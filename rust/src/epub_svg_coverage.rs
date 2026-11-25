@@ -184,9 +184,11 @@ impl<'tree> Coverage<'tree> {
         }
         let rect = intersection(clip, rect);
         let footprint = if paint.affine_source {
-            // The whole isolated raster is attributable to one source and
-            // includes the native antialiasing at its transformed edges.
-            clip
+            // Use native antialiasing throughout the isolated raster, with
+            // the verified support of this branch if it shares the replay.
+            paint
+                .affine_bounds
+                .map_or(clip, |bounds| intersection(clip, bounds))
         } else {
             match target {
                 Target::Glyph(Some(ink)) => intersection(rect, shifted(ink, paint.geometry_shift)),

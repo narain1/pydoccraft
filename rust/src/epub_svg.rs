@@ -1,6 +1,7 @@
 //! Rasterize a validated EPUB SVG content document on its declared viewport.
 use std::{
     collections::{hash_map::Entry, HashMap},
+    rc::Rc,
     sync::Arc,
 };
 
@@ -262,6 +263,7 @@ struct PaintedNode<'tree> {
     uses_full_viewport: bool,
     context_root: bool,
     affine_source: bool,
+    affine_bounds: Option<wordcraft_geom::Rect>,
     // The original subtree renderer already performs its own filter.
     raster_shift: [f32; 2],
     geometry_shift: [f32; 2],
@@ -310,6 +312,7 @@ struct PaintFrame<'tree> {
     shift: [f32; 2],
     inside_context: bool,
     affine_source: bool,
+    shared_sources: Option<Rc<effects::SharedSources>>,
     blocked_context: bool,
 }
 
@@ -337,6 +340,7 @@ fn visit_painted_svg<'tree>(
         shift: [0.0; 2],
         inside_context: false,
         affine_source: false,
+        shared_sources: None,
         blocked_context: false,
     }];
     while let Some(frame) = stack.last_mut() {
@@ -350,6 +354,7 @@ fn visit_painted_svg<'tree>(
             .unwrap_or_default();
         let mut unproven = frame.unproven || status.filter == FilterGeometry::Unproven;
         let mut blocked_context = frame.blocked_context;
+        let mut shared_sources = frame.shared_sources.clone();
         let mut paint = PaintedNode {
             node,
             device_parent: frame.device,
@@ -359,6 +364,9 @@ fn visit_painted_svg<'tree>(
             uses_full_viewport: status.moved_subtree || status.context_subtree,
             context_root: false,
             affine_source: frame.affine_source,
+            affine_bounds: shared_sources
+                .as_ref()
+                .and_then(|sources| sources.bounds(node)),
             raster_shift: frame.shift,
             geometry_shift: frame.shift,
         };
@@ -368,9 +376,14 @@ fn visit_painted_svg<'tree>(
                 continue;
             }
             // An enclosing isolated layer can change the native crop.
-            // Replay it when the output still belongs to one measured source.
+            // Replay it when the output has unambiguous source ownership.
             if status.context_subtree && group.should_isolate() && !frame.inside_context {
-                blocked_context |= !status.one_context_source;
+                if !blocked_context && !status.one_context_source && status.shared_subtree {
+                    shared_sources = geometry.zip(frame.axes).and_then(|(geometry, axes)| {
+                        geometry.shared_sources(group, axes).map(Rc::new)
+                    });
+                }
+                blocked_context |= !status.one_context_source && shared_sources.is_none();
                 paint.context_root = !blocked_context;
                 paint.affine_source |= paint.context_root && status.affine_subtree;
             }
@@ -418,6 +431,7 @@ fn visit_painted_svg<'tree>(
                 shift: paint.geometry_shift,
                 inside_context,
                 affine_source: paint.affine_source,
+                shared_sources,
                 blocked_context,
             });
         }

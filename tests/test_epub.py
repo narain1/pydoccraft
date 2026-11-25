@@ -13427,6 +13427,105 @@ Trailing
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
                     source.export_epub_fixed_pdf(dpi=96, searchable=True)
 
+    def test_svg_affine_offsets_keep_separated_shared_sources_attributable(self) -> None:
+        definitions = """
+          <defs>
+            <filter id="outer" filterUnits="userSpaceOnUse" x="-14" y="-12" width="209" height="78">
+              <feOffset dx="7.75" dy="3.75" result="translated"/>
+              <feColorMatrix in="translated" type="saturate" values=".4"/>
+            </filter>
+            <filter id="inner" filterUnits="userSpaceOnUse" x="-12" y="-10" width="183" height="63">
+              <feOffset dx="3.75" dy="-2.75"/>
+            </filter>
+            <clipPath id="window"><rect x="12" y="5" width="124" height="36"/></clipPath>
+            <mask id="cut" maskUnits="userSpaceOnUse" x="106" y="5" width="61" height="42">
+              <path d="M106 5h61v18l-61 20z" fill="white"/>
+            </mask>
+          </defs>"""
+        letter = """<text x="6" y="37" font-size="34" font-weight="900">
+          <a href="https://example.org/letter" id="letter">B́</a>
+        </text>"""
+        graphic = """<a href="https://example.org/graphic">
+          <g id="graphic" mask="url(#cut)">
+            <rect x="116" y="9" width="34" height="25" stroke="black" stroke-width="2"/>
+          </g>
+        </a>"""
+        targets = """<a href="#letter"><rect x="8" y="7" width="8" height="8" fill="orange"/></a>
+          <a href="#graphic"><rect x="194" y="7" width="8" height="8" fill="purple"/></a>"""
+        layers = """<g opacity=".84">
+          <g transform="matrix(.6 .8 0 1 38 12)" filter="url(#outer)">
+            <g transform="matrix(1 0 .6 .8 0 0)" filter="url(#inner)" clip-path="url(#window)">{}</g>
+          </g>
+        </g>"""
+        frame = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 224 200">{}</svg>'
+        shared = frame.format(definitions + layers.format(letter + graphic) + targets)
+        # This authored control uses separately isolated stacks and therefore
+        # never depends on partitioning shared renderer samples.
+        independent = frame.format(definitions + layers.format(letter) + layers.format(graphic) + targets)
+        fixture = fixed_spread_fixture([("", "white", 224, 200)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Shared geometry</title>
+          <meta name="viewport" content="width=224,height=200"/></head><body style="margin:0">{}</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf")
+
+        def book(markup: str, inline: bool) -> doc_ex.Document:
+            if inline:
+                return doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": template.format(markup)}))
+            standalone = package.replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+            return doc_ex.open(rewrite_epub(fixture, {"OEBPS/content.opf": standalone, "OEBPS/s0.svg": markup}))
+
+        def rgba(document: doc_ex.Document, dpi: int) -> tuple[int, bytes]:
+            return rgba_pixels(png_chunks(document.render_page(0, dpi=dpi)))
+
+        for inline in (False, True):
+            for dpi in (96, 144):
+                with self.subTest(inline=inline, dpi=dpi), book(shared, inline) as source, book(independent, inline) as reference:
+                    width, pixels = rgba(source, dpi)
+                    self.assertTrue((width, pixels) == rgba(reference, dpi), "separate SVG stacks paint different pixels")
+                    parts = ([], [])
+                    for offset in range(0, len(pixels), 4):
+                        red, green, blue, alpha = pixels[offset:offset + 4]
+                        if alpha and red == green == blue < 255:
+                            y, x = divmod(offset // 4, width)
+                            parts[int(x >= width * .45)].append((x, y))
+                    self.assertTrue(all(parts))
+                    scale = 72 / dpi
+                    expected = [(min(x for x, _ in part) * scale, min(y for _, y in part) * scale,
+                                 (max(x for x, _ in part) + 1) * scale, (max(y for _, y in part) + 1) * scale)
+                                for part in parts]
+                    output = source.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                    with doc_ex.open(output) as pdf, pdf.edit() as edit:
+                        self.assertTrue(rgba(pdf, dpi) == (width, pixels), "reopened PDF paints different pixels")
+                        self.assertEqual(pdf[0].get_text(), "B́")
+                        find, = pdf[0].search_for("B́")
+                        self.assertAlmostEqual(find[0], expected[0][0], delta=.04)
+                        self.assertAlmostEqual(find[2], expected[0][2], delta=.04)
+                        self.assertGreaterEqual(find[1], expected[0][1])
+                        self.assertLessEqual(find[3], expected[0][3])
+                        links = {link.uri: link.bbox for link in pdf[0].get_links() if link.uri}
+                        for uri, bounds in zip(("letter", "graphic"), expected):
+                            for actual, target in zip(links[f"https://example.org/{uri}"], bounds):
+                                self.assertAlmostEqual(actual, target, delta=.04)
+                        destinations = re.findall(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
+                                                  edit.to_bytes(object_streams=False))
+                        self.assertEqual(len(destinations), 2)
+                        for (x, y), bounds in zip(sorted(tuple(map(float, entry)) for entry in destinations), expected):
+                            self.assertAlmostEqual(x, bounds[0], delta=.04)
+                            self.assertAlmostEqual(y, 150 - bounds[1], delta=.04)
+
+        touching = shared.replace('id="graphic" mask="url(#cut)"', 'id="graphic" transform="translate(-87 0)"')
+        overlap = touching.replace("translate(-87 0)", "translate(-105 0)")
+        mixed = shared.replace('<feOffset dx="3.75"', '<feGaussianBlur stdDeviation="2"/><feOffset dx="3.75"')
+        split = shared.replace('id="graphic" mask="url(#cut)"', 'id="graphic" filter="url(#inner)"')
+        for markup in (touching, overlap, mixed, split):
+            with self.subTest(markup=markup), book(markup, False) as source:
+                self.assertTrue(source.render_page(0, dpi=96).startswith(b"\x89PNG"))
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                    source.export_epub_fixed_pdf(dpi=96, searchable=True)
+
     def test_svg_stacked_offsets_keep_source_outside_standalone_layer_limits(self) -> None:
         svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
           <defs>

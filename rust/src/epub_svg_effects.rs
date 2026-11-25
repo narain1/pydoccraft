@@ -21,6 +21,10 @@ pub(super) use morphology::normalize as normalize_morphology;
 #[path = "epub_svg_noise.rs"]
 mod noise;
 
+#[path = "epub_svg_shared_coverage.rs"]
+mod shared;
+pub(super) use shared::Sources as SharedSources;
+
 #[path = "epub_svg_tiling.rs"]
 mod tiling;
 
@@ -906,8 +910,15 @@ fn one_affine_source(group: &usvg::Group) -> bool {
     let [node] = group.children() else {
         return false;
     };
+    if let usvg::Node::Group(group) = node {
+        return one_affine_source(group);
+    }
+    affine_leaf(node)
+}
+
+fn affine_leaf(node: &usvg::Node) -> bool {
     match node {
-        usvg::Node::Group(group) => one_affine_source(group),
+        usvg::Node::Group(_) => false,
         usvg::Node::Text(text) => {
             let mut clusters = text
                 .layouted()
@@ -934,6 +945,7 @@ pub(super) struct GeometryStatus {
     pub(super) context_subtree: bool,
     pub(super) affine_subtree: bool,
     pub(super) one_context_source: bool,
+    pub(super) shared_subtree: bool,
     filters_subtree: bool,
     incompatible_stack: bool,
 }
@@ -968,6 +980,7 @@ impl CaptureGeometry {
             status.moved_children |= child.moved_subtree;
             status.context_subtree |= child.context_subtree;
             status.affine_subtree |= child.affine_subtree;
+            status.shared_subtree |= child.shared_subtree;
             status.filters_subtree |= child.filters_subtree;
             status.incompatible_stack |= child.incompatible_stack;
             additive_input |= additive;
@@ -986,10 +999,12 @@ impl CaptureGeometry {
                 });
             let needs_affine = !axis_aligned || status.affine_subtree;
             let affine_source = needs_affine && one_affine_source(group);
+            let shared_sources =
+                needs_affine && !affine_source && shared::common_stack(group).is_some();
             let can_stack = status.moved_children
                 && !status.incompatible_stack
                 && if needs_affine {
-                    affine_source
+                    affine_source || shared_sources
                 } else {
                     at_most_one_leaf(group, &mut false)
                 };
@@ -1013,8 +1028,9 @@ impl CaptureGeometry {
                 }
             }
             status.affine_subtree |= filter == FilterGeometry::Moved && !axis_aligned;
-            status.incompatible_stack |=
-                filter != FilterGeometry::Moved || needs_affine && !affine_source;
+            status.shared_subtree |= filter == FilterGeometry::Moved && can_stack && shared_sources;
+            status.incompatible_stack |= filter != FilterGeometry::Moved
+                || needs_affine && !affine_source && !shared_sources;
             status.filters_subtree = true;
             status.needs_context = (erosion || status.moved_children)
                 && filter == FilterGeometry::Moved
