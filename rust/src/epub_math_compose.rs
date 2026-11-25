@@ -1,6 +1,6 @@
 //! Supply measured MathML boxes to the pinned equation shaper.
 use std::{
-    cell::Cell,
+    cell::{Cell, OnceCell},
     collections::{HashMap, HashSet},
 };
 
@@ -15,10 +15,9 @@ use wordcraft_doc::{
 use wordcraft_layout::math::{layout_equation, MItem, MathLayout};
 
 use super::{css, invalid, limited, table, unsupported, zero_length, Presentation, MATHML};
-use crate::EngineError;
+use crate::{docx::math_spacing, EngineError};
 
 const BOX_PREFIX: &str = "\0epub-math-box-";
-const GUIDE_FONT: &str = "Liberation Serif";
 const GUIDE_SIZE: f32 = 16.0;
 pub(super) const MAX_GEOMETRY: f32 = 20_000.0;
 const LIMIT_BOXES: usize = 512;
@@ -33,6 +32,12 @@ pub(in crate::epub) struct Extras {
 #[derive(Default)]
 pub(in crate::epub) struct Editable {
     boxes: Vec<Cell<Option<MNode>>>,
+}
+
+struct EditableLayout<'a> {
+    document: &'a Document,
+    format: &'a CharProps,
+    guide_ratios: OnceCell<[f32; 2]>,
 }
 
 pub(super) enum Extra {
@@ -53,6 +58,17 @@ struct Length {
     value: f32,
     basis: Option<usize>,
     relative: bool,
+}
+
+impl Length {
+    fn resolve(self, dimension: usize, original: [f32; 3]) -> f32 {
+        let value = self.value * self.basis.map_or(1.0, |basis| original[basis]);
+        if self.relative {
+            original[dimension] + value
+        } else {
+            value
+        }
+    }
 }
 
 struct Measured {
@@ -116,11 +132,29 @@ impl Extras {
         })])
     }
 
-    pub(in crate::epub) fn editable(self) -> Result<Editable, EngineError> {
+    pub(in crate::epub) fn editable(
+        self,
+        document: &Document,
+        format: &CharProps,
+    ) -> Result<Editable, EngineError> {
         let mut editable = Editable::default();
+        let layout = EditableLayout {
+            document,
+            format,
+            guide_ratios: OnceCell::new(),
+        };
         for extra in self.nodes {
             let node = match extra {
-                Extra::Padded(padding) => padding.editable(&editable)?,
+                Extra::Padded(padding) => padding.editable(&editable, &layout)?,
+                Extra::Space([width, ascent, descent]) => {
+                    let mut nodes: Arg = editable_gap(width)?.into_iter().collect();
+                    layout.add_extents(&mut nodes, [Some(ascent), Some(descent)])?;
+                    if nodes.is_empty() {
+                        MNode::Run(MRun::plain(""))
+                    } else {
+                        MNode::Boxed { e: nodes }
+                    }
+                }
                 _ => return Err(unsupported("MathML composed geometry in DOCX export")),
             };
             editable.boxes.push(Cell::new(Some(node)));
@@ -138,8 +172,7 @@ impl Extras {
             return Ok(measurements);
         }
         let base = doc.styles.resolve_char(None, format);
-        let top = guide_metric("H", &base).ascent / GUIDE_SIZE;
-        let bottom = guide_metric("g", &base).descent / GUIDE_SIZE;
+        let [top, bottom] = guide_ratios(&base);
         if top <= 0.0 || bottom <= 0.0 {
             return Err(invalid("missing MathML guide metrics"));
         }
@@ -327,62 +360,95 @@ fn factor(value: &str) -> Result<f32, EngineError> {
 }
 
 impl Padding {
-    fn editable(self, editable: &Editable) -> Result<MNode, EngineError> {
-        let [width, height, depth, left, vertical] = self.lengths;
+    fn editable(
+        self,
+        editable: &Editable,
+        layout: &EditableLayout<'_>,
+    ) -> Result<MNode, EngineError> {
+        let [width, height, depth, left, shift] = self.lengths;
         let unsupported_padding = || unsupported("MathML composed geometry in DOCX export");
-        if vertical.is_some_and(|length| length.value != 0.0) {
+        if shift.is_some_and(|length| length.value != 0.0) {
             return Err(unsupported_padding());
         }
-        let zero_asc = zeroed(height, 1).ok_or_else(unsupported_padding)?;
-        let zero_desc = zeroed(depth, 2).ok_or_else(unsupported_padding)?;
-        let left = match left {
-            None => 0.0,
-            Some(length) if length.value == 0.0 => 0.0,
-            Some(Length {
-                value, basis: None, ..
-            }) if value > 0.0 => value,
-            _ => return Err(unsupported_padding()),
-        };
-        let (absolute_width, advance) = match width {
-            length if zeroed(length, 0) == Some(false) => (false, 0.0),
-            length if zeroed(length, 0) == Some(true) => (true, 0.0),
-            Some(Length {
-                value,
-                basis: None,
-                relative: true,
-            }) if value > 0.0 => (false, value),
-            Some(Length {
-                value,
-                basis: None,
-                relative: false,
-            }) => (true, value.max(0.0)),
-            _ => return Err(unsupported_padding()),
-        };
-        if !absolute_width && left > advance {
-            return Err(unsupported_padding());
-        }
+        // Keep native width when adding a fixed horizontal gap. Other dimensions
+        // may use any measured extent of the original operand as their basis.
+        let additive_width = width.filter(|l| l.basis.is_none() && l.relative && l.value >= 0.0);
         let body = editable.substitute(self.body)?;
-        if body.is_empty() {
+        let needs_original =
+            [width, height, depth, left]
+                .into_iter()
+                .enumerate()
+                .any(|(index, length)| {
+                    length.is_some_and(|l| l.value != 0.0 && (l.relative || l.basis.is_some()))
+                        && zeroed(length, index).is_none()
+                        && !(index == 0 && additive_width.is_some())
+                });
+        let original = if needs_original && !body.is_empty() {
+            let resolved = layout.document.styles.resolve_char(None, &self.format);
+            let math = Math {
+                nodes: body.clone(),
+                ..Default::default()
+            };
+            let box_size = layout_equation(
+                &math,
+                "",
+                &resolved,
+                false,
+                MAX_GEOMETRY,
+                &Default::default(),
+                &mut 0,
+            );
+            [box_size.width, box_size.ascent, box_size.descent]
+        } else {
+            [0.0; 3]
+        };
+        let (absolute_width, advance) = match (width, additive_width) {
+            (_, Some(additive)) => (false, additive.value),
+            (length, _) if zeroed(length, 0) == Some(false) => (false, 0.0),
+            (Some(length), _) => (true, length.resolve(0, original).max(0.0)),
+            (None, _) => (false, 0.0),
+        };
+        let left = left.map_or(0.0, |length| length.resolve(3, original));
+        if left < 0.0 || !absolute_width && left > advance {
+            return Err(unsupported_padding());
+        }
+        if ![left, advance]
+            .into_iter()
+            .all(|value| value <= MAX_GEOMETRY)
+        {
+            return Err(limited("MathML padding exceeds its geometry budget"));
+        }
+        let lengths = [height, depth];
+        let vertical = std::array::from_fn(|index| match zeroed(lengths[index], index + 1) {
+            Some(false) => None,
+            Some(true) => Some(0.0),
+            None => lengths[index].map(|length| length.resolve(index + 1, original).max(0.0)),
+        });
+        if body.is_empty() && vertical.iter().all(|v| v.unwrap_or_default() == 0.0) {
             // An empty visible phantom exposes WordCraft's argument placeholder.
             return Ok(editable_gap(advance)?.unwrap_or_else(|| MNode::Run(MRun::plain(""))));
         }
         let mut contents = Vec::new();
-        contents.extend(editable_gap(left)?);
-        contents.extend(body);
-        if absolute_width || zero_asc || zero_desc {
-            contents = vec![MNode::Phant {
-                show: true,
-                zero_wid: absolute_width,
-                zero_asc,
-                zero_desc,
-                e: contents,
-            }];
+        let leading = if body.is_empty() { 0.0 } else { left };
+        if !body.is_empty() {
+            contents.extend(editable_gap(leading)?);
+            contents.extend(body);
+            if absolute_width || vertical.iter().any(Option::is_some) {
+                contents = vec![MNode::Phant {
+                    show: true,
+                    zero_wid: absolute_width,
+                    zero_asc: vertical[0].is_some(),
+                    zero_desc: vertical[1].is_some(),
+                    e: contents,
+                }];
+            }
         }
         contents.extend(editable_gap(if absolute_width {
             advance
         } else {
-            advance - left
+            advance - leading
         })?);
+        layout.add_extents(&mut contents, vertical)?;
         Ok(MNode::Boxed { e: contents })
     }
 
@@ -410,13 +476,7 @@ impl Padding {
         let mut result = [original[0], original[1], original[2], 0.0, 0.0];
         for (index, length) in self.lengths.iter().enumerate() {
             if let Some(length) = length {
-                let base = length.basis.map_or(1.0, |i| original[i]);
-                let delta = length.value * base;
-                result[index] = if length.relative {
-                    result[index] + delta
-                } else {
-                    delta
-                };
+                result[index] = length.resolve(index, original);
             }
             if index < 3 {
                 result[index] = result[index].max(0.0);
@@ -433,6 +493,39 @@ impl Padding {
             position(item, x, y, 1.0);
         }
         Ok(layout)
+    }
+}
+
+impl EditableLayout<'_> {
+    fn add_extents(&self, nodes: &mut Arg, extents: [Option<f32>; 2]) -> Result<(), EngineError> {
+        for (index, extent) in extents.into_iter().enumerate() {
+            let Some(extent) = extent.filter(|extent| *extent != 0.0) else {
+                continue;
+            };
+            let ratios = self.guide_ratios.get_or_init(|| {
+                let resolved = self.document.styles.resolve_char(None, self.format);
+                guide_ratios(&resolved)
+            });
+            let size = (extent / ratios[index] * 2.0).round() * 0.5;
+            if !(1.0..=1638.0).contains(&size) {
+                return Err(unsupported(
+                    "MathML vertical extent outside the DOCX spacing range",
+                ));
+            }
+            let above = index == 0;
+            nodes.push(phantom(
+                guide(
+                    if above { "H" } else { "g" },
+                    size,
+                    Some(math_spacing::GUIDE_COLOR),
+                ),
+                false,
+                true,
+                !above,
+                above,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -522,7 +615,7 @@ pub(in crate::epub) fn position(item: &mut MItem, dx: f32, dy: f32, scale: f32) 
 fn guide(text: &str, size: f32, color: Option<Rgb>) -> MNode {
     MNode::Run(MRun {
         nor: true,
-        font: Some(GUIDE_FONT.into()),
+        font: Some(math_spacing::GUIDE_FONT.into()),
         size: Some(size),
         color,
         ..MRun::plain(text)
@@ -542,6 +635,13 @@ fn guide_metric(text: &str, resolved: &ResolvedChar) -> MathLayout {
         &Default::default(),
         &mut 0,
     )
+}
+
+fn guide_ratios(resolved: &ResolvedChar) -> [f32; 2] {
+    [
+        guide_metric("H", resolved).ascent / GUIDE_SIZE,
+        guide_metric("g", resolved).descent / GUIDE_SIZE,
+    ]
 }
 
 fn phantom(node: MNode, show: bool, zero_wid: bool, zero_asc: bool, zero_desc: bool) -> MNode {

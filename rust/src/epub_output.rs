@@ -203,7 +203,7 @@ impl<'a> Output<'a> {
                         mut table, extras, ..
                     } if extras.is_empty() || self.pdf_math.is_none() => {
                         if !extras.is_empty() {
-                            table.apply_editable(&extras.editable()?)?;
+                            table.apply_editable(&extras.editable(&self.document, &format)?)?;
                         }
                         let align = CssParagraph::from_block(block)?.and_then(|style| style.align);
                         return table
@@ -250,7 +250,7 @@ impl<'a> Output<'a> {
                 display,
                 extras,
             } if self.pdf_math.is_none() => {
-                extras.editable()?.apply(&mut math)?;
+                extras.editable(&self.document, format)?.apply(&mut math)?;
                 let resolved = self.document.styles.resolve_char(None, format);
                 let layout = wordcraft_layout::math::layout_equation(
                     &math,

@@ -3880,10 +3880,8 @@ first
 
         for attributes, message in (
             ('width="+8pt" voffset="3pt"', "composed geometry"),
-            ('width="+8pt" height="+3pt"', "composed geometry"),
             ('width="+8pt" lspace="-2pt"', "composed geometry"),
             ('width="+8pt" lspace="9pt"', "composed geometry"),
-            ('width="+120%"', "composed geometry"),
             ('width="+0.1pt"', "spacing resolution"),
             ('width="600pt"', "exceeds the DOCX text area"),
         ):
@@ -3891,6 +3889,73 @@ first
             with self.subTest(attributes=attributes), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.convert("docx")
+
+    def test_mathml_vertical_padding_and_space_stay_editable_in_docx(self) -> None:
+        red = '<m:mtext mathcolor="#cf222e">Red</m:mtext>'
+        blue = '<m:mtext mathcolor="#1644df">Blue</m:mtext>'
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Editable vertical spacing</title><style>body {{ margin:0 }}</style></head>
+          <body><p><m:math mathsize="18pt">{}</m:math></p>
+          <p><m:math mathsize="18pt"><m:mtext mathcolor="#198144">Guard</m:mtext></m:math></p></body></html>"""
+        space = red + '<m:mspace width="6pt" height="30pt" depth="22pt"/>' + blue
+        no_depth = red + '<m:mspace width="6pt" height="30pt"/>' + blue
+        fixed = f'<m:mpadded width="+6pt" height="30pt" depth="22pt">{red}</m:mpadded>{blue}'
+        additive = f'<m:mpadded width="+6pt" height="+22pt" depth="+22pt">{red}</m:mpadded>{blue}'
+        relative = f'<m:mpadded width="+100%width" lspace="50%width" height="30pt">{red}</m:mpadded>{blue}'
+        table = f"""<m:mtable><m:mtr><m:mtd columnspan="2"><m:mfrac>
+          <m:mpadded height="26pt" depth="12pt">{red}</m:mpadded>{blue}</m:mfrac></m:mtd></m:mtr>
+          <m:mtr><m:mtd><m:mi>x</m:mi></m:mtd><m:mtd><m:mi>y</m:mi></m:mtd></m:mtr></m:mtable>"""
+
+        def positions(doc: doc_ex.Document) -> list[tuple[int, int]]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=96)))
+            result = []
+            for color in ("cf222e", "1644df", "198144"):
+                ink = bytes.fromhex(color + "ff")
+                matches = [divmod(i // 4, width) for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                result.append((min(x for _, x in matches), min(y for y, _ in matches)))
+            return result
+
+        previews = {}
+        reopened = {}
+        for name, equation in (("plain", red + blue), ("space", space), ("no_depth", no_depth),
+                               ("fixed", fixed), ("additive", additive), ("relative", relative), ("table", table)):
+            with self.subTest(name=name):
+                with doc_ex.open(epub_fixture(chapter_one=template.format(equation))) as book:
+                    previews[name] = positions(book)
+                    data = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                    xml = archive.read("word/document.xml")
+                with doc_ex.open(data) as word:
+                    reopened[name] = positions(word)
+                    text = word[0].get_text()
+                    for label in ("Red", "Blue", "Guard"):
+                        self.assertEqual(text.count(label), 1, text)
+                    self.assertNotIn("⟡H", text)
+                    self.assertNotIn("⟡g", text)
+                if name != "plain":
+                    self.assertIn(b'<m:show m:val="0"/>', xml)
+                    self.assertIn(b'<m:zeroWid m:val="1"/>', xml)
+                    self.assertIn(b'<m:zeroDesc m:val="1"/>', xml)
+                if name == "table":
+                    self.assertIn(b'<w:gridSpan w:val="2"/>', xml)
+                    self.assertIn(b"<m:f>", xml)
+                    self.assertLess(reopened[name][0][1], reopened[name][1][1])
+
+        for layout in (previews, reopened):
+            self.assertEqual(layout["space"], layout["fixed"])
+            self.assertEqual(layout["space"][:2], layout["no_depth"][:2])
+            self.assertGreaterEqual(layout["space"][2][1] - layout["no_depth"][2][1], 20)
+            self.assertAlmostEqual(layout["space"][1][0] - layout["plain"][1][0], 8, delta=1)
+            self.assertGreater(layout["additive"][0][1], layout["fixed"][0][1])
+            before, after = layout["plain"], layout["relative"]
+            advance = before[1][0] - before[0][0]
+            self.assertAlmostEqual(after[0][0] - before[0][0], advance / 2, delta=2)
+            self.assertAlmostEqual(after[1][0] - before[1][0], advance, delta=2)
+
+        too_tall = f'<m:mpadded height="9999pt">{red}</m:mpadded>'
+        with doc_ex.open(epub_fixture(chapter_one=template.format(too_tall))) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "DOCX spacing range"):
+                book.convert("docx")
 
     def test_invalid_media_overlay_references_and_timing_are_explicit(self) -> None:
         for options, error in (
