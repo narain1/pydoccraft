@@ -37,7 +37,7 @@ mod math;
 mod media;
 #[cfg(feature = "python")]
 #[path = "epub_mp4.rs"]
-mod mp4;
+pub(crate) mod mp4;
 #[path = "epub_obfuscation.rs"]
 mod obfuscation;
 #[cfg(feature = "python")]

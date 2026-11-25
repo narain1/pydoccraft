@@ -146,9 +146,14 @@ fn source(
             "named media fragments require local WebM or Ogg",
         ));
     }
-    if chapter_id.is_some() && !matches!(media, "audio/webm" | "video/webm") {
+    if chapter_id.is_some()
+        && !matches!(
+            media,
+            "audio/webm" | "video/webm" | "audio/mp4" | "audio/x-m4a" | "video/mp4"
+        )
+    {
         return Err(unsupported(
-            "media fragment IDs require a local WebM source",
+            "media fragment IDs require a local WebM or MP4 source",
         ));
     }
     let ogg_video = kind == "video" && matches!(media, "video/ogg" | "application/ogg");
@@ -195,7 +200,7 @@ fn source(
     Ok(source)
 }
 
-const MAX_TIME: u128 = (1u128 << 53) - 1;
+pub(super) const MAX_TIME: u128 = (1u128 << 53) - 1;
 
 #[derive(Default)]
 struct MediaFragment {

@@ -801,9 +801,11 @@ class Document:
         if source.fragment_id is not None:
             from . import _core, _native
 
-            authored_start, authored_end = _native(lambda: _core._epub_webm_chapter(
-                self._source, source.path, source.fragment_id,
-            ))
+            chapter = (
+                _core._epub_webm_chapter if source.media_type in ("audio/webm", "video/webm")
+                else _core._epub_mp4_chapter
+            )
+            authored_start, authored_end = _native(lambda: chapter(self._source, source.path, source.fragment_id))
         start = max(start, authored_start)
         if authored_end is not None:
             end = authored_end if end is None else min(end, authored_end)

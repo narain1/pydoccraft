@@ -117,6 +117,7 @@
 - [x] Crop local video spatial fragments in pixel and percent units, including when combined with timed audio and captions.
 - [x] Resolve repeated named track fragments for WebM and Ogg and keep the selected picture and soundtrack on one presentation clock.
 - [x] Resolve local WebM media fragment IDs through simple Matroska chapters and synchronize the selected picture, soundtrack, crop, and captions.
+- [x] Resolve local MP4 and M4A media fragment IDs by exact QuickTime chapter title, preserving movie edits, AAC, cropped picture and caption timing.
 - [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments.
 - [x] Stream mono and stereo Ogg Vorbis for embedded audio and SMIL narration. Preserve page granule timing across same-format chains and synchronize a Vorbis soundtrack with chained Theora and captions.
 - [x] Stream VP8 and SDR VP9 video, Opus soundtracks, and synchronized local captions from packaged WebM sources.
@@ -131,7 +132,7 @@
 - [x] Apply bounded WebVTT region selectors and carry typed region paint and cue styles into standalone captions and synchronized video.
 - [x] Apply TTML initial and inherited region styles to typed runs, including bounded paragraph and division inline regions, content overrides and time-based restores.
 - [ ] Support WebVTT region scrolling, conditional, directly animated and mixed-region TTML captions, additional TTML typography and subtitle painting.
-- [ ] Support more media fragment track combinations and ID fragments in additional containers.
+- [ ] Support more media fragment track combinations, other MP4 chapter metadata profiles and ID fragments in additional containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.

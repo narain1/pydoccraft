@@ -524,6 +524,16 @@ fn _epub_webm_chapter(
     py.allow_threads(|| crate::epub::webm::chapter_interval(data, path, id))
 }
 
+#[pyfunction]
+fn _epub_mp4_chapter(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    id: &str,
+) -> Result<(u64, Option<u64>), EngineError> {
+    py.allow_threads(|| crate::epub::mp4::chapter_interval(data, path, id))
+}
+
 type Rgba = (u8, u8, u8, u8);
 type TimedTextStyle = (
     bool,
@@ -743,6 +753,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_open_epub_audio, module)?)?;
     module.add_function(wrap_pyfunction!(_open_epub_video, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_webm_chapter, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_mp4_chapter, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_text_track, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_narration_text, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;

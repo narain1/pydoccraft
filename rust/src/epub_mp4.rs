@@ -5,6 +5,11 @@ use oxideav_mp4::boxes::read_box_header;
 
 use super::{invalid, limited, unsupported, EngineError};
 
+#[path = "epub_mp4_chapters.rs"]
+mod chapters;
+
+pub(crate) use chapters::chapter_interval;
+
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 pub(super) const MAX_ACCESS_UNITS: usize = 250_000;
 
@@ -26,15 +31,23 @@ impl Mp4Bounds {
 
     pub(super) fn inspect(bytes: &[u8]) -> Result<Self, EngineError> {
         let mut bounds = Self::default();
-        bounds.check(bytes, 0, 0)?;
+        bounds.check(bytes, 0, 0, [0; 4])?;
         Ok(bounds)
     }
 
-    fn check(&mut self, bytes: &[u8], base: usize, depth: usize) -> Result<(), EngineError> {
+    fn check(
+        &mut self,
+        bytes: &[u8],
+        base: usize,
+        depth: usize,
+        parent: [u8; 4],
+    ) -> Result<(), EngineError> {
         if depth > 8 {
             return Err(limited("MP4 box nesting exceeds limits"));
         }
         let mut cursor = Cursor::new(bytes);
+        let mut track_references = false;
+        let mut chapter_references = false;
         while cursor.position() < bytes.len() as u64 {
             let header = read_box_header(&mut cursor)
                 .map_err(invalid)?
@@ -64,7 +77,21 @@ impl Mp4Bounds {
             }
             match &header.fourcc {
                 b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" | b"edts" => {
-                    self.check(&bytes[start..end], base + start, depth + 1)?;
+                    self.check(&bytes[start..end], base + start, depth + 1, header.fourcc)?;
+                }
+                b"tref" if &parent == b"trak" => {
+                    if std::mem::replace(&mut track_references, true) {
+                        return Err(invalid("duplicate MP4 track reference box"));
+                    }
+                    self.check(&bytes[start..end], base + start, depth + 1, header.fourcc)?;
+                }
+                b"chap" if &parent == b"tref" => {
+                    if std::mem::replace(&mut chapter_references, true)
+                        || length == 0
+                        || !length.is_multiple_of(4)
+                    {
+                        return Err(invalid("invalid or repeated MP4 chapter reference"));
+                    }
                 }
                 b"stsz" | b"stz2" => {
                     let raw = bytes[start..end]
