@@ -28,7 +28,14 @@ pub(in crate::epub::svg) struct TextLength {
     id: String,
     target: f32,
     adjust: usvg::LengthAdjust,
+    chunk: Option<PositionedChunk>,
     temporary_id: bool,
+}
+
+#[derive(Clone, Copy)]
+struct PositionedChunk {
+    index: usize,
+    count: usize,
 }
 
 pub(in crate::epub::svg) struct FittedLengths {
@@ -37,6 +44,7 @@ pub(in crate::epub::svg) struct FittedLengths {
 }
 
 pub(super) fn prepare_length(
+    root: Node<'_, '_>,
     owner: Node<'_, '_>,
     ids: &HashMap<&str, bool>,
     next_id: &mut usize,
@@ -52,25 +60,27 @@ pub(super) fn prepare_length(
             ))
         }
     };
-    if owner.descendants().filter(Node::is_element).any(|node| {
+    if root.descendants().filter(Node::is_element).any(|node| {
         ["dx", "dy", "rotate"]
             .iter()
             .any(|attribute| node.has_attribute(*attribute))
-            || node != owner
-                && (node.has_attribute("textLength") || node.has_tag_name((NS, "text")))
+            || node != owner && node.has_attribute("textLength")
+            || node != root && node.has_tag_name((NS, "text"))
+            || node.has_tag_name((NS, "textPath"))
     }) {
         return Err(unsupported(
             "EPUB SVG mixed-font textLength requires one linear run without per-glyph positioning or nested lengths",
         ));
     }
+    let chunk = nested_chunk(root, owner, adjust)?;
     for effect in ["filter", "clip-path", "mask"] {
-        if owner.attribute(effect).is_some_and(|value| value != "none") {
+        if root.attribute(effect).is_some_and(|value| value != "none") {
             return Err(unsupported(
                 "EPUB SVG mixed-font textLength with an effect on the text element",
             ));
         }
     }
-    let style = owner
+    let style = root
         .attribute("style")
         .map(svg_declarations)
         .transpose()?
@@ -101,7 +111,7 @@ pub(super) fn prepare_length(
             "EPUB SVG mixed-font textLength exceeds its geometry budget",
         ));
     }
-    let id_attribute = owner.attribute_node("id");
+    let id_attribute = root.attribute_node("id");
     let supplied = id_attribute.filter(|value| !value.value().is_empty());
     let temporary_id = supplied.is_none();
     let id = if let Some(supplied) = supplied {
@@ -120,7 +130,7 @@ pub(super) fn prepare_length(
             }
         };
         let position = id_attribute.map_or_else(
-            || svg::style_insertion(source.as_bytes(), owner),
+            || svg::style_insertion(source.as_bytes(), root),
             |attr| Ok(attr.range()),
         )?;
         edits.push((position, format!(" id=\"{id}\"")));
@@ -131,14 +141,94 @@ pub(super) fn prepare_length(
         id,
         target,
         adjust,
+        chunk,
         temporary_id,
     })
+}
+
+fn nested_chunk(
+    root: Node<'_, '_>,
+    owner: Node<'_, '_>,
+    adjust: usvg::LengthAdjust,
+) -> Result<Option<PositionedChunk>, EngineError> {
+    if owner == root {
+        return Ok(None);
+    }
+    if !owner.has_tag_name((NS, "tspan")) {
+        return Err(unsupported(
+            "EPUB SVG mixed-font nested textLength requires a tspan owner",
+        ));
+    }
+    let content = owner.range();
+    let preserves_space = root.ancestors().chain(root.descendants()).any(|node| {
+        node.attribute(("http://www.w3.org/XML/1998/namespace", "space")) == Some("preserve")
+    });
+    if root.descendants().filter(Node::is_text).all(|text| {
+        let range = text.range();
+        range.start >= content.start && range.end <= content.end
+            || !preserves_space && text.text().is_none_or(collapsible_space)
+    }) {
+        // With no surrounding text, measuring the containing text is equivalent.
+        return Ok(None);
+    }
+    if owner.parent_element() != Some(root)
+        || adjust != usvg::LengthAdjust::Spacing
+        || root.children().any(|child| {
+            child.is_text() && child.text().is_some_and(|value| !collapsible_space(value))
+        })
+    {
+        return Err(nested_error());
+    }
+    let mut index = None;
+    let mut count = 0;
+    for child in root.children().filter(Node::is_element) {
+        if !child.has_tag_name((NS, "tspan"))
+            || !["x", "y"]
+                .iter()
+                .all(|key| child.attribute(*key).is_some_and(scalar_position))
+            || child
+                .descendants()
+                .skip(1)
+                .filter(Node::is_element)
+                .any(|node| node.has_attribute("x") || node.has_attribute("y"))
+        {
+            return Err(nested_error());
+        }
+        if child == owner {
+            index = Some(count);
+        }
+        count += 1;
+    }
+    Ok(Some(PositionedChunk {
+        index: index.ok_or_else(nested_error)?,
+        count,
+    }))
+}
+
+fn collapsible_space(value: &str) -> bool {
+    value.trim_matches([' ', '\t', '\r', '\n']).is_empty()
+}
+
+fn scalar_position(raw: &str) -> bool {
+    let value = raw.trim();
+    value
+        .strip_suffix("px")
+        .unwrap_or(value)
+        .parse::<f32>()
+        .is_ok_and(|value| value.is_finite() && value.abs() <= MAX_LENGTH)
+}
+
+fn nested_error() -> EngineError {
+    unsupported(
+        "EPUB SVG mixed-font nested textLength requires an independently positioned spacing chunk",
+    )
 }
 
 pub(in crate::epub::svg) fn fit_lengths(
     source: &str,
     tree: &usvg::Tree,
     lengths: &[TextLength],
+    measure: impl FnOnce(&[u8]) -> Result<usvg::Tree, EngineError>,
 ) -> Result<FittedLengths, EngineError> {
     let xml = parse_xml(source.as_bytes())?;
     let mut remaining: HashMap<_, _> = lengths
@@ -148,6 +238,13 @@ pub(in crate::epub::svg) fn fit_lengths(
     // Native use expansion drops IDs, and each instance can have a different
     // resolved origin or font scale. Measure only directly drawn text here.
     let uses = svg::use_refs::used_sources(xml.root_element());
+    let probe = probe_chunks(source, xml.root_element(), &remaining, measure)?;
+    let probes: HashMap<_, _> = probe
+        .as_ref()
+        .into_iter()
+        .flat_map(direct_texts)
+        .map(|text| (text.id(), text))
+        .collect();
     let mut measured = HashMap::new();
     for (index, text) in direct_texts(tree).into_iter().enumerate() {
         if remaining.contains_key(text.id()) && measured.insert(text.id(), (index, text)).is_some()
@@ -178,10 +275,24 @@ pub(in crate::epub::svg) fn fit_lengths(
         let &(index, text) = measured.get(id).ok_or_else(|| {
             unsupported("EPUB SVG mixed-font textLength source has no native layout")
         })?;
-        let [chunk] = text.chunks() else {
-            return Err(unsupported(
-                "EPUB SVG mixed-font textLength requires one positioned native chunk",
-            ));
+        let (chunk, start, owner) = if let Some(origin) = length.chunk {
+            if text.chunks().len() != origin.count {
+                return Err(nested_error());
+            }
+            let owner = positioned_owner(node, origin)?;
+            let probe = probes.get(id).copied().ok_or_else(nested_error)?;
+            let [chunk] = probe.chunks() else {
+                return Err(nested_error());
+            };
+            let start = spacing::verify_probe(text, origin.index, probe)?;
+            (chunk, Some((start, probe)), owner)
+        } else {
+            let [chunk] = text.chunks() else {
+                return Err(unsupported(
+                    "EPUB SVG mixed-font textLength requires one positioned native chunk",
+                ));
+            };
+            (chunk, None, node)
         };
         if text.writing_mode() != usvg::WritingMode::LeftToRight
             || !matches!(chunk.text_flow(), usvg::TextFlow::Linear)
@@ -206,8 +317,16 @@ pub(in crate::epub::svg) fn fit_lengths(
         }
         match length.adjust {
             usvg::LengthAdjust::Spacing => {
-                let check = SpacingCheck::new(index, length.target, text, chunk)?;
-                check.apply(source, node, &mut edits, &mut bytes)?;
+                let (offset, measured) = start.unwrap_or((0, text));
+                let check = SpacingCheck::new(
+                    index,
+                    length.target,
+                    measured,
+                    chunk,
+                    offset,
+                    start.is_none(),
+                )?;
+                check.apply(source, owner, &mut edits, &mut bytes)?;
                 spacing.push(check);
             }
             usvg::LengthAdjust::SpacingAndGlyphs => {
@@ -235,6 +354,50 @@ pub(in crate::epub::svg) fn fit_lengths(
         source: apply_edits(source, edits, XML_BYTES)?,
         spacing,
     })
+}
+
+fn positioned_owner<'a, 'input>(
+    text: Node<'a, 'input>,
+    origin: PositionedChunk,
+) -> Result<Node<'a, 'input>, EngineError> {
+    let mut children = text.children().filter(Node::is_element);
+    if children.clone().count() != origin.count {
+        return Err(nested_error());
+    }
+    children
+        .nth(origin.index)
+        .filter(|child| child.has_tag_name((NS, "tspan")))
+        .ok_or_else(nested_error)
+}
+
+fn probe_chunks(
+    source: &str,
+    root: Node<'_, '_>,
+    lengths: &HashMap<&str, &TextLength>,
+    measure: impl FnOnce(&[u8]) -> Result<usvg::Tree, EngineError>,
+) -> Result<Option<usvg::Tree>, EngineError> {
+    if !lengths.values().any(|length| length.chunk.is_some()) {
+        return Ok(None);
+    }
+    let mut edits = Vec::new();
+    for text in root
+        .descendants()
+        .filter(|node| node.has_tag_name((NS, "text")))
+    {
+        let Some(origin) = text
+            .attribute("id")
+            .and_then(|id| lengths.get(id))
+            .and_then(|length| length.chunk)
+        else {
+            continue;
+        };
+        let owner = positioned_owner(text, origin)?;
+        for child in text.children().filter(|child| *child != owner) {
+            edits.push((child.range(), String::new()));
+        }
+    }
+    let source = apply_edits(source, edits, XML_BYTES)?;
+    measure(source.as_bytes()).map(Some)
 }
 
 fn direct_texts(tree: &usvg::Tree) -> Vec<&usvg::Text> {

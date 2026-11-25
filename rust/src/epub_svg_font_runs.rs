@@ -101,9 +101,18 @@ impl Resolver {
             {
                 continue;
             }
+            let can_keep_owner = parent
+                .ancestors()
+                .skip(1)
+                .filter(Node::is_element)
+                .find(|ancestor| {
+                    ancestor.has_attribute("textLength") || ancestor.has_tag_name((NS, "text"))
+                })
+                .is_none_or(|ancestor| !ancestor.has_attribute("textLength"));
             let (range, replacement) = match (runs.as_slice(), parent.attribute_node("style")) {
                 ([(id, _)], Some(style))
                     if variable
+                        && can_keep_owner
                         && parent
                             .children()
                             .filter(|node| node.is_element() || node.is_text())
@@ -124,12 +133,11 @@ impl Resolver {
                     )
                 }
                 _ => {
-                    let Some(owner) = split_text(parent)? else {
-                        continue;
-                    };
-                    if owner.has_attribute("textLength") {
-                        if let Entry::Vacant(entry) = lengths.entry(owner.id()) {
+                    let (root, owner) = split_text(parent)?;
+                    if let Some(owner) = owner {
+                        if let Entry::Vacant(entry) = lengths.entry(root.id()) {
                             entry.insert(prepare_length(
+                                root,
                                 owner,
                                 &ids,
                                 &mut next_id,
@@ -341,20 +349,26 @@ fn inspect_subroot(
     }
 }
 
+type TextContext<'a, 'input> = (Node<'a, 'input>, Option<Node<'a, 'input>>);
+
 fn split_text<'a, 'input>(
     parent: Node<'a, 'input>,
-) -> Result<Option<Node<'a, 'input>>, EngineError> {
+) -> Result<TextContext<'a, 'input>, EngineError> {
+    let mut owner = None;
     for ancestor in parent.ancestors().filter(Node::is_element) {
-        if ancestor.has_tag_name((NS, "text")) {
-            return Ok(Some(ancestor));
+        if ancestor.has_tag_name((NS, "textPath")) {
+            return Err(unsupported("EPUB SVG mixed-font text path"));
         }
-        if ancestor.has_attribute("textLength") || ancestor.has_tag_name((NS, "textPath")) {
+        if ancestor.has_attribute("textLength") && owner.replace(ancestor).is_some() {
             return Err(unsupported(
-                "EPUB SVG mixed-font nested textLength or text path",
+                "EPUB SVG mixed-font overlapping textLength owners",
             ));
         }
+        if ancestor.has_tag_name((NS, "text")) {
+            return Ok((ancestor, owner));
+        }
     }
-    Ok(None)
+    Err(invalid("missing EPUB SVG text root"))
 }
 
 fn effective_family<'a>(parent: Node<'a, '_>) -> Option<&'a str> {

@@ -1,4 +1,6 @@
 //! Verify native spacing adjustments between identifiable mixed-face glyphs.
+use std::ops::Range;
+
 use resvg::usvg;
 use roxmltree::Node;
 
@@ -11,7 +13,8 @@ use crate::{
 
 pub(super) struct SpacingCheck {
     index: usize,
-    target: f32,
+    width: Option<f32>,
+    glyph_range: Range<usize>,
     gap: f32,
     anchor: f32,
 }
@@ -22,6 +25,8 @@ impl SpacingCheck {
         target: f32,
         text: &usvg::Text,
         chunk: &usvg::TextChunk,
+        offset: usize,
+        verify_full_width: bool,
     ) -> Result<Self, EngineError> {
         if chunk
             .spans()
@@ -66,7 +71,8 @@ impl SpacingCheck {
         };
         Ok(Self {
             index,
-            target,
+            width: verify_full_width.then_some(target),
+            glyph_range: offset..offset + count,
             gap,
             anchor,
         })
@@ -106,6 +112,76 @@ impl SpacingCheck {
     }
 }
 
+pub(super) fn verify_probe(
+    original: &usvg::Text,
+    index: usize,
+    probe: &usvg::Text,
+) -> Result<usize, EngineError> {
+    let [target] = probe.chunks() else {
+        return Err(spacing_error());
+    };
+    if !same_chunk(&original.chunks()[index], target)
+        || original.writing_mode() != probe.writing_mode()
+        || original.abs_transform() != probe.abs_transform()
+    {
+        return Err(spacing_error());
+    }
+    let first_byte = original.chunks()[..index]
+        .iter()
+        .map(|chunk| chunk.text().len())
+        .sum::<usize>();
+    let end_byte = first_byte + target.text().len();
+    let mut reference = probe
+        .layouted()
+        .iter()
+        .flat_map(|span| &span.positioned_glyphs);
+    let logical = original
+        .chunks()
+        .iter()
+        .map(usvg::TextChunk::text)
+        .collect::<String>();
+    let mut remaining = logical.as_str();
+    let mut start = None;
+    for (index, glyph) in original
+        .layouted()
+        .iter()
+        .flat_map(|span| &span.positioned_glyphs)
+        .enumerate()
+    {
+        let byte = logical.len() - remaining.len();
+        if glyph.text.is_empty() {
+            return Err(spacing_error());
+        }
+        remaining = remaining
+            .strip_prefix(&glyph.text)
+            .ok_or_else(spacing_error)?;
+        if byte == first_byte {
+            start = Some(index);
+        }
+        if (first_byte..end_byte).contains(&byte) {
+            let measured = reference.next().ok_or_else(spacing_error)?;
+            if measured.id != glyph.id
+                || measured.font != glyph.font
+                || measured.text != glyph.text
+                || measured.transform() != glyph.transform()
+            {
+                return Err(spacing_error());
+            }
+        }
+    }
+    if !remaining.is_empty() || reference.next().is_some() {
+        return Err(spacing_error());
+    }
+    start.ok_or_else(spacing_error)
+}
+
+fn same_chunk(before: &usvg::TextChunk, after: &usvg::TextChunk) -> bool {
+    before.x() == after.x()
+        && before.y() == after.y()
+        && before.anchor() == after.anchor()
+        && before.text() == after.text()
+}
+
 pub(super) fn verify(
     spacing: &[SpacingCheck],
     original: &usvg::Tree,
@@ -124,12 +200,16 @@ pub(super) fn verify(
     for check in spacing {
         let before = original[check.index];
         let after = fitted[check.index];
-        let [chunk] = after.chunks() else {
-            return Err(spacing_error());
-        };
-        if chunk.text() != before.chunks()[0].text()
+        if before.chunks().len() != after.chunks().len()
+            || before
+                .chunks()
+                .iter()
+                .zip(after.chunks())
+                .any(|(old, new)| !same_chunk(old, new))
             || before.abs_transform() != after.abs_transform()
-            || !close(after.bounding_box().width(), check.target)
+            || check
+                .width
+                .is_some_and(|width| !close(after.bounding_box().width(), width))
         {
             return Err(spacing_error());
         }
@@ -157,7 +237,11 @@ pub(super) fn verify(
             let adjusted = revised.next().ok_or_else(spacing_error)?;
             let mut old = glyph.transform();
             let new = adjusted.transform();
-            let expected = old.tx + check.gap * (index as f32 - check.anchor);
+            let expected = if check.glyph_range.contains(&index) {
+                old.tx + check.gap * ((index - check.glyph_range.start) as f32 - check.anchor)
+            } else {
+                old.tx
+            };
             old.tx = new.tx;
             if glyph.id != adjusted.id
                 || glyph.font != adjusted.font

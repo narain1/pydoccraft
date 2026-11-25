@@ -605,8 +605,12 @@ fn parse(
             tree = result?;
             fonts.check_rendered(&tree)?;
             if !fallback.lengths.is_empty() {
-                let fitted = svg_fonts::fit_lengths(&source, &tree, &fallback.lengths)?;
                 options.fontdb = tree.fontdb().clone();
+                let fitted = svg_fonts::fit_lengths(&source, &tree, &fallback.lengths, |probe| {
+                    let measured = native_tree(probe, &options, has_uses);
+                    fonts.check()?;
+                    measured
+                })?;
                 let result = native_tree(fitted.source.as_bytes(), &options, has_uses);
                 fonts.check()?;
                 let adjusted = result?;

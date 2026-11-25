@@ -1071,3 +1071,7 @@ Both lockfiles and the upstream revisions match the preceding checkpoint. The au
 ## EPUB CSS box calculations
 
 An installed fixed-layout regression compares calculated and explicit insets, dimensions, inherited padding, negative margin and border width in an RTL chapter. The preview and reopened PDF match pixel for pixel. The Unicode search bounds, external link rectangle and internal fragment coordinates match the explicit control. Invalid arithmetic leaves the earlier declaration in the cascade. Mixed length and percentage results and calculations exceeding the expression or geometry limits return explicit errors. [CSS math functions](https://www.w3.org/TR/css-values-4/#calc-notation)
+
+## Nested SVG text lengths
+
+The installed regression adjusts the spacing of a nested mixed-face tspan in standalone and inline SVG. Increasing the requested length extends its visible ink, searchable Unicode and linked geometry around the original anchor. Both independently positioned siblings retain their search and link rectangles. The local fragment follows the adjusted span, and the original SVG bytes and reopened PDF pixels are preserved. A sole nested owner also retains spacingAndGlyphs scaling. Overlapping owners and a sibling without independent coordinates return explicit errors. [SVG text layout algorithm](https://www.w3.org/TR/SVG2/text.html#TextLayoutAlgorithm)

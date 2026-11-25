@@ -2651,6 +2651,100 @@ class EpubTests(unittest.TestCase):
         with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "geometry budget"):
             preview('textLength="1000000" lengthAdjust="spacingAndGlyphs"')
 
+    def test_epub_svg_nested_mixed_face_text_length_preserves_neighbor_layout(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+        resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
+        fixed = fixed_spread_fixture([("", "white", 320, 110)])
+
+        def render(length: str, *, inline: bool = False, sibling: str | None = 'x="250" y="83"',
+                   adjust: str = "", root: str = "") -> tuple[list[int], dict[str, tuple[float, ...]]]:
+            other = "" if sibling is None else (
+                f'<tspan {sibling} style="font-family:sans-serif;fill:#204090">'
+                '<a href="https://example.org/next">Next</a></tspan>'
+            )
+            before = "" if sibling is None else (
+                '<tspan x="45" y="33" style="font-family:sans-serif;fill:#206040">'
+                '<a href="https://example.org/first">First</a></tspan>'
+            )
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 110">
+              <style>
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+00E9;
+                             font-variation-settings:"wght" 340}}
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+0042;
+                             font-variation-settings:"wght" 760}}
+                text {{font-family:Layout;font-size:32px;font-optical-sizing:none;text-anchor:middle;
+                       fill:#9a2222;transform:translate(7 3)}}
+              </style>
+              <a href="#owner"><rect x="8" y="8" width="12" height="12" fill="#027180"/></a>
+              <text {root}>{before}<tspan x="125" y="58" textLength="{length}" {adjust} id="owner"
+                ><a href="https://example.org/owner">éBBé</a></tspan>{other}</text>
+              </svg>"""
+            if inline:
+                markup = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Lengths</title>
+                    <meta name="viewport" content="width=320,height=110"/>
+                    <style>body {{margin:0}} svg {{width:320px;height:110px}}</style>
+                    </head><body>{svg}</body></html>"""
+                path = "OEBPS/s0.xhtml"
+                data = rewrite_epub(fixed, {path: markup})
+                with doc_ex.open(data) as book:
+                    data = book.edit_epub_structure([0], resources=resources)
+            else:
+                markup, path = svg, "OEBPS/text.svg"
+                with doc_ex.open(epub_fixture()) as book:
+                    data = book.edit_epub_structure(
+                        [doc_ex.EpubSvgChapterSource("Lengths", markup, path), 0], resources=resources,
+                    )
+            with doc_ex.open(data) as book:
+                self.assertEqual(book.read_epub_resource(path), markup.encode())
+                preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                output = book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+            with doc_ex.open(output) as pdf, pdf.edit() as editor:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                expected = ["éBBé"] if sibling is None else ["First", "éBBé", "Next"]
+                self.assertEqual(pdf[0].get_text().split(), expected)
+                geometry = {word: tuple(pdf[0].search_for(word)[0]) for word in expected}
+                links = pdf[0].get_links()
+                local, = [link for link in links if link.metadata.get("target_page") is not None]
+                self.assertEqual(local.metadata["target_page"], 0)
+                for name in (("owner",) if sibling is None else ("first", "owner", "next")):
+                    rectangles = [link.bbox for link in links if link.uri == f"https://example.org/{name}"]
+                    geometry[name] = (
+                        min(rect[0] for rect in rectangles), min(rect[1] for rect in rectangles),
+                        max(rect[2] for rect in rectangles), max(rect[3] for rect in rectangles),
+                    )
+                target, = re.findall(rb"/XYZ\s+([1-9][0-9.]*)\s+([0-9.]+)\s+null",
+                                     editor.to_bytes(object_streams=False))
+                geometry["fragment"] = tuple(map(float, target))
+                self.assertAlmostEqual(geometry["owner"][0], geometry["fragment"][0], delta=1)
+            width, pixels = preview
+            ink = [i // 4 % width for i in range(0, len(pixels), 4)
+                   if pixels[i] > pixels[i + 1] + 50 and pixels[i + 3] > 200]
+            return ink, geometry
+
+        for inline in (False, True):
+            with self.subTest(inline=inline):
+                narrow, first = render("84", inline=inline)
+                wide, second = render("90px", inline=inline)
+                self.assertEqual((min(wide), max(wide)), (min(narrow) - 3, max(narrow) + 3))
+                for key in ("éBBé", "owner"):
+                    self.assertAlmostEqual(second[key][0], first[key][0] - 2.25, delta=0.75)
+                    self.assertAlmostEqual(second[key][2], first[key][2] + 2.25, delta=0.75)
+                self.assertAlmostEqual(second["fragment"][0], first["fragment"][0] - 2.25, delta=0.75)
+                for key in ("First", "first", "Next", "next"):
+                    self.assertEqual(first[key], second[key])
+
+                mode = 'lengthAdjust="spacingAndGlyphs"'
+                narrow, _ = render("75", inline=inline, sibling=None, adjust=mode)
+                wide, _ = render("150", inline=inline, sibling=None, adjust=mode)
+                self.assertAlmostEqual(max(wide) - min(wide), 2 * (max(narrow) - min(narrow)), delta=2)
+
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
+            render("84", sibling='x="250"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned spacing"):
+            render("84", adjust='lengthAdjust="spacingAndGlyphs"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength"):
+            render("84", root='textLength="120"')
+
     def test_epub_svg_use_instances_keep_inherited_variable_font_requests(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
         resources = {

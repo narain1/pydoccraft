@@ -49,6 +49,7 @@
 - [x] Match SVG font-face weight, width and signed oblique intervals and apply selected font variation defaults to the laid-out runs.
 - [x] Retain anchored spacingAndGlyphs textLength for directly painted mixed-face runs in fixed-layout SVG, including searchable PDF text and links.
 - [x] Fit spacing-only textLength between verifiable mixed-face clusters without changing their glyph shapes or losing searchable PDF text and links.
+- [x] Fit textLength on a sole nested tspan and spacing on an independently positioned nested owner while preserving sibling ink and PDF geometry.
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
 - [x] Render alpha-preserving SVG color matrices, including saturation and hue rotation, with the fixed-layout PDF text and annotations preserved.
 - [x] Render bounded SVG filter chains with prior named inputs, including alpha-changing color matrices in visual output. Reject PDF text or annotation capture when the source geometry cannot be preserved.
