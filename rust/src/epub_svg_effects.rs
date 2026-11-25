@@ -900,6 +900,29 @@ fn at_most_one_leaf(group: &usvg::Group, seen: &mut bool) -> bool {
     })
 }
 
+fn one_affine_source(group: &usvg::Group) -> bool {
+    // Under rotation, glyph rectangles can overlap even when the unfiltered
+    // advances are disjoint. A whole raster only identifies a single cluster.
+    let [node] = group.children() else {
+        return false;
+    };
+    match node {
+        usvg::Node::Group(group) => one_affine_source(group),
+        usvg::Node::Text(text) => {
+            let mut clusters = text
+                .layouted()
+                .iter()
+                .flat_map(|span| super::glyph_clusters(span, true));
+            clusters
+                .next()
+                .is_some_and(|cluster| cluster.iter().all(|glyph| glyph.id.0 != 0))
+                && clusters.next().is_none()
+                && super::logical_glyph_clusters(text)
+        }
+        usvg::Node::Path(_) | usvg::Node::Image(_) => true,
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub(super) struct GeometryStatus {
     pub(super) filter: FilterGeometry,
@@ -909,6 +932,7 @@ pub(super) struct GeometryStatus {
     pub(super) moved_children: bool,
     pub(super) needs_context: bool,
     pub(super) context_subtree: bool,
+    pub(super) affine_subtree: bool,
     pub(super) one_context_source: bool,
     filters_subtree: bool,
     incompatible_stack: bool,
@@ -943,6 +967,7 @@ impl CaptureGeometry {
             status.sample_subtree |= child.sample_subtree;
             status.moved_children |= child.moved_subtree;
             status.context_subtree |= child.context_subtree;
+            status.affine_subtree |= child.affine_subtree;
             status.filters_subtree |= child.filters_subtree;
             status.incompatible_stack |= child.incompatible_stack;
             additive_input |= additive;
@@ -959,10 +984,15 @@ impl CaptureGeometry {
                     matches!(primitive.kind(), usvg::filter::Kind::Morphology(value)
                     if value.operator() == usvg::filter::MorphologyOperator::Erode)
                 });
+            let needs_affine = !axis_aligned || status.affine_subtree;
+            let affine_source = needs_affine && one_affine_source(group);
             let can_stack = status.moved_children
                 && !status.incompatible_stack
-                && axis_aligned
-                && at_most_one_leaf(group, &mut false);
+                && if needs_affine {
+                    affine_source
+                } else {
+                    at_most_one_leaf(group, &mut false)
+                };
             if status.moved_children
                 || status.context_subtree
                 || (erosion || procedural) && !axis_aligned && filter == FilterGeometry::Sample
@@ -971,7 +1001,7 @@ impl CaptureGeometry {
             }
             if filter == FilterGeometry::Unproven
                 && (!status.filters_subtree || can_stack)
-                && (!erosion || axis_aligned)
+                && (!erosion || axis_aligned || affine_source)
             {
                 if let [native] = group.filters() {
                     if let Some((offsets, preserves_alpha)) = offset_chain(native) {
@@ -982,10 +1012,9 @@ impl CaptureGeometry {
                     }
                 }
             }
-            // Positive axis-aligned layers rebase their children by whole
-            // device pixels. Other layers can remove a rotation/shear from
-            // the next layer's raster grid and cannot compose this way.
-            status.incompatible_stack |= filter != FilterGeometry::Moved || !axis_aligned;
+            status.affine_subtree |= filter == FilterGeometry::Moved && !axis_aligned;
+            status.incompatible_stack |=
+                filter != FilterGeometry::Moved || needs_affine && !affine_source;
             status.filters_subtree = true;
             status.needs_context = (erosion || status.moved_children)
                 && filter == FilterGeometry::Moved
@@ -1004,22 +1033,9 @@ impl CaptureGeometry {
         (status, additive)
     }
 
-    pub(super) fn shift(&self, group: &usvg::Group, transform: Transform) -> Option<[f32; 2]> {
+    pub(super) fn shift(&self, group: &usvg::Group, raster: RasterAxes) -> Option<[f32; 2]> {
         let steps = self.moves.get(&std::ptr::from_ref(group))?;
-        // Match resvg's isolated raster, including the scale after removing
-        // its rotation/shear and truncating each feOffset to a pixel step.
-        let sx = transform.sx.hypot(transform.ky);
-        let sy = transform.kx.hypot(transform.sy);
-        let rest = Transform::from_row(
-            transform.sx / sx,
-            transform.ky / sx,
-            transform.kx / sy,
-            transform.sy / sy,
-            0.0,
-            0.0,
-        );
-        let layer = rest.invert()?.pre_concat(transform);
-        let (sx, sy) = layer.get_scale();
+        let (sx, sy) = raster.local.get_scale();
         let mut pixels = [0i32; 2];
         for [x, y] in steps {
             let values = [*x * sx, *y * sy];
@@ -1031,9 +1047,10 @@ impl CaptureGeometry {
             }
         }
         let [x, y] = pixels.map(|value| value as f32);
+        let page = raster.page;
         let shift = [
-            (rest.sx * x + rest.kx * y) / self.density[0],
-            (rest.ky * x + rest.sy * y) / self.density[1],
+            (page.sx * x + page.kx * y) / self.density[0],
+            (page.ky * x + page.sy * y) / self.density[1],
         ];
         shift.into_iter().all(f32::is_finite).then_some(shift)
     }
@@ -1058,6 +1075,56 @@ impl CaptureGeometry {
             }
             _ => GeometryStatus::default(),
         }
+    }
+}
+
+/// Linear maps between a group's input, its active raster and the page.
+/// Native whole-pixel layer origins affect the crop, which is sampled by
+/// replaying the enclosing layer, but they cancel out of offset vectors.
+#[derive(Clone, Copy)]
+pub(super) struct RasterAxes {
+    local: Transform,
+    page: Transform,
+}
+
+impl RasterAxes {
+    pub(super) fn new(local: Transform) -> Self {
+        Self {
+            local,
+            page: Transform::identity(),
+        }
+    }
+
+    pub(super) fn enter(self, group: &usvg::Group) -> Option<Self> {
+        let mut local = self.local.pre_concat(group.transform());
+        local.tx = 0.0;
+        local.ty = 0.0;
+        if group.filters().is_empty() {
+            return Some(Self {
+                local,
+                page: self.page,
+            });
+        }
+        // The renderer factors out the normalized columns around every
+        // filter, so the inner filter sees the enclosing layer's grid.
+        let sx = local.sx.hypot(local.ky);
+        let sy = local.kx.hypot(local.sy);
+        let rest = Transform::from_row(
+            local.sx / sx,
+            local.ky / sx,
+            local.kx / sy,
+            local.sy / sy,
+            0.0,
+            0.0,
+        );
+        let determinant = rest.sx * rest.sy - rest.kx * rest.ky;
+        if !determinant.is_finite() || determinant.abs() < 0.0001 {
+            return None;
+        }
+        Some(Self {
+            local: rest.invert()?.pre_concat(local),
+            page: self.page.pre_concat(rest),
+        })
     }
 }
 

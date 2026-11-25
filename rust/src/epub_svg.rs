@@ -261,6 +261,7 @@ struct PaintedNode<'tree> {
     shifted_descendants: bool,
     uses_full_viewport: bool,
     context_root: bool,
+    affine_source: bool,
     // The original subtree renderer already performs its own filter.
     raster_shift: [f32; 2],
     geometry_shift: [f32; 2],
@@ -303,10 +304,12 @@ struct PaintFrame<'tree> {
     children: std::slice::Iter<'tree, usvg::Node>,
     clip: wordcraft_geom::Rect,
     device: tiny_skia::Transform,
+    axes: Option<effects::RasterAxes>,
     effects: usize,
     unproven: bool,
     shift: [f32; 2],
     inside_context: bool,
+    affine_source: bool,
     blocked_context: bool,
 }
 
@@ -323,14 +326,17 @@ fn visit_painted_svg<'tree>(
     use effects::FilterGeometry;
     let [sx, sy] = geometry.map_or([1.0; 2], |geometry| geometry.density);
     let mut effects = Vec::new();
+    let device = tiny_skia::Transform::from_scale(sx, sy);
     let mut stack = vec![PaintFrame {
         children: tree.root().children().iter(),
         clip,
-        device: tiny_skia::Transform::from_scale(sx, sy),
+        device,
+        axes: geometry.map(|_| effects::RasterAxes::new(device)),
         effects: 0,
         unproven: false,
         shift: [0.0; 2],
         inside_context: false,
+        affine_source: false,
         blocked_context: false,
     }];
     while let Some(frame) = stack.last_mut() {
@@ -352,6 +358,7 @@ fn visit_painted_svg<'tree>(
             shifted_descendants: status.moved_children,
             uses_full_viewport: status.moved_subtree || status.context_subtree,
             context_root: false,
+            affine_source: frame.affine_source,
             raster_shift: frame.shift,
             geometry_shift: frame.shift,
         };
@@ -365,11 +372,15 @@ fn visit_painted_svg<'tree>(
             if status.context_subtree && group.should_isolate() && !frame.inside_context {
                 blocked_context |= !status.one_context_source;
                 paint.context_root = !blocked_context;
+                paint.affine_source |= paint.context_root && status.affine_subtree;
             }
             unproven |= blocked_context && status.needs_context;
             let device = frame.device.pre_concat(group.transform());
+            let axes = frame.axes.and_then(|axes| axes.enter(group));
             if status.filter == FilterGeometry::Moved && !unproven {
-                if let Some([dx, dy]) = geometry.and_then(|geometry| geometry.shift(group, device))
+                if let Some([dx, dy]) = geometry
+                    .zip(axes)
+                    .and_then(|(geometry, axes)| geometry.shift(group, axes))
                 {
                     paint.geometry_shift = [frame.shift[0] + dx, frame.shift[1] + dy];
                 } else {
@@ -388,10 +399,12 @@ fn visit_painted_svg<'tree>(
                 let Some(bounds) = group.abs_layer_bounding_box() else {
                     continue;
                 };
-                clip = super::rendition::intersection(
-                    clip,
-                    shifted(links::actual_rect(bounds.to_rect()), paint.raster_shift),
-                );
+                if !paint.affine_source {
+                    clip = super::rendition::intersection(
+                        clip,
+                        shifted(links::actual_rect(bounds.to_rect()), paint.raster_shift),
+                    );
+                }
                 effects.push(paint);
             }
             let inside_context = frame.inside_context || paint.context_root;
@@ -399,10 +412,12 @@ fn visit_painted_svg<'tree>(
                 children: group.children().iter(),
                 clip,
                 device,
+                axes,
                 effects: effects.len(),
                 unproven,
                 shift: paint.geometry_shift,
                 inside_context,
+                affine_source: paint.affine_source,
                 blocked_context,
             });
         }

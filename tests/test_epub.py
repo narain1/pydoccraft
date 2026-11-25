@@ -13022,6 +13022,155 @@ Trailing
             ):
                 book.export_epub_fixed_pdf(dpi=96, searchable=True)
 
+    def test_svg_affine_offset_stacks_replay_clipped_source_geometry(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 224 160">
+          <defs>
+            <filter id="outer" filterUnits="userSpaceOnUse" x="-12" y="-10" width="73" height="71">
+              <feOffset dx="7.75" dy="3.75"/>
+            </filter>
+            <filter id="inner" filterUnits="userSpaceOnUse" x="-10" y="-6" width="66" height="58">
+              <feMorphology radius="1" result="eroded"/>
+              <feOffset in="eroded" dx="3.75" dy="-2.75"/>
+            </filter>
+            <clipPath id="letter-window"><rect x="9" y="10" width="26" height="26"/></clipPath>
+            <clipPath id="box-window"><rect x="15" y="9" width="16" height="19"/></clipPath>
+          </defs>
+          <g opacity=".84">
+            <g transform="matrix(.6 .8 0 1 38 12)" filter="url(#outer)">
+              <g transform="matrix(1 0 .6 .8 0 0)" filter="url(#inner)" clip-path="url(#letter-window)">
+                <text x="6" y="37" font-size="34" font-weight="900">
+                  <a href="https://example.org/letter" id="letter">B́</a>
+                </text>
+              </g>
+            </g>
+          </g>
+          <a href="https://example.org/box">
+            <g transform="matrix(-.6 .8 0 1 184 16)" filter="url(#outer)" id="box">
+              <g transform="matrix(1 0 .6 .8 0 0)" filter="url(#inner)" clip-path="url(#box-window)">
+                <rect x="5" y="9" width="34" height="22"/>
+              </g>
+            </g>
+          </a>
+          <a href="#letter"><rect x="6" y="7" width="8" height="8" fill="orange"/></a>
+          <a href="#box"><rect x="205" y="7" width="8" height="8" fill="purple"/></a>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 224, 160)])
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</manifest>",
+                b'<item id="toc" href="toc.xhtml" properties="nav" media-type="application/xhtml+xml"/></manifest>',
+            )
+        standalone = package.replace(
+            b'href="s0.xhtml" media-type="application/xhtml+xml"',
+            b'href="s0.svg" media-type="image/svg+xml"',
+        )
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Affine filters</title>
+          <meta name="viewport" content="width=224,height=160"/></head><body style="margin:0">{}</body></html>"""
+        toc = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+          <head><title>Contents</title></head><body><nav epub:type="toc"><ol>
+            <li><a href="{0}#letter">Moved letter</a></li>
+            <li><a href="{0}#box">Moved box</a></li>
+          </ol></nav></body></html>"""
+
+        def book(markup: str, inline: bool = False, *, letter_destination: bool = True) -> doc_ex.Document:
+            resource = "s0.xhtml" if inline else "s0.svg"
+            nav = toc.format(resource)
+            if not letter_destination:
+                nav = nav.replace(f'<li><a href="{resource}#letter">Moved letter</a></li>', '')
+            return doc_ex.open(rewrite_epub(fixture, {
+                "OEBPS/content.opf": package if inline else standalone,
+                "OEBPS/toc.xhtml": nav,
+                "OEBPS/" + resource: template.format(markup) if inline else markup,
+            }))
+
+        def rgba(document: doc_ex.Document, dpi: int) -> tuple[int, bytes]:
+            return rgba_pixels(png_chunks(document.render_page(0, dpi=dpi)))
+
+        def footprints(preview: tuple[int, bytes], dpi: int) -> tuple:
+            width, pixels = preview
+            parts: tuple[list[tuple[int, int]], list[tuple[int, int]]] = ([], [])
+            for offset in range(0, len(pixels), 4):
+                red, green, blue, alpha = pixels[offset:offset + 4]
+                if alpha and red == green == blue < 255:
+                    y, x = divmod(offset // 4, width)
+                    parts[int(x >= width / 2)].append((x, y))
+            scale = 72 / dpi
+            self.assertTrue(all(parts))
+            return tuple((min(x for x, _ in part) * scale, min(y for _, y in part) * scale,
+                          (max(x for x, _ in part) + 1) * scale,
+                          (max(y for _, y in part) + 1) * scale) for part in parts)
+
+        for inline in (False, True):
+            for dpi in (96, 144):
+                with self.subTest(inline=inline, dpi=dpi), book(svg, inline) as source:
+                    view = rgba(source, dpi)
+                    letter, box = footprints(view, dpi)
+                    uncut = svg.replace(' clip-path="url(#box-window)"', '')
+                    with book(uncut, inline) as complete:
+                        _, full = footprints(rgba(complete, dpi), dpi)
+                        self.assertLess(box[2] - box[0], full[2] - full[0])
+
+                    output = source.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                    with doc_ex.open(output) as pdf, pdf.edit() as edit:
+                        self.assertTrue(rgba(pdf, dpi) == view, "reopened PDF pixels differ")
+                        self.assertEqual(pdf[0].get_text(), "B́")
+                        search, = pdf[0].search_for("B́")
+                        by_uri = {link.uri: link.bbox for link in pdf[0].get_links() if link.uri}
+                        self.assertAlmostEqual(search[0], letter[0], delta=.04)
+                        self.assertAlmostEqual(search[2], letter[2], delta=.04)
+                        self.assertGreaterEqual(search[1], letter[1])
+                        self.assertLessEqual(search[3], letter[3])
+                        self.assertGreater(search[3] - search[1], .7 * (letter[3] - letter[1]))
+                        for actual, expected in ((by_uri["https://example.org/letter"], letter),
+                                                 (by_uri["https://example.org/box"], box)):
+                            for actual_edge, expected_edge in zip(actual, expected):
+                                self.assertAlmostEqual(actual_edge, expected_edge, delta=.04)
+                        self.assertEqual([(entry.title, entry.page) for entry in edit.bookmarks],
+                                         [("Moved letter", 0), ("Moved box", 0)])
+                        destinations = re.findall(rb"/XYZ[ ]+([0-9.]+)[ ]+([0-9.]+)[ ]+null",
+                                                  edit.to_bytes(object_streams=False))
+                        expected = sorted([(letter[0], 120 - letter[1]), (box[0], 120 - box[1])] * 2)
+                        self.assertEqual(len(destinations), len(expected))
+                        for actual, target in zip(sorted(tuple(map(float, coords)) for coords in destinations), expected):
+                            for value, estimate in zip(actual, target):
+                                self.assertAlmostEqual(value, estimate, delta=.04)
+
+        axis = svg.replace("matrix(.6 .8 0 1 38 12)", "matrix(0 1 -1 0 92 16)")
+        axis = axis.replace("matrix(-.6 .8 0 1 184 16)", "matrix(-1 0 0 1 204 42)")
+        axis = axis.replace("matrix(1 0 .6 .8 0 0)", "matrix(0 1 -1 0 50 0)")
+        for dpi in (96, 144):
+            density = dpi / 96
+            dx = int(7.75 * density) / density
+            dy = int(3.75 * density) / density
+            # Whole-device translations preserve both layers' raster grids
+            # under exact right-angle rotations and reflections.
+            control = axis.replace('<feOffset dx="7.75" dy="3.75"/>', '<feOffset/>')
+            control = control.replace('matrix(0 1 -1 0 50 0)', f'matrix(0 1 -1 0 {50 + dx} {dy})')
+            with self.subTest(axis_dpi=dpi), book(axis) as source, book(control) as expected:
+                self.assertTrue(rgba(source, dpi) == rgba(expected, dpi), "axis control pixels differ")
+                with doc_ex.open(source.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as pdf:
+                    self.assertEqual(pdf[0].get_text(), "B́")
+
+        hidden = svg.replace('x="9" y="10" width="26" height="26"', 'x="-7" y="-5" width="2" height="2"')
+        hidden = hidden.replace('<a href="#letter"><rect x="6" y="7" width="8" height="8" fill="orange"/></a>', '')
+        with book(hidden, letter_destination=False) as source:
+            with doc_ex.open(source.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(pdf[0].get_text(), "")
+                self.assertNotIn("https://example.org/letter", [link.uri for link in pdf[0].get_links()])
+                self.assertIn("https://example.org/box", [link.uri for link in pdf[0].get_links()])
+
+        cases = (
+            svg.replace(">B́</a>", ">B́A</a>"),
+            svg.replace('<rect x="5" y="9" width="34" height="22"/>',
+                        '<rect x="5" y="9" width="34" height="22"/><path d="M4 8h12v10H4z"/>'),
+            svg.replace('matrix(.6 .8 0 1 38 12)', 'matrix(.000001 1 0 1 38 12)'),
+        )
+        for markup in cases:
+            with self.subTest(markup=markup), book(markup) as source:
+                self.assertTrue(source.render_page(0, dpi=96).startswith(b"\x89PNG"))
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                    source.export_epub_fixed_pdf(dpi=96, searchable=True)
+
     def test_svg_stacked_offsets_keep_source_outside_standalone_layer_limits(self) -> None:
         svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
           <defs>

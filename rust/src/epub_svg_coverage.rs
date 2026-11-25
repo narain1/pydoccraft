@@ -183,16 +183,22 @@ impl<'tree> Coverage<'tree> {
             return Ok(Some(rect));
         }
         let rect = intersection(clip, rect);
-        let footprint = match target {
-            Target::Glyph(Some(ink)) => intersection(rect, shifted(ink, paint.geometry_shift)),
-            _ => rect,
+        let footprint = if paint.affine_source {
+            // The whole isolated raster is attributable to one source and
+            // includes the native antialiasing at its transformed edges.
+            clip
+        } else {
+            match target {
+                Target::Glyph(Some(ink)) => intersection(rect, shifted(ink, paint.geometry_shift)),
+                _ => rect,
+            }
         };
         let Some(bounds) = Bounds::from_rect(footprint, self.density) else {
             return Ok(None);
         };
         // Replay one source with its original isolated context. Cropping
         // an intermediate layer can change translated or neighboring pixels.
-        let owner = if paint.uses_full_viewport {
+        let owner = if paint.uses_full_viewport || paint.affine_source {
             effects
                 .iter()
                 .find(|effect| effect.context_root)
@@ -240,6 +246,9 @@ impl<'tree> Coverage<'tree> {
                     }
                 }
             }
+        }
+        if paint.affine_source {
+            return Ok((!visible.is_empty()).then(|| visible.as_rect(self.density)));
         }
         Ok((!visible.is_empty()).then(|| match target {
             Target::Object | Target::PaintedObject => {
@@ -315,15 +324,17 @@ impl<'tree> Coverage<'tree> {
         self.measure_draws(paint.node, 0)?;
         let mut pixmap = tiny_skia::Pixmap::new(bounds.width(), bounds.height())
             .ok_or_else(|| limited("cannot allocate EPUB SVG coverage"))?;
-        let transform = paint
-            .device_parent
-            .post_translate(
-                sx * paint.raster_shift[0] - bounds.left as f32,
-                sy * paint.raster_shift[1] - bounds.top as f32,
-            )
-            // The public single-node renderer first translates by its absolute bbox.
-            // Cancel that normalization to render on the original SVG pixel grid.
-            .pre_translate(bbox.x(), bbox.y());
+        let original = paint.device_parent.post_translate(
+            sx * paint.raster_shift[0] - bounds.left as f32,
+            sy * paint.raster_shift[1] - bounds.top as f32,
+        );
+        // The public node renderer subtracts its absolute bbox origin.
+        // Undo that translation and check for precision loss before using
+        // a replay as the exact owner of affine source pixels.
+        let transform = original.pre_translate(bbox.x(), bbox.y());
+        if paint.affine_source && transform.pre_translate(-bbox.x(), -bbox.y()) != original {
+            return Err(effects::geometry_error());
+        }
         resvg::render_node(paint.node, transform, &mut pixmap.as_mut());
         Ok(Some(Tile {
             bounds,
