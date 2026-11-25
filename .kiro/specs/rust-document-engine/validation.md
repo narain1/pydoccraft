@@ -3072,3 +3072,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 918 installed tests, including 3
 ## 2026-11-25 EPUB native flex bounds, composed MathML carets, SVG point lighting and MP4 gaps
 
 The Linux x86-64 CPython 3.11 host wheel passed 922 installed tests, including 327 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-native-flex-bounds-composed-mathml-carets-svg-point-lighting-and-mp4-gaps)
+
+## 2026-11-25 EPUB native grid areas, merged MathML carets, SVG spotlights and narration fragments
+
+The Linux x86-64 CPython 3.11 host wheel passed 924 installed tests, including 329 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-native-grid-areas-merged-mathml-carets-svg-spotlights-and-narration-fragments)
