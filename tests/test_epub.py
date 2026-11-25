@@ -10815,6 +10815,85 @@ Resume
         with doc_ex.open(epub_fixture()) as document, self.assertRaisesRegex(IndexError, "target is absent"):
             list(document.epub_narration(0, start_fragment="chapter"))
 
+    def test_media_overlay_navigation_from_an_inline_anchor_uses_the_containing_cue(self) -> None:
+        source, wav = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</manifest>",
+                b'<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+                b'<item id="foreign" href="Media/foreign.flac" media-type="audio/flac"/></manifest>',
+            )
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+            <section id="container"><p id="spoken">Listen <strong><em id="café-anchor">here</em></strong>.
+              <span id="exact">Exact text</span></p></section>
+            <p id="unvoiced">Unvoiced sibling</p><p id="after">Following cue</p></body></html>"""
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Media/foreign.flac": b"fLaC",
+            "OEBPS/one.xhtml": chapter,
+            "OEBPS/two.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+                <p xml:id="other">On the second <span id="café-anchor">page</span></p></body></html>""",
+            "OEBPS/nav.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head>
+                <body><nav epub:type="toc"><ol><li><a href="one.xhtml#caf%C3%A9-anchor">Start here</a></li>
+                </ol></nav></body></html>""",
+            "OEBPS/Sync/read.smil": """<smil xmlns="http://www.w3.org/ns/SMIL"
+                xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body>
+                <par id="earlier"><text src="../one.xhtml#container"/>
+                  <audio src="../Media/foreign.flac" clipEnd="1s"/></par>
+                <par id="nearest"><text src="../one.xhtml#spoken"/>
+                  <audio src="../Media/voice.wav" clipBegin="250ms" clipEnd="325ms"/></par>
+                <par id="direct"><text src="../one.xhtml#exact"/></par>
+                <par id="later"><text src="../one.xhtml#after"/></par>
+                <par><text src="../two.xhtml#other"/></par></body></smil>""",
+        })
+        with doc_ex.open(source) as document:
+            fragment = document.metadata["navigation"][0]["items"][0]["fragment"]
+            self.assertEqual(fragment, "café-anchor")
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                next(document.epub_narration(0))
+            sought = list(document.epub_narration(0, start_fragment=fragment))
+            self.assertEqual(sought, list(document.epub_narration(0, start_cue=1)))
+            self.assertEqual([cue.id for cue in sought], ["nearest", "direct", "later"])
+            self.assertEqual(list(document.epub_narration(0, start_fragment="exact")), sought[1:])
+            [other] = document.epub_narration(-1, start_fragment="café-anchor")
+            self.assertEqual((other.path, other.fragment, other.text),
+                             ("OEBPS/two.xhtml", "other", "On the second page"))
+            for missing in ("unvoiced", "does-not-exist"):
+                with self.subTest(fragment=missing), self.assertRaisesRegex(IndexError, "target is absent"):
+                    next(document.epub_narration(0, start_fragment=missing))
+
+            changes: list[str | None] = []
+            speech: list[str] = []
+            chunks: list[doc_ex.EpubAudioClip] = []
+            document.play_epub_narration(
+                0, start_fragment=fragment, chunk_frames=257, play_audio=chunks.append,
+                speak_text=speech.append, on_cue=lambda cue: changes.append(cue.fragment if cue else None),
+            )
+            self.assertEqual(changes, ["spoken", None, "exact", None, "after", None])
+            self.assertEqual(speech, ["Exact text", "Following cue"])
+            self.assertEqual([chunk.frame_count for chunk in chunks], [257, 257, 86])
+            samples = bytearray()
+            for chunk in chunks:
+                with wave.open(io.BytesIO(chunk.wave), "rb") as pcm:
+                    samples.extend(pcm.readframes(chunk.frame_count))
+            with wave.open(io.BytesIO(wav), "rb") as pcm:
+                pcm.setpos(2000)
+                reference = b"".join(struct.pack("<h", (value - 128) * 256) for value in pcm.readframes(600))
+            self.assertEqual(samples, reference)
+
+        for identifier, message in (("café-anchor", "fragment is ambiguous"), ("spoken", "ancestor is ambiguous")):
+            ambiguous = rewrite_epub(source, {"OEBPS/one.xhtml": chapter.replace('id="unvoiced"', f'id="{identifier}"')})
+            with self.subTest(identifier=identifier), doc_ex.open(ambiguous) as document:
+                with self.assertRaisesRegex(doc_ex.MalformedDocumentError, message):
+                    next(document.epub_narration(0, start_fragment="café-anchor"))
+
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            overlay = archive.read("OEBPS/Sync/read.smil").replace(b"two.xhtml#other", b"two.xhtml")
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/Sync/read.smil": overlay})) as document:
+            [whole_chapter] = document.epub_narration(1, start_fragment="café-anchor")
+            self.assertEqual((whole_chapter.fragment, whole_chapter.text), (None, "On the second page"))
+
     def test_media_overlay_escapes_the_selected_active_structure_during_playback(self) -> None:
         source, wav = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:

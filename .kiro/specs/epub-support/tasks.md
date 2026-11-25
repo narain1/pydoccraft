@@ -167,6 +167,7 @@
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Resume media overlays at a decoded navigation fragment that matches a cue or sequence target, including paths that share an overlay.
+- [x] Resume narration from XHTML links inside a narrated element, retaining explicit SMIL priority and the precise clip of the nearest enclosing cue.
 - [x] Allow callers to leave an active SMIL table, list, figure or aside between chunks or cues. Resume after the selected structure while retaining later same-role siblings.
 - [x] Clamp overlong SMIL clip ends at the physical presentation end in buffered and streamed narration, including unindexed MPEG and chained Ogg audio.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.

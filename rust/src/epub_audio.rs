@@ -1,5 +1,5 @@
 //! Decode bounded sections of local media-overlay audio for an offline playback sink.
-use std::{io::Cursor, ops::Range, panic::AssertUnwindSafe};
+use std::{collections::HashMap, io::Cursor, ops::Range, panic::AssertUnwindSafe};
 
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
@@ -860,6 +860,51 @@ pub(crate) fn narration_text(
     let mut text = String::new();
     collect_text(target, &mut text)?;
     Ok(text.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+pub(crate) fn narration_ancestors(
+    data: &[u8],
+    path: &str,
+    fragment: &str,
+) -> Result<Option<Vec<String>>, EngineError> {
+    let source = read(data, path, XML_BYTES)?;
+    let doc = parse_xml(&source)?;
+    let root = doc.root_element();
+    if !super::name(root, XHTML, "html") {
+        return Ok(None);
+    }
+    let Some(body) = super::child(root, XHTML, "body") else {
+        return Ok(None);
+    };
+    let mut targets = doc
+        .descendants()
+        .filter(|node| super::element_ids(*node).any(|id| id == fragment));
+    let Some(target) = targets.next() else {
+        return Ok(None);
+    };
+    if targets.next().is_some() {
+        return Err(invalid("media-overlay narration fragment is ambiguous"));
+    }
+    if !target.ancestors().any(|node| node == body) {
+        return Ok(None);
+    }
+    let ancestors: Vec<_> = target
+        .ancestors()
+        .skip(1)
+        .flat_map(|node| super::element_ids(node).map(move |id| (id, node.id())))
+        .collect();
+    if !ancestors.is_empty() {
+        let owners: HashMap<_, _> = ancestors.iter().copied().collect();
+        if doc.descendants().any(|node| {
+            super::element_ids(node)
+                .any(|id| owners.get(id).is_some_and(|&owner| owner != node.id()))
+        }) {
+            return Err(invalid("media-overlay narration ancestor is ambiguous"));
+        }
+    }
+    Ok(Some(
+        ancestors.into_iter().map(|(id, _)| id.to_owned()).collect(),
+    ))
 }
 
 fn collect_text(node: roxmltree::Node<'_, '_>, out: &mut String) -> Result<(), EngineError> {

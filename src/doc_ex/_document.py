@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from numbers import Real
 from html import escape
-from itertools import chain
+from itertools import chain, islice
 from types import SimpleNamespace
 from typing import Any, Callable, Generator, Iterator, Literal, TYPE_CHECKING, overload
 
@@ -957,6 +957,8 @@ class Document:
         overlay_id = chapter.get("media_overlay")
         started = start_fragment is None
         chapter_path = chapter["chapter_path"]
+        earlier_cues: dict[str | None, int] = {}
+        preceding = 0
         stack: list[tuple[dict[str, Any], tuple[str, ...], bool, _EpubEscapeScopes]] = []
         if overlay_id is not None:
             overlay = self.metadata["media_overlays"][overlay_id]
@@ -973,17 +975,34 @@ class Document:
             if not started and not within_target and target is not None:
                 within_target = target["path"] == chapter_path and target["fragment"] == start_fragment
             if node["kind"] == "par":
-                if (started or within_target) and node["text"]["path"] == chapter_path:
-                    started = True
-                    yield {
-                        "id": node["id"],
-                        "text": dict(node["text"]),
-                        "audio": None if node["audio"] is None else dict(node["audio"]),
-                        "epub_type": node["epub_type"],
-                    }, roles, scopes
+                if node["text"]["path"] != chapter_path:
+                    continue
+                if not started and not within_target:
+                    earlier_cues.setdefault(node["text"]["fragment"], preceding)
+                    preceding += 1
+                    continue
+                started = True
+                yield {
+                    "id": node["id"],
+                    "text": dict(node["text"]),
+                    "audio": None if node["audio"] is None else dict(node["audio"]),
+                    "epub_type": node["epub_type"],
+                }, roles, scopes
             else:
                 stack.extend((child, roles, within_target, scopes) for child in reversed(node["children"]))
         if not started:
+            if earlier_cues and start_fragment is not None:
+                from . import _core, _native
+
+                ancestors = _native(lambda: _core._epub_narration_ancestors(
+                    self._source, chapter_path, start_fragment,
+                ))
+                if ancestors is not None:
+                    containing = next((ancestor for ancestor in ancestors if ancestor in earlier_cues), None)
+                    if containing in earlier_cues:
+                        cues = self._epub_cues(index, track_escape=track_escape)
+                        yield from islice(cues, earlier_cues[containing], None)
+                        return
             raise IndexError("EPUB narration target is absent on this page")
 
     def _epub_narration_groups(

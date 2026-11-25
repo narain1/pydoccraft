@@ -688,6 +688,15 @@ fn _epub_narration_text(
 }
 
 #[pyfunction]
+fn _epub_narration_ancestors(
+    data: &[u8],
+    path: &str,
+    fragment: &str,
+) -> Result<Option<Vec<String>>, EngineError> {
+    crate::epub::audio::narration_ancestors(data, path, fragment)
+}
+
+#[pyfunction]
 fn _edit_epub_chapters(
     data: &[u8],
     replacements: Vec<(i64, String)>,
@@ -758,6 +767,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_epub_mp4_chapter, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_text_track, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_narration_text, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_narration_ancestors, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;
     module.add_function(wrap_pyfunction!(render, module)?)?;

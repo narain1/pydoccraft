@@ -45,6 +45,8 @@ For an open EPUB, `document.read_epub_resource(path, offset=0, length=None)` rea
 
 To resume at a chapter's navigation destination, pass the decoded element ID as `start_fragment` to either narration method. Use the destination's spine page and its `fragment` value from `document.metadata["navigation"]`. A SMIL sequence target starts at the first cue within the sequence on that page. For a position in `epub_media_cues(page)`, pass the zero-based `start_cue` instead.
 
+When an XHTML fragment lies inside a narrated element, playback can start at that element's authored cue. Explicit SMIL targets take precedence, and otherwise the nearest enclosing cue supplies the starting position. A whole-chapter cue covers the chapter body.
+
 ```python
 with doc_ex.open(epub_bytes) as book:
     book.play_epub_narration(
