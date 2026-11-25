@@ -2939,3 +2939,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 757 installed tests including 16
 ## 2026-11-24 EPUB auxiliary chapters, MathML table rules and named track checks
 
 The Linux x86-64 CPython 3.11 host wheel passed 764 installed tests, including 169 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-spine-mathml-rules-svg-use-cascade-and-named-track-validation)
+
+## 2026-11-24 EPUB frames, SVG graphics links, fitted MathML columns and WebM chapters
+
+The Linux x86-64 CPython 3.11 host wheel passed 770 installed tests, including 175 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-frames-svg-links-mathml-widths-and-webm-chapters)
