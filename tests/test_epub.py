@@ -13427,7 +13427,7 @@ Trailing
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
                     source.export_epub_fixed_pdf(dpi=96, searchable=True)
 
-    def test_svg_affine_offsets_keep_separated_shared_sources_attributable(self) -> None:
+    def test_svg_shared_offsets_keep_separated_sources_attributable(self) -> None:
         definitions = """
           <defs>
             <filter id="outer" filterUnits="userSpaceOnUse" x="-14" y="-12" width="209" height="78">
@@ -13480,47 +13480,71 @@ Trailing
         def rgba(document: doc_ex.Document, dpi: int) -> tuple[int, bytes]:
             return rgba_pixels(png_chunks(document.render_page(0, dpi=dpi)))
 
-        for inline in (False, True):
-            for dpi in (96, 144):
-                with self.subTest(inline=inline, dpi=dpi), book(shared, inline) as source, book(independent, inline) as reference:
-                    width, pixels = rgba(source, dpi)
-                    self.assertTrue((width, pixels) == rgba(reference, dpi), "separate SVG stacks paint different pixels")
-                    parts = ([], [])
-                    for offset in range(0, len(pixels), 4):
-                        red, green, blue, alpha = pixels[offset:offset + 4]
-                        if alpha and red == green == blue < 255:
-                            y, x = divmod(offset // 4, width)
-                            parts[int(x >= width * .45)].append((x, y))
-                    self.assertTrue(all(parts))
-                    scale = 72 / dpi
-                    expected = [(min(x for x, _ in part) * scale, min(y for _, y in part) * scale,
-                                 (max(x for x, _ in part) + 1) * scale, (max(y for _, y in part) + 1) * scale)
-                                for part in parts]
-                    output = source.export_epub_fixed_pdf(dpi=dpi, searchable=True)
-                    with doc_ex.open(output) as pdf, pdf.edit() as edit:
-                        self.assertTrue(rgba(pdf, dpi) == (width, pixels), "reopened PDF paints different pixels")
-                        self.assertEqual(pdf[0].get_text(), "B́")
-                        find, = pdf[0].search_for("B́")
-                        self.assertAlmostEqual(find[0], expected[0][0], delta=.04)
-                        self.assertAlmostEqual(find[2], expected[0][2], delta=.04)
-                        self.assertGreaterEqual(find[1], expected[0][1])
-                        self.assertLessEqual(find[3], expected[0][3])
-                        links = {link.uri: link.bbox for link in pdf[0].get_links() if link.uri}
-                        for uri, bounds in zip(("letter", "graphic"), expected):
-                            for actual, target in zip(links[f"https://example.org/{uri}"], bounds):
-                                self.assertAlmostEqual(actual, target, delta=.04)
-                        destinations = re.findall(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
-                                                  edit.to_bytes(object_streams=False))
-                        self.assertEqual(len(destinations), 2)
-                        for (x, y), bounds in zip(sorted(tuple(map(float, entry)) for entry in destinations), expected):
-                            self.assertAlmostEqual(x, bounds[0], delta=.04)
-                            self.assertAlmostEqual(y, 150 - bounds[1], delta=.04)
+        rgb = '<feColorMatrix in="translated" type="saturate" values=".4"/>'
+        transfer = """<feComponentTransfer in="translated">
+          <feFuncA type="discrete" tableValues="0 0 .6 .8"/>
+        </feComponentTransfer>"""
+        matrix = """<feColorMatrix in="translated" type="matrix"
+          values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 -.2"/>"""
+
+        def axis(markup: str) -> str:
+            return markup.replace("matrix(.6 .8 0 1 38 12)", "translate(34 15)").replace(
+                "matrix(1 0 .6 .8 0 0)", "scale(1 .8)",
+            )
+
+        def single(markup: str) -> str:
+            return axis(markup).replace(' filter="url(#inner)"', "")
+
+        cases = (
+            ("sheared", shared, independent),
+            ("scaled", axis(shared), axis(independent)),
+            ("scaled transfer", axis(shared).replace(rgb, transfer), axis(independent).replace(rgb, transfer)),
+            ("sheared alpha matrix", shared.replace(rgb, matrix), independent.replace(rgb, matrix)),
+            ("single scaled transfer", single(shared).replace(rgb, transfer), single(independent).replace(rgb, transfer)),
+        )
+        for mode, markup, control in cases:
+            for inline in (False, True):
+                for dpi in (96, 144):
+                    with self.subTest(mode=mode, inline=inline, dpi=dpi), book(markup, inline) as source, book(control, inline) as reference:
+                        width, pixels = rgba(source, dpi)
+                        self.assertTrue((width, pixels) == rgba(reference, dpi), "separate SVG stacks paint different pixels")
+                        parts = ([], [])
+                        for offset in range(0, len(pixels), 4):
+                            red, green, blue, alpha = pixels[offset:offset + 4]
+                            if alpha and red == green == blue < 255:
+                                y, x = divmod(offset // 4, width)
+                                parts[int(x >= width * .45)].append((x, y))
+                        self.assertTrue(all(parts))
+                        scale = 72 / dpi
+                        expected = [(min(x for x, _ in part) * scale, min(y for _, y in part) * scale,
+                                     (max(x for x, _ in part) + 1) * scale, (max(y for _, y in part) + 1) * scale)
+                                    for part in parts]
+                        output = source.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                        with doc_ex.open(output) as pdf, pdf.edit() as edit:
+                            self.assertTrue(rgba(pdf, dpi) == (width, pixels), "reopened PDF paints different pixels")
+                            self.assertEqual(pdf[0].get_text(), "B́")
+                            find, = pdf[0].search_for("B́")
+                            self.assertAlmostEqual(find[0], expected[0][0], delta=.04)
+                            self.assertAlmostEqual(find[2], expected[0][2], delta=.04)
+                            self.assertGreaterEqual(find[1], expected[0][1])
+                            self.assertLessEqual(find[3], expected[0][3])
+                            links = {link.uri: link.bbox for link in pdf[0].get_links() if link.uri}
+                            for uri, bounds in zip(("letter", "graphic"), expected):
+                                for actual, target in zip(links[f"https://example.org/{uri}"], bounds):
+                                    self.assertAlmostEqual(actual, target, delta=.04)
+                            destinations = re.findall(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
+                                                      edit.to_bytes(object_streams=False))
+                            self.assertEqual(len(destinations), 2)
+                            for (x, y), bounds in zip(sorted(tuple(map(float, entry)) for entry in destinations), expected):
+                                self.assertAlmostEqual(x, bounds[0], delta=.04)
+                                self.assertAlmostEqual(y, 150 - bounds[1], delta=.04)
 
         touching = shared.replace('id="graphic" mask="url(#cut)"', 'id="graphic" transform="translate(-87 0)"')
         overlap = touching.replace("translate(-87 0)", "translate(-105 0)")
         mixed = shared.replace('<feOffset dx="3.75"', '<feGaussianBlur stdDeviation="2"/><feOffset dx="3.75"')
         split = shared.replace('id="graphic" mask="url(#cut)"', 'id="graphic" filter="url(#inner)"')
-        for markup in (touching, overlap, mixed, split):
+        painted_clear = single(shared).replace(rgb, transfer).replace('tableValues="0 0 .6 .8"', 'tableValues=".1 0 .6 .8"')
+        for markup in (touching, overlap, mixed, split, painted_clear):
             with self.subTest(markup=markup), book(markup, False) as source:
                 self.assertTrue(source.render_page(0, dpi=96).startswith(b"\x89PNG"))
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):

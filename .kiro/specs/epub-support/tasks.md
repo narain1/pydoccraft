@@ -61,7 +61,8 @@
 - [x] Transport fixed-layout PDF text, annotations and destinations along provable single-layer SVG offset chains using native raster transforms and clipping.
 - [x] Compose nested axis-aligned SVG offsets for one painted source and capture surviving search, links and fragments from the whole native stack.
 - [x] Capture the surviving raster of one graphic or Unicode cluster through a verified affine SVG offset stack.
-- [x] Attribute links, targets and Unicode clusters independently when their raster supports stay separated through a common affine offset stack.
+- [x] Attribute links, targets and Unicode clusters independently when their raster supports stay separated through a common SVG offset stack.
+- [x] Measure separately surviving sources through pointwise alpha changes that preserve transparency in shared SVG offset layers.
 - [x] Render bounded native SVG blend and component transfer and retain searchable text, links and fragments through provable alpha and offset chains.
 - [x] Render bounded native morphology and preserve PDF source attribution through provable erosion, dilation and erosion-to-offset chains.
 - [x] Render bounded native turbulence and displacement. Keep provable source geometry and reject ambiguous PDF attribution.

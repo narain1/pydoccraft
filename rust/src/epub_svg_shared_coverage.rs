@@ -1,10 +1,10 @@
-//! Attribute a shared native affine replay when source pixel supports stay apart.
+//! Attribute a shared native offset replay when source pixel supports stay apart.
 use std::collections::HashMap;
 
 use resvg::{tiny_skia, tiny_skia::Transform, usvg};
 use wordcraft_geom::Rect;
 
-use super::{affine_leaf, contains_filter, CaptureGeometry, RasterAxes};
+use super::{affine_leaf, contains_filter, transfer, CaptureGeometry, RasterAxes};
 
 const MAX_BRANCHES: usize = 8;
 const MAX_LAYERS: usize = 4;
@@ -41,25 +41,27 @@ pub(super) fn common_stack(mut group: &usvg::Group) -> Option<&usvg::Group> {
 }
 
 fn pointwise_offsets(group: &usvg::Group) -> bool {
-    use usvg::filter::{ColorMatrixKind, Kind, TransferFunction};
+    use usvg::filter::{ColorMatrixKind, Kind};
 
     let [filter] = group.filters() else {
         return false;
     };
     // A translated pixel can only carry the source it already belonged to.
-    // RGB-only stages may change its color without changing its support.
+    // Pointwise color and alpha changes also preserve ownership when a
+    // transparent pixel remains transparent.
     filter
         .primitives()
         .iter()
         .all(|primitive| match primitive.kind() {
             Kind::Offset(_) => true,
             Kind::ColorMatrix(matrix) => match matrix.kind() {
-                ColorMatrixKind::Saturate(_) | ColorMatrixKind::HueRotate(_) => true,
-                ColorMatrixKind::Matrix(values) => values[15..20] == [0.0, 0.0, 0.0, 1.0, 0.0],
-                ColorMatrixKind::LuminanceToAlpha => false,
+                ColorMatrixKind::Saturate(_)
+                | ColorMatrixKind::HueRotate(_)
+                | ColorMatrixKind::LuminanceToAlpha => true,
+                ColorMatrixKind::Matrix(values) => values[19] <= 0.0,
             },
             Kind::ComponentTransfer(transfer) => {
-                matches!(transfer.func_a(), TransferFunction::Identity)
+                transfer::alpha_coverage(transfer.func_a()).keeps_transparency
             }
             _ => false,
         })

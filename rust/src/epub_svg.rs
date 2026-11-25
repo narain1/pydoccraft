@@ -262,8 +262,8 @@ struct PaintedNode<'tree> {
     shifted_descendants: bool,
     uses_full_viewport: bool,
     context_root: bool,
-    affine_source: bool,
-    affine_bounds: Option<wordcraft_geom::Rect>,
+    exact_coverage: bool,
+    source_bounds: Option<wordcraft_geom::Rect>,
     // The original subtree renderer already performs its own filter.
     raster_shift: [f32; 2],
     geometry_shift: [f32; 2],
@@ -311,7 +311,7 @@ struct PaintFrame<'tree> {
     unproven: bool,
     shift: [f32; 2],
     inside_context: bool,
-    affine_source: bool,
+    exact_coverage: bool,
     shared_sources: Option<Rc<effects::SharedSources>>,
     blocked_context: bool,
 }
@@ -339,7 +339,7 @@ fn visit_painted_svg<'tree>(
         unproven: false,
         shift: [0.0; 2],
         inside_context: false,
-        affine_source: false,
+        exact_coverage: false,
         shared_sources: None,
         blocked_context: false,
     }];
@@ -363,8 +363,8 @@ fn visit_painted_svg<'tree>(
             shifted_descendants: status.moved_children,
             uses_full_viewport: status.moved_subtree || status.context_subtree,
             context_root: false,
-            affine_source: frame.affine_source,
-            affine_bounds: shared_sources
+            exact_coverage: frame.exact_coverage,
+            source_bounds: shared_sources
                 .as_ref()
                 .and_then(|sources| sources.bounds(node)),
             raster_shift: frame.shift,
@@ -385,7 +385,8 @@ fn visit_painted_svg<'tree>(
                 }
                 blocked_context |= !status.one_context_source && shared_sources.is_none();
                 paint.context_root = !blocked_context;
-                paint.affine_source |= paint.context_root && status.affine_subtree;
+                paint.exact_coverage |=
+                    paint.context_root && (status.affine_subtree || shared_sources.is_some());
             }
             unproven |= blocked_context && status.needs_context;
             let device = frame.device.pre_concat(group.transform());
@@ -412,7 +413,7 @@ fn visit_painted_svg<'tree>(
                 let Some(bounds) = group.abs_layer_bounding_box() else {
                     continue;
                 };
-                if !paint.affine_source {
+                if !paint.exact_coverage {
                     clip = super::rendition::intersection(
                         clip,
                         shifted(links::actual_rect(bounds.to_rect()), paint.raster_shift),
@@ -430,7 +431,7 @@ fn visit_painted_svg<'tree>(
                 unproven,
                 shift: paint.geometry_shift,
                 inside_context,
-                affine_source: paint.affine_source,
+                exact_coverage: paint.exact_coverage,
                 shared_sources,
                 blocked_context,
             });

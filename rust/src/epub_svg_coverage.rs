@@ -183,11 +183,11 @@ impl<'tree> Coverage<'tree> {
             return Ok(Some(rect));
         }
         let rect = intersection(clip, rect);
-        let footprint = if paint.affine_source {
+        let footprint = if paint.exact_coverage {
             // Use native antialiasing throughout the isolated raster, with
             // the verified support of this branch if it shares the replay.
             paint
-                .affine_bounds
+                .source_bounds
                 .map_or(clip, |bounds| intersection(clip, bounds))
         } else {
             match target {
@@ -200,7 +200,7 @@ impl<'tree> Coverage<'tree> {
         };
         // Replay one source with its original isolated context. Cropping
         // an intermediate layer can change translated or neighboring pixels.
-        let owner = if paint.uses_full_viewport || paint.affine_source {
+        let owner = if paint.uses_full_viewport || paint.exact_coverage {
             effects
                 .iter()
                 .find(|effect| effect.context_root)
@@ -249,7 +249,7 @@ impl<'tree> Coverage<'tree> {
                 }
             }
         }
-        if paint.affine_source {
+        if paint.exact_coverage {
             return Ok((!visible.is_empty()).then(|| visible.as_rect(self.density)));
         }
         Ok((!visible.is_empty()).then(|| match target {
@@ -332,9 +332,9 @@ impl<'tree> Coverage<'tree> {
         );
         // The public node renderer subtracts its absolute bbox origin.
         // Undo that translation and check for precision loss before using
-        // a replay as the exact owner of affine source pixels.
+        // a replay as the exact owner of the source pixels.
         let transform = original.pre_translate(bbox.x(), bbox.y());
-        if paint.affine_source && transform.pre_translate(-bbox.x(), -bbox.y()) != original {
+        if paint.exact_coverage && transform.pre_translate(-bbox.x(), -bbox.y()) != original {
             return Err(effects::geometry_error());
         }
         resvg::render_node(paint.node, transform, &mut pixmap.as_mut());

@@ -999,40 +999,46 @@ impl CaptureGeometry {
                 });
             let needs_affine = !axis_aligned || status.affine_subtree;
             let affine_source = needs_affine && one_affine_source(group);
-            let shared_sources =
-                needs_affine && !affine_source && shared::common_stack(group).is_some();
+            let shared_sources = !affine_source && shared::common_stack(group).is_some();
             let can_stack = status.moved_children
                 && !status.incompatible_stack
-                && if needs_affine {
-                    affine_source || shared_sources
-                } else {
-                    at_most_one_leaf(group, &mut false)
-                };
+                && (shared_sources
+                    || if needs_affine {
+                        affine_source
+                    } else {
+                        at_most_one_leaf(group, &mut false)
+                    });
             if status.moved_children
                 || status.context_subtree
                 || (erosion || procedural) && !axis_aligned && filter == FilterGeometry::Sample
             {
                 filter = FilterGeometry::Unproven;
             }
+            let mut replay_shared = false;
             if filter == FilterGeometry::Unproven
                 && (!status.filters_subtree || can_stack)
                 && (!erosion || axis_aligned || affine_source)
             {
                 if let [native] = group.filters() {
                     if let Some((offsets, preserves_alpha)) = offset_chain(native) {
-                        if preserves_alpha || can_stack || at_most_one_leaf(group, &mut false) {
+                        if preserves_alpha
+                            || shared_sources
+                            || can_stack
+                            || at_most_one_leaf(group, &mut false)
+                        {
                             self.moves.insert(key, offsets);
                             filter = FilterGeometry::Moved;
+                            replay_shared = shared_sources && (can_stack || !preserves_alpha);
                         }
                     }
                 }
             }
             status.affine_subtree |= filter == FilterGeometry::Moved && !axis_aligned;
-            status.shared_subtree |= filter == FilterGeometry::Moved && can_stack && shared_sources;
+            status.shared_subtree |= replay_shared;
             status.incompatible_stack |= filter != FilterGeometry::Moved
                 || needs_affine && !affine_source && !shared_sources;
             status.filters_subtree = true;
-            status.needs_context = (erosion || status.moved_children)
+            status.needs_context = (erosion || status.moved_children || replay_shared)
                 && filter == FilterGeometry::Moved
                 || (erosion || procedural) && filter == FilterGeometry::Sample;
         }
