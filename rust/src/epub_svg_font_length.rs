@@ -49,6 +49,7 @@ struct LengthOwner {
 struct PositionedChunk {
     index: usize,
     count: usize,
+    probe_y: Option<f32>,
 }
 
 pub(in crate::epub::svg) struct FittedLengths {
@@ -262,13 +263,12 @@ fn nested_chunk(
         }
         position = wrapper;
     }
-    let mut index = None;
+    let mut selected = None;
     let mut count = 0;
+    let mut baseline = root.attribute("y").map_or(Some(0.0), scalar_position);
     for child in root.children().filter(Node::is_element) {
         if !child.has_tag_name((NS, "tspan"))
-            || !["x", "y"]
-                .iter()
-                .all(|key| child.attribute(*key).is_some_and(scalar_position))
+            || child.attribute("x").and_then(scalar_position).is_none()
             || child
                 .descendants()
                 .skip(1)
@@ -277,14 +277,26 @@ fn nested_chunk(
         {
             return Err(nested_error());
         }
+        let y = child
+            .attribute("y")
+            .map(|raw| scalar_position(raw).ok_or_else(nested_error))
+            .transpose()?;
+        baseline = y.or(baseline);
+        if baseline.is_none() {
+            return Err(nested_error());
+        }
         if child == position {
-            index = Some(count);
+            // An isolated probe has no previous chunk to carry its baseline.
+            // Recreate that coordinate in the probe and verify native glyphs.
+            selected = Some((count, if y.is_none() { baseline } else { None }));
         }
         count += 1;
     }
+    let (index, probe_y) = selected.ok_or_else(nested_error)?;
     Ok(Some(PositionedChunk {
-        index: index.ok_or_else(nested_error)?,
+        index,
         count,
+        probe_y,
     }))
 }
 
@@ -319,13 +331,14 @@ fn collapsible_space(value: &str) -> bool {
     value.trim_matches([' ', '\t', '\r', '\n']).is_empty()
 }
 
-fn scalar_position(raw: &str) -> bool {
+fn scalar_position(raw: &str) -> Option<f32> {
     let value = raw.trim();
     value
         .strip_suffix("px")
         .unwrap_or(value)
         .parse::<f32>()
-        .is_ok_and(|value| value.is_finite() && value.abs() <= MAX_LENGTH)
+        .ok()
+        .filter(|value| value.is_finite() && value.abs() <= MAX_LENGTH)
 }
 
 fn nested_error() -> EngineError {
@@ -430,7 +443,7 @@ pub(in crate::epub::svg) fn fit_lengths(
                 let [chunk] = probe.chunks() else {
                     return Err(nested_error());
                 };
-                let start = spacing::verify_probe(text, origin.index, probe)?;
+                let start = spacing::verify_probe(text, origin.index, probe, origin.probe_y)?;
                 (chunk, Some((start, probe)), positioned)
             } else {
                 let [chunk] = text.chunks() else {
@@ -565,15 +578,25 @@ fn probe_chunks<'a>(
         let mut replacement = String::new();
         let mut selected = Vec::new();
         if let Some(nested) = &length.nested {
-            selected.extend(nested.owners(text)?.into_iter().enumerate());
+            selected.extend(
+                nested
+                    .owners(text)?
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, owner)| (index, owner, None)),
+            );
         } else if length.relative.is_some() {
-            selected.push((0, text));
+            selected.push((0, text, None));
         } else {
             for origin in length.owners.iter().filter_map(|owner| owner.chunk) {
-                selected.push((origin.index, positioned_chunk_node(text, origin)?));
+                selected.push((
+                    origin.index,
+                    positioned_chunk_node(text, origin)?,
+                    origin.probe_y,
+                ));
             }
         }
-        for (index, owner) in selected {
+        for (index, owner, probe_y) in selected {
             let probe_id = loop {
                 let id = format!("pydoccraft-svg-spacing-probe-{next_id}");
                 next_id += 1;
@@ -600,6 +623,12 @@ fn probe_chunks<'a>(
                 }
                 outside
             };
+            if let Some(y) = probe_y {
+                copy_edits.push((
+                    local(svg::style_insertion(source.as_bytes(), owner)?),
+                    format!(" y=\"{y}\""),
+                ));
+            }
             copy_edits.push((local(attr.range_value()), probe_id.clone()));
             let copy = apply_edits(&source[range.clone()], copy_edits, XML_BYTES)?;
             charge(

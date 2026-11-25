@@ -4231,7 +4231,7 @@ class EpubTests(unittest.TestCase):
                 self.assertAlmostEqual(max(wide) - min(wide), 2 * (max(narrow) - min(narrow)), delta=2)
 
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
-            render("84", sibling='x="250"')
+            render("84", sibling='y="83"')
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned spacing"):
             render("84", adjust='lengthAdjust="spacingAndGlyphs"')
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength"):
@@ -4242,11 +4242,12 @@ class EpubTests(unittest.TestCase):
         resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
         fixture = fixed_spread_fixture([("", "white", 340, 112)])
 
-        def svg(*, combined: bool, first: int, second: int, wrapped: bool = False) -> str:
+        def svg(*, combined: bool, first: int, second: int, wrapped: bool = False,
+                first_y: int = 38, second_y: int = 68) -> str:
             elements = (
-                f'<tspan x="110" y="38" id="first-owner" textLength="{first}" font-size="31" fill="#a03020">'
+                f'<tspan x="110" y="{first_y}" id="first-owner" textLength="{first}" font-size="31" fill="#a03020">'
                 '<a href="https://example.org/first">B́éBé</a></tspan>',
-                f'<tspan x="270" y="68" id="second-owner" textLength="{second}" '
+                f'<tspan x="270" y="{second_y}" id="second-owner" textLength="{second}" '
                 'font-size="29" text-anchor="end" fill="#204090">'
                 '<a href="https://example.org/second">BééB</a></tspan>',
                 '<tspan x="152" y="99" textLength="80" style="font-family:sans-serif;fill:#305010">'
@@ -4254,9 +4255,9 @@ class EpubTests(unittest.TestCase):
             )
             if wrapped:
                 elements = (
-                    '<tspan x="110" y="38" class="voice" fill="#a03020"><a href="https://example.org/first">'
+                    f'<tspan x="110" y="{first_y}" class="voice" fill="#a03020"><a href="https://example.org/first">'
                     f'<tspan id="first-owner" textLength="{first}">B́éBé</tspan></a></tspan>',
-                    '<tspan x="270" y="68" text-anchor="end"><tspan class="quiet">'
+                    f'<tspan x="270" y="{second_y}" text-anchor="end"><tspan class="quiet">'
                     f'<tspan id="second-owner" textLength="{second}" fill="#204090">'
                     '<a href="https://example.org/second">BééB</a></tspan></tspan></tspan>',
                     elements[2],
@@ -4328,9 +4329,27 @@ class EpubTests(unittest.TestCase):
                 for link in ("second", "neighbor"):
                     self.assertEqual(adjusted[2][link], combined[2][link])
 
-        unsupported = svg(combined=True, first=94, second=78).replace('x="270" y="68"', 'x="270"')
-        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
-            render(unsupported, False)
+        for inline in (False, True):
+            with self.subTest(inline=inline, mode="carried baseline"):
+                for baseline, root_y in ((42, 42), (56, 25)):
+                    control = render(svg(combined=False, first=94, second=78,
+                                         first_y=baseline, second_y=baseline), inline)
+                    carried = svg(combined=True, first=94, second=78, wrapped=True,
+                                  first_y=baseline, second_y=baseline)
+                    carried = carried.replace("<text>", f'<text y="{root_y}px">')
+                    carried = carried.replace(f'x="270" y="{baseline}"', 'x="270"')
+                    if baseline == root_y:
+                        carried = carried.replace(f'x="110" y="{baseline}"', 'x="110"')
+                    self.assertEqual(render(carried, inline), control)
+
+        for unsupported in (
+            svg(combined=True, first=94, second=78).replace('x="270" y="68"', 'y="68"'),
+            svg(combined=True, first=94, second=78).replace('x="270" y="68"', 'x="270" y="68 80"'),
+            svg(combined=True, first=94, second=78).replace(
+                '<text><tspan x="110" y="38"', '<text y="20 40"><tspan x="110"'),
+        ):
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
+                render(unsupported, False)
 
         wrapped = svg(combined=True, first=94, second=78, wrapped=True)
         for unsupported in (

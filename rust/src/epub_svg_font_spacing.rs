@@ -158,12 +158,14 @@ pub(super) fn verify_probe(
     original: &usvg::Text,
     index: usize,
     probe: &usvg::Text,
+    probe_y: Option<f32>,
 ) -> Result<usize, EngineError> {
     let [target] = probe.chunks() else {
         return Err(spacing_error());
     };
+    let chunk = &original.chunks()[index];
     if !svg::logical_glyph_clusters(original)
-        || !same_chunk(&original.chunks()[index], target)
+        || !same_chunk_at(chunk, target, chunk.y().or(probe_y))
         || original.writing_mode() != probe.writing_mode()
         || original.abs_transform() != probe.abs_transform()
     {
@@ -211,8 +213,12 @@ pub(super) fn verify_probe(
 }
 
 pub(super) fn same_chunk(before: &usvg::TextChunk, after: &usvg::TextChunk) -> bool {
+    same_chunk_at(before, after, before.y())
+}
+
+fn same_chunk_at(before: &usvg::TextChunk, after: &usvg::TextChunk, y: Option<f32>) -> bool {
     before.x() == after.x()
-        && before.y() == after.y()
+        && y == after.y()
         && before.anchor() == after.anchor()
         && before.text() == after.text()
 }
