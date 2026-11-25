@@ -2991,3 +2991,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 843 installed tests, including 2
 ## 2026-11-25 EPUB named grids, nested MathML groups, SVG filter images and Ogg defaults
 
 The Linux x86-64 CPython 3.11 host wheel passed 849 installed tests, including 254 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-named-grids-nested-mathml-groups-svg-filter-images-and-ogg-defaults)
+
+## 2026-11-25 EPUB CSS steps, MathML span widths, SVG spacing and TTML region timing
+
+The Linux x86-64 CPython 3.11 host wheel passed 855 installed tests, including 260 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-steps-mathml-span-widths-svg-spacing-and-ttml-region-timing)
