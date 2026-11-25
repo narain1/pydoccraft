@@ -8,6 +8,8 @@ use crate::EngineError;
 mod ttml;
 #[path = "epub_webvtt_css.rs"]
 mod webvtt_css;
+#[path = "epub_webvtt_regions.rs"]
+mod webvtt_regions;
 
 const MAX_TRACK_BYTES: usize = 2 * 1024 * 1024;
 pub(super) const MICROS: u64 = 1_000_000;
@@ -132,6 +134,7 @@ pub(crate) struct Cue {
     pub markup: Option<String>,
     pub runs: Vec<TextRun>,
     pub background_color: Option<[u8; 4]>,
+    pub region_layout: Option<Arc<webvtt_regions::Region>>,
 }
 
 #[derive(Default)]
@@ -153,6 +156,7 @@ impl Track {
             cue.settings.as_deref(),
             cue.region.as_deref(),
             cue.markup.as_deref(),
+            cue.region_layout.as_ref().map(|region| region.id.as_str()),
         ]
         .into_iter()
         .flatten()
@@ -252,6 +256,7 @@ fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(),
     }
     let mut previous = 0;
     let mut cascade = webvtt_css::Cascade::default();
+    let mut regions = webvtt_regions::Regions::default();
     let mut timed_work = 0;
     while let Some(first) = lines.by_ref().find(|line| !line.is_empty()) {
         if first.trim_end_matches([' ', '\t']) == "STYLE" {
@@ -274,10 +279,18 @@ fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(),
             }
             continue;
         }
+        if first.trim_end_matches([' ', '\t']) == "REGION" {
+            let region_lines = lines.by_ref().take_while(|line| !line.is_empty());
+            if track.cues.is_empty() {
+                regions.block(region_lines)?;
+            } else {
+                region_lines.for_each(drop);
+            }
+            continue;
+        }
         let side_block = first
             .strip_prefix("NOTE")
-            .is_some_and(|tail| tail.is_empty() || tail.starts_with([' ', '\t']))
-            || first == "REGION";
+            .is_some_and(|tail| tail.is_empty() || tail.starts_with([' ', '\t']));
         if side_block {
             lines
                 .by_ref()
@@ -321,6 +334,7 @@ fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(),
             end,
             id: id.as_deref(),
             region,
+            region_layout: regions.resolve(&settings),
             settings: (!settings.is_empty()).then_some(settings.as_str()),
             markup: &markup,
             language,
@@ -363,6 +377,7 @@ struct WebvttCue<'a> {
     end: u64,
     id: Option<&'a str>,
     region: Option<&'a str>,
+    region_layout: Option<Arc<webvtt_regions::Region>>,
     settings: Option<&'a str>,
     markup: &'a str,
     language: Option<&'a str>,
@@ -523,6 +538,7 @@ impl<'a> WebvttCue<'a> {
                     markup: Some(self.markup.to_owned()),
                     runs,
                     background_color,
+                    region_layout: self.region_layout.clone(),
                 })?;
             }
             start = end;

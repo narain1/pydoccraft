@@ -560,6 +560,15 @@ fn timed_text_run(run: crate::epub::text_tracks::TextRun) -> TimedTextRun {
     )
 }
 
+type TimedTextRegion = (
+    String,
+    f64,
+    u32,
+    (f64, f64),
+    (f64, f64),
+    Option<&'static str>,
+);
+
 type TimedTextCue = (
     u64,
     Option<u64>,
@@ -570,6 +579,7 @@ type TimedTextCue = (
     Option<String>,
     Vec<TimedTextRun>,
     Option<Rgba>,
+    Option<TimedTextRegion>,
 );
 
 #[pyfunction]
@@ -598,6 +608,16 @@ fn _epub_text_track(
                         cue.runs.into_iter().map(timed_text_run).collect(),
                         cue.background_color
                             .map(|[r, g, b, a]: [u8; 4]| (r, g, b, a)),
+                        cue.region_layout.map(|region| {
+                            (
+                                region.id.clone(),
+                                region.width_percent,
+                                region.lines,
+                                region.region_anchor_percent,
+                                region.viewport_anchor_percent,
+                                region.scroll_up.then_some("up"),
+                            )
+                        }),
                     )
                 })
                 .collect()

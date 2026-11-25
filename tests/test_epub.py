@@ -3921,6 +3921,174 @@ Second
                 self.assertEqual(frame.text_cues[0].runs, cue.runs)
                 self.assertEqual(frame.text_cues[0].background_color, cue.background_color)
 
+    def test_webvtt_regions_follow_caption_selection_and_the_display_viewport(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        vtt = '''WEBVTT
+
+REGION\t
+id:équipage width:40.5% lines:2
+regionanchor:50%,100%
+viewportanchor:10%,90% scroll:up
+
+REGION
+id:lower
+
+REGION
+id:replace width:70%
+
+REGION
+id:replace width:35.25%
+
+REGION
+id:fallback width:1e1% lines:-1 regionanchor:0%,oops viewportanchor:110%,0% scroll:down
+
+REGION
+id:large lines:4294967295
+
+REGION
+width:17%
+
+STYLE
+::cue(c:future) { color: red; }
+
+lead
+00:00:00.160 --> 00:00:00.205 region:équipage position:50% align:center
+<c>Hello</c><00:00:00.175><c>Port</c>
+
+floor
+00:00:00.175 --> 00:00:00.195 region:lower size:100% line:auto
+Lower
+
+line
+00:00:00.200 --> 00:00:00.230 region:équipage line:50%,end
+Placed on a line
+
+vertical
+00:00:00.220 --> 00:00:00.235 region:équipage vertical:rl
+Vertical
+
+size
+00:00:00.240 --> 00:00:00.260 region:équipage size:99.5%
+Sized
+
+ignored-line
+00:00:00.260 --> 00:00:00.270 region:équipage line:5,bogus
+Invalid line setting
+
+ordered
+00:00:00.270 --> 00:00:00.280 line:5 region:équipage
+Region selected last
+
+replace
+00:00:00.280 --> 00:00:00.290 region:replace
+Later definition
+
+fallback
+00:00:00.290 --> 00:00:00.300 region:fallback
+Default values
+
+missing
+00:00:00.300 --> 00:00:00.310 region:missing
+Unknown region
+
+large
+00:00:00.310 --> 00:00:00.320 region:large
+Large line count
+
+REGION
+id:late width:45%
+
+late
+00:00:00.320 --> 00:00:00.330 region:late
+Late region
+'''
+        raw = ("\ufeff" + vtt.replace("\n", "\r\n")).encode()
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Caption regions</title></head>
+          <body><video src="clip.mp4#t=0.17,0.19&amp;xywh=1,1,6,4">
+          <track src="styled.vtt" kind="captions" srclang="en"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Caption regions", chapter, "OEBPS/regions.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/styled.vtt": doc_ex.EpubResource("text/vtt", raw),
+                },
+            )
+        region = doc_ex.EpubTextRegion("équipage", 40.5, 2, (50, 100), (10, 90), "up")
+        with doc_ex.open(data) as book:
+            lead, lead_after, floor = book.epub_embedded_text(0, 0, start_us=170_000, end_us=190_000)
+            self.assertEqual([(cue.start_us, cue.end_us) for cue in (lead, lead_after, floor)],
+                             [(170_000, 175_000), (175_000, 190_000), (175_000, 190_000)])
+            self.assertEqual(lead.region_layout, region)
+            self.assertEqual(lead_after.region_layout, region)
+            self.assertEqual(floor.region_layout, doc_ex.EpubTextRegion("lower"))
+            self.assertEqual(lead, doc_ex.EpubTextCue(
+                170_000, 175_000, "HelloPort", "lead", "region:équipage position:50% align:center",
+                "équipage", "<c>Hello</c><00:00:00.175><c>Port</c>",
+            ))
+            self.assertEqual(lead.runs[1].timestamp_us, 175_000)
+            self.assertEqual(lead.runs[1].style.color, (255, 0, 0, 255))
+            self.assertIsNone(lead_after.runs[1].style.color)
+            self.assertEqual(region.viewport_bounds(200, 100), (-20.5, 78, 81, 12))
+            self.assertEqual(doc_ex.EpubTextRegion("lower").viewport_bounds(200, 100), (0, 82, 200, 18))
+            with self.assertRaisesRegex(ValueError, "finite positive"):
+                region.viewport_bounds(float("inf"), 100)
+
+            cues = {cue.id: cue for cue in book.epub_embedded_text(0, 0)}
+            for name in ("line", "vertical", "size"):
+                self.assertEqual(cues[name].region, "équipage")
+                self.assertIsNone(cues[name].region_layout)
+            for name in ("ignored-line", "ordered"):
+                self.assertEqual(cues[name].region_layout, region)
+            for name in ("late", "missing"):
+                self.assertEqual(cues[name].region, name)
+                self.assertIsNone(cues[name].region_layout)
+            self.assertEqual(cues["replace"].region_layout, doc_ex.EpubTextRegion("replace", 35.25))
+            self.assertEqual(cues["fallback"].region_layout, doc_ex.EpubTextRegion("fallback"))
+            self.assertEqual(cues["large"].region_layout, doc_ex.EpubTextRegion("large", lines=4_294_967_295))
+
+            first, second = book.epub_embedded_video(0, 0, start_us=167_000, end_us=196_000, text_track=0)
+            self.assertEqual([(f.start_us, f.duration_us, f.width, f.height) for f in (first, second)],
+                             [(170_000, 5_000, 6, 4), (175_000, 15_000, 6, 4)])
+            self.assertIs(first.rgb, second.rgb)
+            self.assertEqual([cue.region_layout for cue in first.text_cues], [region])
+            self.assertEqual([cue.region_layout for cue in second.text_cues],
+                             [region, doc_ex.EpubTextRegion("lower")])
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("Caption regions", "Regions revised")})
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened.read_epub_resource("OEBPS/styled.vtt"), raw)
+            self.assertEqual(reopened.epub_embedded_text(0, 0)[0].region_layout, region)
+
+    def test_webvtt_region_layout_limits_block_bytes_identifiers_and_lines(self) -> None:
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Caption regions</title></head>
+          <body><video><track src="style.vtt" kind="captions" srclang="en"/></video></body></html>'''
+        header = b"WEBVTT\n\n"
+        cue = b"00:00:00.000 --> 00:00:00.200 region:local\nText"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Caption regions", chapter, "OEBPS/style.xhtml")],
+                resources={"OEBPS/style.vtt": doc_ex.EpubResource("text/vtt", header + cue)},
+            )
+        blocks = b"".join(
+            b"REGION\nid:local note:" + b"".join(
+                hashlib.sha256(f"{i}-{j}".encode()).hexdigest().encode() for j in range(60)
+            ) + b"\n\n"
+            for i in range(18)
+        )
+        for raw, message in (
+            (b"REGION\nid:local\n\n" * 257, "256 REGION blocks"),
+            (b"REGION\nid:local\n " + b"a" * 4096 + b"\n\n", "REGION block exceeds 4 KiB"),
+            (blocks, "REGION blocks exceed 64 KiB"),
+            (b"REGION\nid:" + b"a" * 1025 + b"\n\n", "REGION identifier exceeds"),
+            (b"REGION\nid:local lines:4294967296\n\n", "line count exceeds 32 bits"),
+            (b"REGION\nid:local lines:18446744073709551616\n\n", "line count exceeds 32 bits"),
+        ):
+            with self.subTest(message=message):
+                changed = rewrite_epub(data, {"OEBPS/style.vtt": header + raw + cue})
+                with doc_ex.open(changed) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, message):
+                    book.epub_embedded_text(0, 0)
+
     def test_webvtt_timed_styles_follow_the_source_clock_during_clipped_video(self) -> None:
         video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
         markup = ('<c.wrap><c.past>Before</c><00:00:00.170><c.past.future><b>Middle</b></c>'

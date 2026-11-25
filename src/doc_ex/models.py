@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
+from math import isfinite
 from typing import Any, Callable, Iterable, Literal
 from urllib.parse import urlsplit
 
@@ -103,6 +104,35 @@ class EpubTextRun:
 
 
 @dataclass(frozen=True, slots=True)
+class EpubTextRegion:
+    """An authored WebVTT region with anchors measured from the top left."""
+
+    id: str
+    width_percent: float = 100.0
+    lines: int = 3
+    region_anchor_percent: tuple[float, float] = (0.0, 100.0)
+    viewport_anchor_percent: tuple[float, float] = (0.0, 100.0)
+    scroll: Literal["up"] | None = None
+
+    def viewport_bounds(
+        self, viewport_width: float, viewport_height: float
+    ) -> tuple[float, float, float, float]:
+        """Return (left, top, width, height) using the WebVTT region line height."""
+        if not all(isfinite(size) and size > 0 for size in (viewport_width, viewport_height)):
+            raise ValueError("WebVTT region bounds require finite positive viewport dimensions")
+        width = (self.width_percent / 100) * viewport_width
+        height = (0.06 * self.lines) * viewport_height
+        rx, ry = self.region_anchor_percent
+        vx, vy = self.viewport_anchor_percent
+        left = (vx / 100) * viewport_width - (rx / 100) * width
+        top = (vy / 100) * viewport_height - (ry / 100) * height
+        bounds = (left, top, width, height)
+        if not all(isfinite(value) for value in bounds):
+            raise ValueError("WebVTT region bounds exceed the finite coordinate range")
+        return bounds
+
+
+@dataclass(frozen=True, slots=True)
 class EpubTextCue:
     """Plain text and an interval on the embedded media presentation timeline."""
 
@@ -115,6 +145,7 @@ class EpubTextCue:
     markup: str | None = None
     runs: tuple[EpubTextRun, ...] = field(default=(), compare=False, repr=False)
     background_color: tuple[int, int, int, int] | None = field(default=None, compare=False, repr=False)
+    region_layout: EpubTextRegion | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

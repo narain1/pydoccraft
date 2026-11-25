@@ -971,6 +971,7 @@ impl Reader<'_, '_> {
             markup: None,
             runs,
             background_color: None,
+            region_layout: None,
         })
     }
 }

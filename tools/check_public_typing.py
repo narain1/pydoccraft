@@ -26,6 +26,12 @@ def verify_epub_tracks(source: bytes) -> None:
         assert_type(cues, list[doc_ex.EpubTextCue])
         assert_type(cues[0].end_us, int | None)
         assert_type(cues[0].region, str | None)
+        region = cues[0].region_layout
+        assert_type(region, doc_ex.EpubTextRegion | None)
+        if region is not None:
+            assert_type(region.viewport_bounds(1280, 720), tuple[float, float, float, float])
+            assert_type(region.viewport_anchor_percent, tuple[float, float])
+            assert_type(region.scroll, Literal["up"] | None)
         assert_type(cues[0].background_color, tuple[int, int, int, int] | None)
         assert_type(cues[0].runs, tuple[doc_ex.EpubTextRun, ...])
         assert_type(cues[0].runs[0].style, doc_ex.EpubTextStyle)
