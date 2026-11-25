@@ -29,6 +29,7 @@ pub(super) struct Styled {
     pub box_style: Style,
     pub text: Typography,
     pub inline: bool,
+    pub bidi: super::bidi::Mode,
     pub hidden: bool,
     pub background: Option<Paint>,
     pub border: [Option<Paint>; 4],
@@ -154,6 +155,11 @@ impl ChapterStyles {
                     }
                     _ => false,
                 };
+            let bidi = super::bidi::Mode::resolve(
+                node,
+                values.get("unicode-bidi").map(String::as_str),
+                parent.map_or(super::bidi::Mode::Normal, |parent| parent.bidi),
+            );
             let font = text.chars.size.unwrap_or(12.0);
             let auto = |key| dimension::<LengthPercentageAuto>(value(&values, key), font, viewport);
             let dim = |key| dimension::<Dimension>(value(&values, key), font, viewport);
@@ -342,6 +348,7 @@ impl ChapterStyles {
                     box_style,
                     text,
                     inline,
+                    bidi,
                     hidden,
                     background,
                     border,

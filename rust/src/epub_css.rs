@@ -240,7 +240,9 @@ impl Cascade {
     pub(super) fn needed(&self, root: Node<'_, '_>) -> bool {
         self.bytes != 0
             || root.descendants().any(|node| {
-                node.attribute("style").is_some() || html_direction::hint(node).is_some()
+                node.attribute("style").is_some()
+                    || html_direction::hint(node).is_some()
+                    || name(node, XHTML, "bdo")
             })
     }
 
@@ -419,6 +421,8 @@ impl Cascade {
         let mut output = Properties::new();
         for (physical, (_, name, value, pair)) in winners {
             let computed = computed_value(&mut self.variables, name, value)?;
+            let computed =
+                computed.or_else(|| (name == "unicode-bidi").then(|| "unset".to_owned()));
             if pair.is_some()
                 && computed.as_deref().is_some_and(|value| {
                     logical::value_kind(name, value) == logical::ValueKind::Unsupported
@@ -1182,6 +1186,19 @@ fn valid_literal(
     font_descriptor: bool,
 ) -> bool {
     match name {
+        "unicode-bidi" => {
+            css_wide(value)
+                || [
+                    "normal",
+                    "embed",
+                    "isolate",
+                    "bidi-override",
+                    "isolate-override",
+                    "plaintext",
+                ]
+                .iter()
+                .any(|mode| value.eq_ignore_ascii_case(mode))
+        }
         "direction" => {
             css_wide(value)
                 || ["ltr", "rtl"]

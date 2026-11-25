@@ -17,6 +17,8 @@ use crate::{
 #[cfg(feature = "python")]
 #[path = "epub_audio.rs"]
 pub(crate) mod audio;
+#[path = "epub_bidi.rs"]
+mod bidi;
 #[path = "epub_content.rs"]
 mod content;
 #[path = "epub_css.rs"]

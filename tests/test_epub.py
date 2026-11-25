@@ -1212,6 +1212,83 @@ class EpubTests(unittest.TestCase):
         with doc_ex.open(epub_fixture(chapter_one=control)) as a, doc_ex.open(epub_fixture(chapter_one=candidate)) as b:
             self.assertEqual(a.render_page(0, dpi=96), b.render_page(0, dpi=96))
 
+    def test_inline_bidi_isolation_matches_controls_and_preserves_pdf_links(self) -> None:
+        source = fixed_spread_fixture([("", "white", 260, 150)])
+        markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Inline bidi</title>
+          <meta name="viewport" content="width=260,height=150"/>
+          <style>html,body{margin:0} p{margin:0;font-size:13px;font-family:sans-serif,serif}
+          #top{position:absolute;left:12px;top:10px;width:215px}
+          #end{position:absolute;left:12px;top:110px;width:215px}</style></head>
+          <body><p id="top" dir="ltr">Left FIRST Right <br/> Code SECOND End
+            <br/> After THIRD Tail <br/> Start FOURTH Last.</p>
+            <p id="end"><a href="#inside">Go to target</a></p>
+          </body></html>"""
+        automatic = (
+            '<a href="https://example.org/bidi"><bdi>שלום!</bdi></a>',
+            '<bdo dir="rtl">AbCd</bdo>',
+            '<span style="direction:rtl;unicode-bidi:embed">שלום!</span>',
+            '<bdi id="inside">שלום!<br/>שלום!</bdi>',
+        )
+        literal = (
+            '<a href="https://example.org/bidi">&#x2067;שלום!&#x2069;</a>',
+            '&#x2068;&#x202E;AbCd&#x202C;&#x2069;',
+            '&#x202B;שלום!&#x202C;',
+            '&#x2067;<span id="inside">שלום!</span>&#x2069;<br/>&#x2067;שלום!&#x2069;',
+        )
+        pictures = []
+        for authored in (automatic, literal):
+            chapter = markup
+            for key, element in zip(("FIRST", "SECOND", "THIRD", "FOURTH"), authored):
+                chapter = chapter.replace(key, element)
+            with doc_ex.open(source) as before:
+                updated = before.edit_epub_structure(replacements={0: chapter})
+            with doc_ex.open(updated) as book:
+                preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                pdf = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                if authored == automatic:
+                    text = book[0].get_text()
+                    self.assertIn("שלום!", text)
+                    self.assertFalse(any(mark in text for mark in "\u2067\u2069\u202e"))
+                    link = next(link for link in book[0].get_links() if link.uri == "https://example.org/bidi")
+                    self.assertEqual(link.text, "שלום!")
+                    paragraph = next(block for block in book[0].blocks if "Left" in block.text)
+                    self.assertEqual(paragraph.text[link.metadata["start"]:link.metadata["end"]], "שלום!")
+            with doc_ex.open(pdf) as output, output.edit() as editor:
+                self.assertEqual(preview, rgba_pixels(png_chunks(output.render_page(0, dpi=96))))
+                self.assertFalse(any(mark in output[0].get_text() for mark in "\u2067\u2069\u202e"))
+                self.assertTrue(output[0].search_for("Right"))
+                external, local = output[0].get_links()
+                self.assertEqual(external.uri, "https://example.org/bidi")
+                self.assertEqual(local.metadata["target_page"], 0)
+                readable = editor.to_bytes(object_streams=False)
+                destination = re.search(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null", readable)
+                self.assertIsNotNone(destination)
+                assert destination is not None
+                self.assertGreater(float(destination[1]), 10)
+                self.assertLess(float(destination[2]), 112.5)
+                pictures.append((preview, external.bbox, destination.groups()))
+        self.assertEqual(pictures[0], pictures[1])
+
+    def test_reflow_inline_bidi_preserves_whitespace_and_image_offsets(self) -> None:
+        markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Bidi image</title>
+          <style>body{margin:0} p{font-family:sans-serif,serif}</style></head><body>
+          <p dir="ltr">A SCOPE Z</p><p>End</p></body></html>"""
+        scoped = '<bdi dir="rtl"> שלום <img src="image.png" alt="Pixel"/>!</bdi>'
+        literal = '&#x2067;שלום <img src="image.png" alt="Pixel"/>!&#x2069;'
+        previews = []
+        for value in (scoped, literal):
+            data = rewrite_epub(epub_fixture(chapter_one=markup.replace("SCOPE", value)), {
+                "OEBPS/image.png": solid((170, 80, 35)),
+            })
+            with doc_ex.open(data) as book:
+                previews.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+                if value == scoped:
+                    self.assertIn("A  שלום ! Z", book[0].get_text())
+                    (picture,) = book[0].get_images()
+                    self.assertEqual(picture.alt, "Pixel")
+                    self.assertEqual(picture.metadata["inline_offset"], len("A  שלום "))
+        self.assertEqual(previews[0], previews[1])
+
     def test_fixed_layout_embedded_xhtml_preserves_frame_pixels_text_and_links(self) -> None:
         source = fixed_spread_fixture([("", "white", 220, 154)])
         host = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Host</title>

@@ -155,7 +155,8 @@ impl Fonts {
             let families = &style.text.families;
             let weight = style.text.font_weight.unwrap_or(400.0);
             let width = style.text.font_width.unwrap_or(100.0);
-            needs_stack |= families.len() > 1
+            needs_stack |= style.inline && style.bidi.scope(false).is_some()
+                || families.len() > 1
                 || unusual_weight(weight)
                 || width != 100.0
                 || style.text.oblique.is_some();
@@ -399,7 +400,7 @@ impl Fonts {
                 }
             }
         }
-        if has_composed_math(block) {
+        if has_composed_math(block) || block.metadata.contains_key("bidi_shaping") {
             return Ok(true);
         }
         Ok(StyledText::new(block)?.spans.iter().any(|(_, _, style)| {
@@ -1244,7 +1245,17 @@ impl Text {
                 capture.text.as_deref_mut(),
                 self.search_text.as_ref().and_then(|s| s.get(range.clone())),
             ) {
-                text.add(value, rect, clip)?;
+                if value.chars().any(super::bidi::control) {
+                    let visible: String = value
+                        .chars()
+                        .filter(|c| !super::bidi::control(*c))
+                        .collect();
+                    if !visible.is_empty() {
+                        text.add(&visible, rect, clip)?;
+                    }
+                } else {
+                    text.add(value, rect, clip)?;
+                }
             }
             self.navigation.capture(range, rect, clip, capture)?;
         }

@@ -76,6 +76,9 @@ struct Inline {
     math: Vec<serde_json::Value>,
     styles: Vec<(usize, usize, super::output::RunStyle)>,
     anchors: Vec<(usize, String)>,
+    controls: Vec<usize>,
+    scopes: Vec<super::bidi::Scope>,
+    last_text: Option<char>,
 }
 
 impl Inline {
@@ -83,6 +86,9 @@ impl Inline {
         budget.bytes(text.len())?;
         self.text.push_str(text);
         self.characters += text.chars().count();
+        if let Some(character) = text.chars().next_back() {
+            self.last_text = Some(character);
+        }
         Ok(())
     }
 
@@ -94,10 +100,16 @@ impl Inline {
     ) -> Result<(), EngineError> {
         let start = self.characters;
         if typography.preformatted {
-            self.push(text, budget)?;
+            if self.scopes.is_empty() {
+                self.push(text, budget)?;
+            } else {
+                self.preformatted_bidi(text, budget)?;
+            }
         } else {
             let mut collapsed = String::new();
-            let mut whitespace = self.text.is_empty() || self.text.ends_with([' ', '\n']);
+            let mut whitespace = self
+                .last_text
+                .is_none_or(|character| matches!(character, ' ' | '\n'));
             for character in text.chars() {
                 if matches!(character, ' ' | '\t' | '\n' | '\r' | '\u{000C}') {
                     if !whitespace {
@@ -111,6 +123,15 @@ impl Inline {
             }
             self.push(&collapsed, budget)?;
         }
+        self.record_style(start, typography, budget)
+    }
+
+    fn record_style(
+        &mut self,
+        start: usize,
+        typography: &super::style::Typography,
+        budget: &mut Budget,
+    ) -> Result<(), EngineError> {
         if self.characters != start {
             let mut props = typography.chars.clone();
             if typography.invisible {
@@ -159,6 +180,46 @@ impl Inline {
         Ok(())
     }
 
+    fn push_controls(&mut self, controls: &str, budget: &mut Budget) -> Result<(), EngineError> {
+        budget.bytes(controls.len() + 16)?;
+        for character in controls.chars() {
+            self.controls.push(self.characters);
+            self.characters += 1;
+            self.text.push(character);
+        }
+        Ok(())
+    }
+
+    fn line_break(&mut self, value: &str, budget: &mut Budget) -> Result<(), EngineError> {
+        let scopes = std::mem::take(&mut self.scopes);
+        for scope in scopes.iter().rev() {
+            self.push_controls(scope.end, budget)?;
+        }
+        self.push(value, budget)?;
+        for scope in &scopes {
+            self.push_controls(scope.start, budget)?;
+        }
+        self.scopes = scopes;
+        Ok(())
+    }
+
+    fn preformatted_bidi(&mut self, text: &str, budget: &mut Budget) -> Result<(), EngineError> {
+        let mut start = 0;
+        let mut characters = text.char_indices().peekable();
+        while let Some((offset, character)) = characters.next() {
+            if matches!(character, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                let mut end = offset + character.len_utf8();
+                if character == '\r' && characters.next_if(|&(_, next)| next == '\n').is_some() {
+                    end += 1;
+                }
+                self.push(&text[start..offset], budget)?;
+                self.line_break(&text[offset..end], budget)?;
+                start = end;
+            }
+        }
+        self.push(&text[start..], budget)
+    }
+
     fn flush(
         &mut self,
         out: &mut Vec<BlockPayload>,
@@ -166,8 +227,16 @@ impl Inline {
         kind: Option<&str>,
         cx: &mut Context<'_, '_>,
     ) -> Result<(), EngineError> {
-        let inline = std::mem::take(self);
-        if inline.text.trim().is_empty() && inline.images.is_empty() && inline.math.is_empty() {
+        let mut inline = std::mem::take(self);
+        let empty_text = if inline.controls.is_empty() {
+            inline.text.trim().is_empty()
+        } else {
+            inline
+                .text
+                .chars()
+                .all(|c| c.is_whitespace() || super::bidi::control(c))
+        };
+        if empty_text && inline.images.is_empty() && inline.math.is_empty() {
             return Ok(());
         }
         cx.budget.object()?;
@@ -191,6 +260,20 @@ impl Inline {
             block
                 .metadata
                 .insert("mathml".into(), serde_json::Value::Array(inline.math));
+        }
+        if !inline.controls.is_empty() {
+            block.metadata.insert("bidi_shaping".into(), true.into());
+            for (offset, _) in &mut inline.anchors {
+                let start = inline
+                    .controls
+                    .partition_point(|control| *control < *offset);
+                for &control in &inline.controls[start..] {
+                    if control != *offset {
+                        break;
+                    }
+                    *offset += 1;
+                }
+            }
         }
         if !inline.anchors.is_empty() {
             block
@@ -541,7 +624,17 @@ fn inline(
     }
     match tag.name() {
         tag if ignored(tag) => return Ok(()),
-        "br" => return run.push("\n", cx.budget),
+        "br" => {
+            if run.scopes.is_empty() {
+                return run.push("\n", cx.budget);
+            }
+            let start = run.characters;
+            run.line_break("\n", cx.budget)?;
+            if let Some(style) = styled(node, cx) {
+                run.record_style(start, &style.text, cx.budget)?;
+            }
+            return Ok(());
+        }
         "img" => {
             let alt = node.attribute("alt").unwrap_or_default();
             if let Some(src) = node.attribute("src") {
@@ -611,6 +704,18 @@ fn inline(
         }
         _ => {}
     }
+    let style = styled(node, cx);
+    let scope = style
+        .filter(|style| style.inline)
+        .and_then(|style| style.bidi.scope(style.text.chars.rtl == Some(true)));
+    if let Some(scope) = scope {
+        let start = run.characters;
+        run.push_controls(scope.start, cx.budget)?;
+        if let Some(style) = style {
+            run.record_style(start, &style.text, cx.budget)?;
+        }
+        run.scopes.push(scope);
+    }
     let start = run.characters;
     let start_byte = run.text.len();
     let first_image = run.images.len();
@@ -637,6 +742,14 @@ fn inline(
                 run.characters,
                 cx,
             )?);
+        }
+    }
+    if let Some(scope) = scope {
+        run.scopes.pop();
+        let end = run.characters;
+        run.push_controls(scope.end, cx.budget)?;
+        if let Some(style) = style {
+            run.record_style(end, &style.text, cx.budget)?;
         }
     }
     Ok(())
