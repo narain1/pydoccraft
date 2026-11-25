@@ -751,8 +751,9 @@ class Document:
         track_index: int | None = None,
         start_us: int = 0,
         end_us: int | None = None,
+        ttml_forced: bool = False,
     ) -> list[EpubTextCue]:
-        """Return clipped WebVTT or TTML cues on the media presentation timeline."""
+        """Return clipped WebVTT or TTML cues, optionally in TTML forced mode."""
         embedded = self.epub_embedded_media(page)[operator.index(media_index)]
         if track_index is None:
             track = next((track for track in embedded.tracks if track.default), None)
@@ -763,18 +764,21 @@ class Document:
         start, end = _epub_playback_interval(start_us, end_us)
         if track is None:
             return []
-        cues = self._read_epub_text(track, start, end, video_context=embedded.kind == "video")
+        cues = self._read_epub_text(
+            track, start, end, video_context=embedded.kind == "video", ttml_forced=ttml_forced,
+        )
         cues.sort(key=operator.attrgetter("start_us"))
         return cues
 
     def _read_epub_text(
-        self, track: EpubMediaTrack, start: int, end: int | None, *, video_context: bool = True
+        self, track: EpubMediaTrack, start: int, end: int | None, *,
+        video_context: bool = True, ttml_forced: bool = False,
     ) -> list[EpubTextCue]:
         from . import _core, _native
 
         self._ensure_open()
         result = _native(lambda: _core._epub_text_track(
-            self._source, track.path, track.media_type, start, end, track.language, video_context
+            self._source, track.path, track.media_type, start, end, track.language, video_context, ttml_forced,
         ))
         cues = []
         for *legacy_fields, native_runs, background_color, native_region, native_ttml in result:
@@ -879,6 +883,7 @@ class Document:
         end_us: int | None = None,
         text_track: int | None = None,
         video_track: int | None = None,
+        ttml_forced: bool = False,
     ) -> Iterator[EpubVideoFrame]:
         """Read local video frames with authored clips and optional synchronized text cues."""
         from . import _core, _native
@@ -925,7 +930,9 @@ class Document:
                 raise UnsupportedFormatError("video track selection requires a supported local WebM or Ogg source")
             raise UnsupportedFormatError("embedded video requires a supported local MP4, Ogg or WebM source")
 
-        timeline = None if track is None else _EpubTextTimeline(self._read_epub_text(track, start, end))
+        timeline = None if track is None else _EpubTextTimeline(
+            self._read_epub_text(track, start, end, ttml_forced=ttml_forced)
+        )
         while True:
             self._ensure_open()
             result = _native(decoder.next_frame)

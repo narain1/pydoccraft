@@ -195,20 +195,20 @@ pub(super) fn validate_ttml_edit(root: Node<'_, '_>, bytes: usize) -> Result<(),
             return Err(limited("EPUB text track exceeds its byte budget"));
         }
         // Validate interactions with neighboring sets and owner clocks using the
-        // same bounded projection that caption and video playback will use.
-        return ttml::parse(root, &mut Track::default());
+        // same bounded projection as ordinary caption and video playback.
+        return ttml::parse(root, &mut Track::default(), false);
     }
-    super::ttml_regions::read(root).map(|_| ())
+    super::ttml_regions::read(root, false).map(|_| ())
 }
 
 pub(crate) fn read(
     epub: &[u8],
     path: &str,
     media: &str,
-    start: u64,
-    end: Option<u64>,
+    window: (u64, Option<u64>),
     language: Option<&str>,
     video_context: bool,
+    ttml_forced: bool,
 ) -> Result<Vec<Cue>, EngineError> {
     validate_archive_path(path)?;
     let bytes = Book::open(epub)?.read(path, MAX_TRACK_BYTES)?;
@@ -220,13 +220,16 @@ pub(crate) fn read(
             language.filter(|value| !value.is_empty()),
             video_context,
         )?,
-        "application/ttml+xml" => ttml::parse(parse_xml(&bytes)?.root_element(), &mut track)?,
+        "application/ttml+xml" => {
+            ttml::parse(parse_xml(&bytes)?.root_element(), &mut track, ttml_forced)?
+        }
         _ => {
             return Err(unsupported(
                 "embedded EPUB text tracks require WebVTT or TTML",
             ))
         }
     }
+    let (start, end) = window;
     track.cues.retain_mut(|cue| {
         cue.start = cue.start.max(start);
         cue.end = cue.end.into_iter().chain(end).min();

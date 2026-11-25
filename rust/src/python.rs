@@ -615,7 +615,7 @@ type TimedTextCue = (
 );
 
 #[pyfunction]
-#[pyo3(signature = (data, path, media, start, end, language=None, video_context=true))]
+#[pyo3(signature = (data, path, media, start, end, language=None, video_context=true, ttml_forced=false))]
 #[allow(clippy::too_many_arguments)]
 fn _epub_text_track(
     py: Python<'_>,
@@ -626,9 +626,18 @@ fn _epub_text_track(
     end: Option<u64>,
     language: Option<&str>,
     video_context: bool,
+    ttml_forced: bool,
 ) -> Result<Vec<TimedTextCue>, EngineError> {
     py.allow_threads(|| {
-        crate::epub::text_tracks::read(data, path, media, start, end, language, video_context)
+        crate::epub::text_tracks::read(
+            data,
+            path,
+            media,
+            (start, end),
+            language,
+            video_context,
+            ttml_forced,
+        )
     })
     .map(|cues| {
         cues.into_iter()

@@ -13,6 +13,7 @@ import wave
 import xml.etree.ElementTree as ET
 import zipfile
 import zlib
+from collections.abc import Iterable
 
 import doc_ex
 from fixtures import PNG, docx_fixture
@@ -8169,10 +8170,107 @@ overlay
                              (175_123, 2_879, "Shown detail"))
             self.assertEqual(sought.text_cues[0].ttml_region_layout, cues[1].ttml_region_layout)
             self.assertEqual(sought.text_cues[0].runs, cues[1].runs)
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "invalid TTML condition expression"):
+                book.epub_embedded_text(0, 0, ttml_forced=True)
             revised = book.edit_epub_structure(replacements={0: chapter.replace("Conditional captions", "Revised")})
         with doc_ex.open(revised) as reopened:
             self.assertEqual(reopened.read_epub_resource(path), conditional)
             self.assertEqual(reopened.epub_embedded_text(0, 0), cues)
+
+    def test_ttml_forced_playback_matches_independent_timed_controls(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        header = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
+          ttp:tickRate="1000" xml:lang="en"><head>'''
+        region = b'''<layout><region xml:id="lower" tts:origin="10% 65%" tts:extent="80% 30%"'''
+        body = b'''</region></layout></head><body begin="150t"><div region="lower" timeContainer="seq">'''
+        footer = b'''<p xml:id="always" dur="16t">Closing</p></div></body></tt>'''
+        conditional = (
+            header + b'<ttm:item name="usesForced">true</ttm:item>' + region + b''' timeContainer="seq">
+            <set dur="160t" condition="parameter('forced')" tts:backgroundColor="red"/>
+            <set begin="21t" dur="34t" condition="!parameter('forced')" tts:backgroundColor="blue"/>'''
+            + body + b'''
+            <p xml:id="translation" dur="24t" condition="parameter('forced')">
+              <set begin="5t" dur="11t" condition="parameter('forced')" tts:fontWeight="bold"/>Translation
+            </p>
+            <p xml:id="ordinary" dur="30t" condition="!parameter('forced')">
+              <set begin="12t" dur="5t" condition="!parameter('forced')" tts:color="lime"/>Dialogue
+            </p>''' + footer
+        )
+        ordinary_control = (
+            header + region + b'><set begin="181t" end="215t" tts:backgroundColor="blue"/>'
+            + body + b'''<p dur="24t"/><p xml:id="ordinary" dur="30t">
+              <set begin="12t" dur="5t" tts:color="lime"/>Dialogue</p>''' + footer
+        )
+        forced_control = (
+            header + region + b'><set begin="0t" end="160t" tts:backgroundColor="red"/>'
+            + body + b'''<p xml:id="translation" dur="24t">
+              <set begin="5t" dur="11t" tts:fontWeight="bold"/>Translation</p><p dur="30t"/>''' + footer
+        )
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>TTML subtitle modes</title></head>
+          <body><video src="clip.mp4#t=0.148,0.222&amp;xywh=1,1,6,4">
+          <track src="mode.ttml" kind="captions" srclang="en"/>
+          <track src="ordinary.ttml" kind="subtitles" srclang="en"/>
+          <track src="forced.ttml" kind="subtitles" srclang="en"/>
+          <track src="vtt.vtt" kind="subtitles" srclang="en"/>
+          </video></body></html>"""
+        path = "OEBPS/mode.ttml"
+        with doc_ex.open(epub_fixture()) as original:
+            publication = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("TTML subtitle modes", chapter, "OEBPS/chapter.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    path: doc_ex.EpubResource("application/ttml+xml", conditional),
+                    "OEBPS/ordinary.ttml": doc_ex.EpubResource("application/ttml+xml", ordinary_control),
+                    "OEBPS/forced.ttml": doc_ex.EpubResource("application/ttml+xml", forced_control),
+                    "OEBPS/vtt.vtt": doc_ex.EpubResource("text/vtt", b"WEBVTT\n\n00:00.150 --> 00:00.200\nWebVTT\n"),
+                },
+            )
+
+        def presentation(cues: Iterable[doc_ex.EpubTextCue]) -> list[tuple[object, ...]]:
+            return [(cue, cue.runs, cue.ttml_region_layout) for cue in cues]
+
+        with doc_ex.open(publication) as book:
+            for forced, control_index, bounds, words in (
+                (False, 1, [(174, 181), (181, 186), (186, 191), (191, 204), (204, 215), (215, 220)],
+                 ["Dialogue"] * 4 + ["Closing"] * 2),
+                (True, 2, [(150, 155), (155, 160), (160, 166), (166, 174), (204, 220)],
+                 ["Translation"] * 4 + ["Closing"]),
+            ):
+                with self.subTest(ttml_forced=forced):
+                    cues = book.epub_embedded_text(0, 0, track_index=0, ttml_forced=forced)
+                    self.assertEqual(presentation(cues), presentation(
+                        book.epub_embedded_text(0, 0, track_index=control_index),
+                    ))
+                    self.assertEqual([(cue.start_us, cue.end_us) for cue in cues],
+                                     [(start * 1000, end * 1000) for start, end in bounds])
+                    self.assertEqual([cue.text for cue in cues], words)
+                    frames = list(book.epub_embedded_video(0, 0, text_track=0, ttml_forced=forced))
+                    expected = list(book.epub_embedded_video(0, 0, text_track=control_index))
+                    self.assertEqual(frames, expected)
+                    self.assertEqual([presentation(frame.text_cues) for frame in frames],
+                                     [presentation(frame.text_cues) for frame in expected])
+                    self.assertTrue(all((frame.width, frame.height) == (6, 4) for frame in frames))
+
+            seek = {"start_us": 157_123, "end_us": 162_087}
+            sought = list(book.epub_embedded_video(0, 0, text_track=0, ttml_forced=True, **seek))
+            self.assertEqual(sought, list(book.epub_embedded_video(0, 0, text_track=2, **seek)))
+            self.assertEqual([(frame.start_us, frame.duration_us) for frame in sought],
+                             [(157_123, 2_877), (160_000, 2_087)])
+            self.assertIs(sought[0].rgb, sought[1].rgb)
+            self.assertTrue(all(frame.text_cues[0].runs[0].style.bold for frame in sought))
+            layouts = [frame.text_cues[0].ttml_region_layout for frame in sought]
+            self.assertEqual([layout.background_color for layout in layouts if layout is not None],
+                             [(255, 0, 0, 255), None])
+            self.assertEqual(presentation(book.epub_embedded_text(0, 0)),
+                             presentation(book.epub_embedded_text(0, 0, track_index=1)))
+            self.assertEqual(book.epub_embedded_text(0, 0, track_index=3),
+                             book.epub_embedded_text(0, 0, track_index=3, ttml_forced=True))
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("TTML subtitle modes", "Revised")})
+        with doc_ex.open(revised) as book:
+            self.assertEqual(book.read_epub_resource(path), conditional)
+            self.assertEqual(presentation(book.epub_embedded_text(0, 0, ttml_forced=True)),
+                             presentation(book.epub_embedded_text(0, 0, track_index=2)))
 
     def test_ttml_forced_conditions_validate_in_staging_and_playback(self) -> None:
         root = b'<tt xmlns="http://www.w3.org/ns/ttml"><body>'

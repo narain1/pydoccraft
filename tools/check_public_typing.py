@@ -22,7 +22,7 @@ from doc_ex._authoring import (
 
 def verify_epub_tracks(source: bytes) -> None:
     with doc_ex.open(source, filetype="epub") as epub:
-        cues = epub.epub_embedded_text(0, 0, track_index=1, end_us=100_000)
+        cues = epub.epub_embedded_text(0, 0, track_index=1, end_us=100_000, ttml_forced=True)
         assert_type(cues, list[doc_ex.EpubTextCue])
         assert_type(cues[0].end_us, int | None)
         assert_type(cues[0].region, str | None)
@@ -54,7 +54,7 @@ def verify_epub_tracks(source: bytes) -> None:
         )
         assert_type(epub.epub_embedded_media(0)[0].sources[0].fragment_tracks, tuple[str, ...])
         assert_type(epub.epub_embedded_media(0)[0].sources[0].fragment_id, str | None)
-        frames = epub.epub_embedded_video(0, 0, text_track=1, video_track=0)
+        frames = epub.epub_embedded_video(0, 0, text_track=1, video_track=0, ttml_forced=True)
         assert_type(frames, Iterator[doc_ex.EpubVideoFrame])
         assert_type(next(frames).text_cues, tuple[doc_ex.EpubTextCue, ...])
         audio = epub.epub_embedded_audio(0, 0, audio_track=1)

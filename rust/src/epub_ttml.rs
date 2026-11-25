@@ -24,13 +24,17 @@ const MAX_TEXT_WORK: usize = 8 * 1024 * 1024;
 const MAX_SETS_PER_ELEMENT: usize = 32;
 const MAX_ANIMATION_WORK: usize = 8 * 1024 * 1024;
 
-pub(super) fn parse(root: Node<'_, '_>, track: &mut Track) -> Result<(), EngineError> {
+pub(super) fn parse(
+    root: Node<'_, '_>,
+    track: &mut Track,
+    forced: bool,
+) -> Result<(), EngineError> {
     if !root.has_tag_name((TT, "tt")) {
         return Err(invalid("missing TTML tt root"));
     }
     let clock = Clock::new(root)?;
     validate_animation(root)?;
-    let regions = ttml_regions::read(root)?;
+    let regions = ttml_regions::read(root, forced)?;
     let mut bodies = root
         .children()
         .filter(|node| node.has_tag_name((TT, "body")));

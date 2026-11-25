@@ -1,4 +1,4 @@
-//! Evaluate the bounded TTML boolean profile for ordinary subtitle playback.
+//! Evaluate the bounded TTML boolean profile for subtitle playback.
 use std::collections::HashSet;
 
 use roxmltree::{Node, NodeId};
@@ -13,7 +13,7 @@ use super::{
 const MAX_EXPRESSION_BYTES: usize = 1024;
 const MAX_EXPRESSION_DEPTH: usize = 16;
 
-pub(super) fn read(root: Node<'_, '_>) -> Result<HashSet<NodeId>, EngineError> {
+pub(super) fn read(root: Node<'_, '_>, forced: bool) -> Result<HashSet<NodeId>, EngineError> {
     let mut excluded = HashSet::new();
     let mut clock = None;
     for node in root.descendants().filter(Node::is_element) {
@@ -38,7 +38,7 @@ pub(super) fn read(root: Node<'_, '_>) -> Result<HashSet<NodeId>, EngineError> {
             }
             _ => return Err(unsupported("unsupported TTML conditional target")),
         };
-        let included = evaluate(condition)?;
+        let included = evaluate(condition, forced)?;
         if included && !is_set {
             continue;
         }
@@ -79,11 +79,14 @@ fn validate_set(node: Node<'_, '_>) -> Result<(), EngineError> {
     }
 }
 
-fn evaluate(expression: &str) -> Result<bool, EngineError> {
+fn evaluate(expression: &str, forced: bool) -> Result<bool, EngineError> {
     if expression.len() > MAX_EXPRESSION_BYTES {
         return Err(limited("TTML condition exceeds its expression byte budget"));
     }
-    let mut parser = Parser { rest: expression };
+    let mut parser = Parser {
+        rest: expression,
+        forced,
+    };
     let value = parser.expression(1, 0)?;
     if !parser.rest.trim_ascii().is_empty() {
         return Err(malformed());
@@ -97,6 +100,7 @@ fn malformed() -> EngineError {
 
 struct Parser<'a> {
     rest: &'a str,
+    forced: bool,
 }
 
 impl Parser<'_> {
@@ -149,7 +153,7 @@ impl Parser<'_> {
         }
         if self.take("parameter(") {
             return match self.argument()? {
-                "forced" => Ok(false), // The EPUB APIs use ordinary subtitle playback.
+                "forced" => Ok(self.forced),
                 "mediaAspectRatio" | "mediaLanguage" | "userLanguage" => Err(unsupported(
                     "TTML condition parameter has no EPUB playback binding",
                 )),

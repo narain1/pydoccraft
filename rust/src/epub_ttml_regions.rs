@@ -258,11 +258,11 @@ struct RegionWork {
     declaration_bytes: usize,
 }
 
-pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
+pub(super) fn read<'n>(root: Node<'n, '_>, forced: bool) -> Result<Regions<'n>, EngineError> {
     if !root.has_tag_name((TT, "tt")) {
         return Err(invalid("missing TTML tt root"));
     }
-    let excluded = ttml_condition::read(root)?;
+    let excluded = ttml_condition::read(root, forced)?;
     let viewport = Viewport::new(root)?;
     let mut initial = RegionPatch::default();
     let mut definitions = Vec::new();

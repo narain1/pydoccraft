@@ -195,6 +195,7 @@
 - [x] Bind inline TTML region sets to their owning division or paragraph and preserve inherited layout through caption and video seeks.
 - [x] Project contiguous named-region span groups in unassigned TTML paragraphs with independent lexical layout, timing and video synchronization.
 - [x] Evaluate bounded TTML boolean forced-parameter conditions and preserve explicit timing for omitted content in captions and video.
+- [x] Expose opt-in TTML forced-subtitle mode for standalone and synchronized captions, preserving the ordinary staged validation and exact presentation clock.
 - [x] Apply local normal-play-time fragments to embedded audio, video and synchronized captions.
 - [x] Crop local video spatial fragments in pixel and percent units, including when combined with timed audio and captions.
 - [x] Resolve repeated named track fragments for WebM and Ogg and keep the selected picture and soundtrack on one presentation clock.

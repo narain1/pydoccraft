@@ -41,6 +41,8 @@ Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX and EPU
 
 For an open EPUB, `document.read_epub_resource(path, offset=0, length=None)` reads a local resource by its decoded archive path. The manifest in `document.metadata["manifest"]` lists paths, media types and resource properties. `document.epub_media_cues(page)` returns the chapter's ordered SMIL audio and text cues. `document.edit_epub_metadata(title=..., description=...)` and `document.edit_epub_chapters({page: markup})` return new EPUB bytes with the requested changes. `document.edit_epub_structure(order, resources=...)` reorders, inserts or removes entries in the reading order and can add or replace packaged resources. See [EPUB authoring](authoring.md#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased).
 
+For a selected TTML caption track, pass `ttml_forced=True` to `document.epub_embedded_text` or `document.epub_embedded_video` to enable authored forced-subtitle conditions. Both methods default to ordinary subtitle playback.
+
 `document.epub_narration(page, skip_roles=())` yields `EpubNarrationCue` values in playback order. Each value identifies a chapter path, element fragment, and inherited roles. Recorded cues carry an `EpubAudioClip` with signed 16-bit PCM WAVE bytes and sample geometry. Text-only cues carry the target's readable text.
 
 To resume at a chapter's navigation destination, pass the decoded element ID as `start_fragment` to either narration method. Use the destination's spine page and its `fragment` value from `document.metadata["navigation"]`. A SMIL sequence target starts at the first cue within the sequence on that page. For a position in `epub_media_cues(page)`, pass the zero-based `start_cue` instead.
