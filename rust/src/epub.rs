@@ -19,6 +19,9 @@ use crate::{
 pub(crate) mod audio;
 #[path = "epub_bidi.rs"]
 mod bidi;
+#[cfg(feature = "python")]
+#[path = "epub_caption_paint.rs"]
+pub(crate) mod caption_paint;
 #[path = "epub_content.rs"]
 mod content;
 #[path = "epub_css.rs"]

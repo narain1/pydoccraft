@@ -490,6 +490,25 @@ impl NativeEpubVideo {
 }
 
 #[pyfunction]
+fn _epub_caption_overlay(
+    py: Python<'_>,
+    size: (u32, u32),
+    paint: crate::epub::caption_paint::Paint,
+    runs: Vec<crate::epub::caption_paint::Run>,
+) -> Result<Vec<u8>, EngineError> {
+    py.allow_threads(|| crate::epub::caption_paint::overlay(size, paint, runs))
+}
+
+#[pyfunction]
+fn _epub_caption_composite(
+    py: Python<'_>,
+    rgb: &[u8],
+    overlay: &[u8],
+) -> Result<Vec<u8>, EngineError> {
+    py.allow_threads(|| crate::epub::caption_paint::composite(rgb, overlay))
+}
+
+#[pyfunction]
 #[pyo3(signature = (data, path, media, start, end, video_track=None, fragment_tracks=None))]
 #[allow(clippy::too_many_arguments)]
 fn _open_epub_video(
@@ -772,6 +791,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_epub_resource, module)?)?;
     module.add_function(wrap_pyfunction!(_open_epub_audio, module)?)?;
     module.add_function(wrap_pyfunction!(_open_epub_video, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_caption_overlay, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_caption_composite, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_webm_chapter, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_mp4_chapter, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_text_track, module)?)?;

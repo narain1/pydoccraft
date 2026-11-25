@@ -7549,6 +7549,93 @@ Inherited
             self.assertEqual(audio.region_layout, doc_ex.EpubTextRegion("port:é", width_percent=40, scroll="up"))
             self.assertEqual(audio.runs[0].style.font_style, "normal")
 
+    def test_webvtt_stationary_region_paints_clipped_rgb_and_preserves_the_caption_clock(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-vp9.webm").read_bytes()
+        vtt = """WEBVTT
+
+STYLE
+::cue-region(#plate) {{ background-color: #c85028; opacity: 0.5; }}
+::cue {{ color: {color}; background-color: transparent; }}
+
+REGION
+id:plate width:50% lines:1 regionanchor:0%,0% viewportanchor:10%,20%{scroll}
+
+00:00.100 --> 00:00.425 region:plate align:left
+<b>MM MM</b>{extra}
+"""
+        tracks = {
+            "paint": vtt.format(color="#00ff00", scroll="", extra=""),
+            "plate": vtt.format(color="transparent", scroll="", extra=""),
+            "clip": vtt.format(color="#00ff00", scroll="", extra="\n<i>Below the region</i>"),
+            "scroll": vtt.format(color="#00ff00", scroll=" scroll:up", extra=""),
+            "spaces": vtt.format(color="#00ff00", scroll="", extra="").replace(
+                "<b>MM MM</b>", "<b>\t MM <c.red> \t </c>MM \t</b>",
+            ),
+        }
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Caption paint</title></head>
+          <body><video src="clip.webm#t=0.075,0.470&amp;xywh=pixel:2,0,60,50">
+          <track src="paint.vtt" kind="captions" srclang="en"/>
+          <track src="plate.vtt" kind="captions" srclang="en"/>
+          <track src="clip.vtt" kind="captions" srclang="en"/>
+          <track src="scroll.vtt" kind="captions" srclang="en"/>
+          <track src="spaces.vtt" kind="captions" srclang="en"/>
+          </video></body></html>"""
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Caption paint", chapter, "OEBPS/paint.xhtml")],
+                resources={
+                    "OEBPS/clip.webm": doc_ex.EpubResource("video/webm", video),
+                    **{f"OEBPS/{name}.vtt": doc_ex.EpubResource("text/vtt", track.encode())
+                       for name, track in tracks.items()},
+                },
+            )
+        with doc_ex.open(data) as book:
+            raw = list(book.epub_embedded_video(0, 0, text_track=0))
+            painted = list(book.epub_embedded_video(0, 0, text_track=0, paint_captions=True))
+            plate = list(book.epub_embedded_video(0, 0, text_track=1, paint_captions=True))
+            clipped = list(book.epub_embedded_video(0, 0, text_track=2, paint_captions=True))
+            spaces = list(book.epub_embedded_video(0, 0, text_track=4, paint_captions=True))
+            self.assertEqual([(f.start_us, f.duration_us) for f in raw], [
+                (75_000, 25_000), (100_000, 43_000), (143_000, 143_000),
+                (286_000, 139_000), (425_000, 4_000), (429_000, 41_000),
+            ])
+            self.assertEqual(
+                [(f.start_us, f.duration_us, f.text_cues) for f in painted],
+                [(f.start_us, f.duration_us, f.text_cues) for f in raw],
+            )
+            self.assertEqual(painted[1].text_cues[0].runs[0].style.color, (0, 255, 0, 255))
+            self.assertTrue(all((f.width, f.height) == (60, 50) for f in painted))
+            self.assertEqual([f.rgb for f in clipped], [f.rgb for f in painted])
+            self.assertEqual([f.rgb for f in spaces], [f.rgb for f in painted])
+            self.assertNotEqual(spaces[1].text_cues[0].text, painted[1].text_cues[0].text)
+            for base, output, empty in zip(raw, painted, plate, strict=True):
+                if not base.text_cues:
+                    self.assertEqual(output.rgb, base.rgb)
+                    self.assertEqual(empty.rgb, base.rgb)
+                    continue
+                # 50%-wide region at (10%, 20%), one 6vh line, 50%-opaque
+                # RGB(200, 80, 40) backdrop over the independently decoded video.
+                expected = bytearray(base.rgb)
+                glyphs = bytearray(output.rgb)
+                for y in range(10, 13):
+                    for x in range(6, 36):
+                        offset = 3 * (60 * y + x)
+                        for channel, foreground in enumerate((100, 40, 20)):
+                            expected[offset + channel] = foreground + (base.rgb[offset + channel] * 127 + 127) // 255
+                        glyphs[offset:offset + 3] = expected[offset:offset + 3]
+                self.assertEqual(empty.rgb, expected)
+                self.assertEqual(glyphs, expected)
+                self.assertNotEqual(output.rgb, empty.rgb)
+            seek, = book.epub_embedded_video(
+                0, 0, start_us=110_000, end_us=130_000, text_track=0, paint_captions=True,
+            )
+            self.assertEqual((seek.start_us, seek.duration_us, seek.rgb), (110_000, 20_000, painted[1].rgb))
+            self.assertEqual(book.epub_embedded_text(0, 0, track_index=3)[0].region_layout.scroll, "up")
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "stationary WebVTT region"):
+                list(book.epub_embedded_video(0, 0, text_track=3, paint_captions=True))
+            with self.assertRaisesRegex(ValueError, "requires a selected text track"):
+                list(book.epub_embedded_video(0, 0, paint_captions=True))
+
     def test_webvtt_region_layout_limits_block_bytes_identifiers_and_lines(self) -> None:
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Caption regions</title></head>
           <body><video><track src="style.vtt" kind="captions" srclang="en"/></video></body></html>'''

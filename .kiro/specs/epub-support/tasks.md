@@ -237,7 +237,8 @@
 - [x] Evaluate conditions on supported TTML timed text and region sets while preserving their owner clocks, sequential region placement and synchronized style restores.
 - [x] Keep conditional TTML mixed-region paragraphs on the ordinary cue timeline when all scoped elements are active.
 - [x] Preserve timed omissions in mixed-region TTML, retain region order for visible cues, and validate region grouping independently in ordinary and forced playback.
-- [ ] Support WebVTT region scrolling, additional TTML condition contexts and conditional layout, interleaved or ambiguous region ownership, and advanced TTML animation, additional TTML typography and subtitle painting.
+- [x] Opt in to painting one stationary WebVTT region cue over the cropped video RGB with authored styles, clipping and seek parity.
+- [ ] Support WebVTT region scrolling and painting with simultaneous cues, additional TTML condition contexts and conditional layout, interleaved or ambiguous region ownership, advanced TTML animation, additional TTML typography and TTML subtitle painting.
 - [ ] Support more media fragment track combinations and ID fragments in additional containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources. Use staged explicit XHTML titles in generated fallback navigation labels. Protect referenced package IDs when an occurrence leaves the spine.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.

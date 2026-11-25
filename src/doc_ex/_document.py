@@ -106,6 +106,72 @@ class _EpubTextTimeline:
         yield start, end, self._visible
 
 
+class _EpubCaptionPainter:
+    def __init__(self) -> None:
+        self._cue: EpubTextCue | None = None
+        self._size = (0, 0)
+        self._overlay = b""
+        self._raster_pixels = 0
+
+    def frame(
+        self, pixels: bytes, size: tuple[int, int], aspect: tuple[int, int], cues: tuple[EpubTextCue, ...],
+    ) -> bytes:
+        from . import _core, _native
+        from .errors import UnsupportedFormatError
+
+        if not cues:
+            return pixels
+        if len(cues) != 1:
+            raise UnsupportedFormatError("EPUB caption painting requires one active region cue")
+        if aspect[0] != aspect[1]:
+            raise UnsupportedFormatError("EPUB caption painting requires square video pixels")
+        cue = cues[0]
+        if cue is not self._cue or size != self._size:
+            self._overlay = self._prepare(cue, size)
+            self._cue = cue
+            self._size = size
+        if not self._overlay:
+            return pixels
+        return bytes(_native(lambda: _core._epub_caption_composite(pixels, self._overlay)))
+
+    def _prepare(self, cue: EpubTextCue, size: tuple[int, int]) -> bytes:
+        from . import _core, _native
+        from .errors import UnsupportedFormatError
+
+        region = cue.region_layout
+        if region is None or region.scroll is not None:
+            raise UnsupportedFormatError("EPUB caption painting requires a stationary WebVTT region")
+        if region.visibility in {"hidden", "collapse"}:
+            return b""
+        if region.lines > 32:
+            raise UnsafeArchiveError("EPUB caption painting exceeds 32 region lines")
+        align = "center"
+        for setting in (cue.settings or "").split():
+            if setting.startswith("region:"):
+                continue
+            if setting in {"align:center", "align:left", "align:right"}:
+                align = setting.split(":", 1)[1]
+            else:
+                raise UnsupportedFormatError("unsupported EPUB caption painting cue setting")
+        if cue.markup and ("<ruby" in cue.markup or "<rt" in cue.markup):
+            raise UnsupportedFormatError("EPUB caption painting does not support ruby")
+        if any(run.style.overline or run.style.background_color is not None for run in cue.runs):
+            raise UnsupportedFormatError("unsupported EPUB caption painting inline style")
+        runs = [
+            (run.text, run.style.color or (255, 255, 255, 255), run.style.bold,
+             run.style.font_style, run.style.underline, run.style.line_through)
+            for run in cue.runs
+        ]
+        paint = (
+            region.viewport_bounds(*size), region.style.background_color or (0, 0, 0, 204),
+            cue.background_color or (0, 0, 0, 204), region.opacity if region.opacity is not None else 1.0, align,
+        )
+        self._raster_pixels += size[0] * size[1]
+        if self._raster_pixels > 512 * 1024 * 1024:
+            raise UnsafeArchiveError("EPUB caption painting exceeds its playback raster budget")
+        return bytes(_native(lambda: _core._epub_caption_overlay(size, paint, runs)))
+
+
 def _epub_edit_text(value: str, limit: int, label: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{label} must be a string")
@@ -884,8 +950,9 @@ class Document:
         text_track: int | None = None,
         video_track: int | None = None,
         ttml_forced: bool = False,
+        paint_captions: bool = False,
     ) -> Iterator[EpubVideoFrame]:
-        """Read local video frames with authored clips and optional synchronized text cues."""
+        """Read local video frames with synchronized cues and optional WebVTT region painting."""
         from . import _core, _native
         from .errors import UnsupportedFormatError
 
@@ -893,6 +960,12 @@ class Document:
         if embedded.kind != "video":
             raise UnsupportedFormatError("video playback requires an XHTML video element")
         track = None if text_track is None else embedded.tracks[operator.index(text_track)]
+        if paint_captions:
+            if track is None:
+                raise ValueError("EPUB caption painting requires a selected text track")
+            if track.media_type != "text/vtt":
+                raise UnsupportedFormatError("EPUB caption painting requires a WebVTT text track")
+        painter = _EpubCaptionPainter() if paint_captions else None
         selection = _epub_track_index(video_track, "video")
         sources = embedded.sources if source_index is None else (embedded.sources[operator.index(source_index)],)
         ordinal_types = ("video/webm", "video/ogg", "application/ogg")
@@ -945,7 +1018,8 @@ class Document:
             else:
                 for begin, finish, visible in timeline.segments(timestamp, timestamp + duration):
                     self._ensure_open()
-                    yield EpubVideoFrame(pixels, width, height, aspect, begin, finish - begin, visible)
+                    output = pixels if painter is None else painter.frame(pixels, (width, height), aspect, visible)
+                    yield EpubVideoFrame(output, width, height, aspect, begin, finish - begin, visible)
 
     def epub_media_cues(self, page: int) -> list[dict[str, Any]]:
         """Return SMIL cues for a spine page, in playback order."""

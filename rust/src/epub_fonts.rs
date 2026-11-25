@@ -137,6 +137,66 @@ impl Fonts {
         }
     }
 
+    #[cfg(feature = "python")]
+    pub(super) fn shape_caption(
+        &mut self,
+        text: &str,
+        runs: &[super::caption_paint::Run],
+        size: f32,
+        line_height: f32,
+        align: Alignment,
+    ) -> Result<Text, EngineError> {
+        let mut builder = self
+            .layout
+            .ranged_builder(&mut self.fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontSize(size));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(line_height)));
+        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
+            "Source Sans 3".into(),
+        )));
+        let mut start = 0;
+        for (value, color, bold, slant, underline, strike) in runs {
+            if value.is_empty() {
+                continue;
+            }
+            let end = start + value.len();
+            let range = start..end;
+            start = end;
+            let font_style = match slant.as_str() {
+                "normal" => FontStyle::Normal,
+                "italic" => FontStyle::Italic,
+                "oblique" => FontStyle::Oblique(None),
+                _ => return Err(invalid("invalid EPUB caption font style")),
+            };
+            builder.push(StyleProperty::FontStyle(font_style), range.clone());
+            builder.push(
+                StyleProperty::FontWeight(if *bold {
+                    FontWeight::BOLD
+                } else {
+                    FontWeight::NORMAL
+                }),
+                range.clone(),
+            );
+            builder.push(StyleProperty::Underline(*underline), range.clone());
+            builder.push(StyleProperty::Strikethrough(*strike), range.clone());
+            builder.push(
+                StyleProperty::Brush(Brush {
+                    rgba: *color,
+                    oblique: None,
+                }),
+                range,
+            );
+        }
+        Ok(Text {
+            layout: RefCell::new(builder.build(text)),
+            face_upright: self.face_upright.clone(),
+            search_text: None,
+            align,
+            inline: Vec::new(),
+            navigation: super::layout::InlineNavigation::default(),
+        })
+    }
+
     pub(super) fn load(
         faces: &[Face],
         styles: &Styles,
@@ -984,6 +1044,27 @@ pub(super) struct Text {
 }
 
 impl Text {
+    #[cfg(feature = "python")]
+    pub(super) fn caption_backgrounds(&self, area: Rect) -> Vec<Rect> {
+        let mut layout = self.layout.borrow_mut();
+        layout.set_alignment(self.align, AlignmentOptions::default());
+        layout
+            .lines()
+            .filter_map(|line| {
+                let metrics = line.metrics();
+                let width = metrics.inline_max_coord - metrics.inline_min_coord;
+                (width > 0.0).then(|| {
+                    Rect::new(
+                        area.x + metrics.offset + metrics.inline_min_coord,
+                        area.y + metrics.block_min_coord,
+                        width,
+                        metrics.line_height,
+                    )
+                })
+            })
+            .collect()
+    }
+
     pub(super) fn intrinsic_width(&self, minimum: bool) -> f32 {
         let widths = self.layout.borrow().calculate_content_widths();
         if minimum {
