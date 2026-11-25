@@ -139,6 +139,7 @@
 - [x] Resolve nested MathML relative widths inside a span whose aggregate width is forced by a definite unlabeled parent table, including mixed intrinsic and fitted tracks and grids within editable operands.
 - [x] Pass definite containing widths through vertical-only MathML padding, including inside independently sized grids used as editable equation operands.
 - [x] Resolve nested relative MathML widths in the sole fitted data track of a definite-width, non-overlap labeled grid with fixed remaining tracks and independent native label equations.
+- [x] Resolve nested relative MathML widths in multiple fitted or equal data tracks and spans with a definite remaining width after independent labels and fixed outside tracks.
 - [x] Resolve a labeled fitted track when a label uses one independently measured height or depth padding box with equal preview and editable widths.
 - [x] Resolve a labeled fitted track from a single label padding box with an absolute width and a representable nonnegative leading inset. Reject changes to its native editable geometry.
 - [ ] Resolve other relative widths when equation operands, label-dependent tracks or other intrinsically sized containers acquire an independent width after measurement.

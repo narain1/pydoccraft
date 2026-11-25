@@ -387,16 +387,17 @@ pub(super) fn project<'xml>(
         em,
         enclosing_em,
     };
-    // Measure labels only when a nested table needs the independently
-    // resolvable fitted width. All other grids keep their normal projection.
-    let measured_fit = grid.labeled_fit_column().filter(|&column| {
-        placements
-            .iter()
-            .any(|cell| cell.columns.contains(&column) && has_relative_widths(cell.node))
-    });
+    // Fitted tracks fill a definite table after reserving the labels.
+    // Measure those labels early only when a nested grid needs that space.
+    let measure_labels = grid.width.is_some()
+        && grid.labels.as_ref().is_some_and(|labels| !labels.overlap)
+        && grid.column_widths.contains(&ColumnWidth::Fit)
+        && placements.iter().any(|cell| {
+            grid.uses_labeled_track_total(&cell.columns) && has_relative_widths(cell.node)
+        });
     let mut measured_labels = Vec::new();
     let track_total = match &grid.labels {
-        Some(labels) if measured_fit.is_some() => {
+        Some(labels) if measure_labels => {
             let mut label_width = 0.0f32;
             for cell in placements.iter().filter(|cell| cell.columns.is_empty()) {
                 let prior_boxes = projection.extras.box_count();
@@ -933,20 +934,22 @@ impl Table {
         Ok(())
     }
 
-    fn labeled_fit_column(&self) -> Option<usize> {
-        let labels = self.labels.as_ref()?;
-        if labels.overlap || self.equal_columns || self.width.is_none() {
-            return None;
+    fn uses_labeled_track_total(&self, span: &Range<usize>) -> bool {
+        if span.is_empty() {
+            return false;
         }
-        let fit = self
-            .column_widths
+        let widths = &self.column_widths;
+        if self.equal_columns {
+            return widths.iter().all(|width| width.fixed().is_none());
+        }
+        widths[span.clone()]
             .iter()
-            .position(|width| *width == ColumnWidth::Fit)?;
-        self.column_widths
-            .iter()
-            .enumerate()
-            .all(|(column, width)| column == fit || width.fixed().is_some())
-            .then_some(fit)
+            .any(|width| width.fixed().is_none())
+            && (!widths.contains(&ColumnWidth::Auto)
+                || widths[..span.start]
+                    .iter()
+                    .chain(&widths[span.end..])
+                    .all(|width| width.fixed().is_some()))
     }
 
     fn declared_track_width(&self, label_inset: f32) -> Result<Option<f32>, EngineError> {

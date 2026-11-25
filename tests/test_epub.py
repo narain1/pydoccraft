@@ -15645,6 +15645,101 @@ Resume
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                         operation()
 
+    def test_mathml_labeled_fitted_tracks_resolve_independent_nested_widths(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Relative MathML widths in labeled fit tracks</title>
+            <meta name="viewport" content="width=620,height=330"/>
+            <style>body {margin:0} .wide {font-size:14pt}</style>
+          </head><body><p><m:math mathsize="12pt">
+            <m:mtable width="380pt" OUTER columnspacing="8pt" side="left"
+                minlabelspacing="6pt" columnalign="left">
+              <m:mlabeledtr>
+                <m:mtd><m:mtext>Tiny</m:mtext></m:mtd><m:mtd><m:mtext>Guard</m:mtext></m:mtd>
+                <m:mtd SPAN><m:mrow><m:mtable width="INNER" columnwidth="50% fit"
+                    columnspacing="4pt" columnalign="left">
+                  <m:mtr><m:mtd><m:mtext mathsize="9pt">Near</m:mtext></m:mtd><m:mtd><m:mtext mathsize="9pt">Far</m:mtext></m:mtd></m:mtr>
+                </m:mtable><m:mtext>Tail</m:mtext></m:mrow></m:mtd>
+                LAST
+              </m:mlabeledtr>
+              <m:mlabeledtr>
+                <m:mtd><m:mtext class="wide">LongTag</m:mtext></m:mtd>
+                <m:mtd><m:mtext>Below</m:mtext></m:mtd><m:mtd><m:mtext>Joint</m:mtext></m:mtd>
+                <m:mtd><m:mtext>Edge</m:mtext></m:mtd>
+              </m:mlabeledtr>
+            </m:mtable>
+          </m:math></p></body></html>"""
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        terms = ("Tiny", "LongTag", "Guard", "Below", "Joint", "Edge", "Near", "Far", "Tail")
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 620, 330)])
+
+        def chapter(columns, span, relative):
+            last = "<m:mtd/>" if span == 1 else ""
+            return (source.replace("OUTER", columns)
+                    .replace("SPAN", f'columnspan="{span}"')
+                    .replace("LAST", last)
+                    .replace("INNER", relative))
+
+        def boxes(pdf):
+            result = {}
+            for term in terms:
+                result[term], = pdf[0].search_for(term)
+            return result
+
+        def sample(chapter, inner):
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                preview = book.render_page(0, dpi=96)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    self.assertFalse(pdf[0].get_images())
+                    vector = boxes(pdf)
+                    self.assertAlmostEqual(vector["Far"][0] - vector["Near"][0], inner / 2 + 4, delta=0.002)
+                    self.assertAlmostEqual(vector["Tail"][0] - vector["Near"][0], inner, delta=0.002)
+                editable = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            matrix = xml.find(".//m:oMath//m:m", ns)
+            self.assertIsNotNone(matrix)
+            self.assertIsNotNone(matrix.find(".//m:m", ns))
+            runs = [run.text for run in matrix.findall(".//m:r/m:t", ns)]
+            with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                native = boxes(pdf)
+                for term in terms:
+                    self.assertEqual(runs.count(term), 1)
+                    self.assertEqual(word[0].get_text().count(term), 1)
+                    for expected, actual in zip(vector[term], native[term]):
+                        self.assertAlmostEqual(expected, actual, delta=0.40)
+            with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter})) as book:
+                fixed = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), fixed)
+                    fixed_vector = boxes(pdf)
+            return preview, fixed, vector, native, fixed_vector
+
+        # Measure the author-styled label independently of the relative
+        # equation. Its width is reserved on both sides of the data tracks.
+        probe = chapter('columnwidth="46pt fit fit"', 1, "48pt")
+        with doc_ex.open(epub_fixture(chapter_one=probe)) as book, doc_ex.open(book.convert("pdf")) as pdf:
+            label, = pdf[0].search_for("LongTag")
+        tracks = 380 - 2 * (label[2] - label[0] + 6) - 16
+        for columns, span, relative, inner in (
+            ('columnwidth="46pt fit fit"', 1, "50%", (tracks - 46) / 4),
+            ('columnwidth="fit auto auto" equalcolumns="true"', 1, "0.5", tracks / 6),
+            ('columnwidth="46pt auto fit"', 2, "50%", (tracks - 46 + 8) / 2),
+        ):
+            with self.subTest(columns=columns, span=span):
+                control = sample(chapter(columns, span, f"{inner:.6f}pt"), inner)
+                resolved = sample(chapter(columns, span, relative), inner)
+                self.assertEqual(resolved[:2], control[:2])
+                for expected_geometry, actual_geometry in zip(control[2:], resolved[2:]):
+                    for term in terms:
+                        for expected, actual in zip(expected_geometry[term], actual_geometry[term]):
+                            self.assertAlmostEqual(expected, actual, delta=0.002)
+
+        ambiguous = chapter('columnwidth="46pt auto fit"', 1, "50%")
+        with doc_ex.open(epub_fixture(chapter_one=ambiguous)) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing line width"):
+                    operation()
+
     def test_mathml_labeled_fit_measures_a_vertically_padded_label(self) -> None:
         source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>MathML padded label and a fitted track</title>
