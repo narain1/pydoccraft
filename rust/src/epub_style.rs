@@ -365,16 +365,8 @@ impl ChapterStyles {
                     y: overflow("overflow-y"),
                 },
                 gap: Size {
-                    height: len(if values.contains_key("row-gap") {
-                        "row-gap"
-                    } else {
-                        "gap"
-                    }),
-                    width: len(if values.contains_key("column-gap") {
-                        "column-gap"
-                    } else {
-                        "gap"
-                    }),
+                    height: len("row-gap"),
+                    width: len("column-gap"),
                 },
                 flex_direction: match value(&values, "flex-direction") {
                     "column" => FlexDirection::Column,

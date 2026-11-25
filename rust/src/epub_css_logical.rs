@@ -57,7 +57,7 @@ fn keyword(value: &str, name: &str) -> bool {
     value.eq_ignore_ascii_case(name)
 }
 
-// Logical longhand, physical LTR and RTL aliases, and its initial value.
+// Box longhand, physical LTR and RTL aliases, and its initial value.
 pub(super) struct Pair(
     pub &'static str,
     &'static str,
@@ -163,6 +163,7 @@ static PAIRS: &[Pair] = &[
         "border-right-width",
         "medium",
     ),
+    Pair("column-gap", "column-gap", "column-gap", "normal"),
     Pair("inline-size", "width", "width", "auto"),
     Pair("inset-block-end", "bottom", "bottom", "auto"),
     Pair("inset-block-start", "top", "top", "auto"),
@@ -182,6 +183,7 @@ static PAIRS: &[Pair] = &[
     Pair("padding-block-start", "padding-top", "padding-top", "0"),
     Pair("padding-inline-end", "padding-right", "padding-left", "0"),
     Pair("padding-inline-start", "padding-left", "padding-right", "0"),
+    Pair("row-gap", "row-gap", "row-gap", "normal"),
 ];
 
 pub(super) fn pair(name: &str) -> Option<&'static Pair> {
@@ -189,6 +191,7 @@ pub(super) fn pair(name: &str) -> Option<&'static Pair> {
         .binary_search_by_key(&name, |pair| pair.0)
         .ok()
         .map(|index| &PAIRS[index])
+        .filter(|pair| pair.0 != pair.1)
 }
 
 pub(super) fn physical_pair(name: &str, flow: Flow) -> Option<&'static Pair> {
@@ -251,6 +254,7 @@ pub(super) fn shorthand(name: &str) -> Option<[&'static str; 2]> {
         "inset-inline" => ["inset-inline-start", "inset-inline-end"],
         "inset-block" => ["inset-block-start", "inset-block-end"],
         "overflow" => ["overflow-x", "overflow-y"],
+        "gap" => ["row-gap", "column-gap"],
         "border-inline-width" => ["border-inline-start-width", "border-inline-end-width"],
         "border-block-width" => ["border-block-start-width", "border-block-end-width"],
         "border-inline-color" => ["border-inline-start-color", "border-inline-end-color"],
@@ -388,6 +392,9 @@ pub(super) fn value_kind(name: &str, value: &str) -> ValueKind {
     let value = value.to_ascii_lowercase();
     let value = value.as_str();
     let classified = |valid| if valid { Supported } else { Invalid };
+    if value == "normal" && matches!(name, "row-gap" | "column-gap") {
+        return Supported;
+    }
     if name.starts_with("overflow-") {
         return classified(matches!(
             value,

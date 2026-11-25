@@ -2967,6 +2967,36 @@ class EpubTests(unittest.TestCase):
                     preview(fallback),
                 )
 
+    def test_css_gap_cascade_and_computed_inheritance(self) -> None:
+        source = fixed_spread_fixture([("", "white", 240, 120)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Box gaps</title>
+          <meta name="viewport" content="width=240,height=120"/><style>
+          html,body,p{margin:0} #holder{position:absolute;left:10px;top:9px;font-size:16px}
+          #grid{display:grid;width:120px;font-size:10px;
+            grid-template-columns:repeat(auto-fill,30px);grid-auto-rows:16px}
+          p{background:#b73337} p:nth-child(2){background:#358348} CSS
+          </style></head><body><div id="holder"><div id="grid">
+          <p>One</p><p>Two</p><p>Three</p><p>Four</p>
+          </div></div></body></html>"""
+
+        def preview(css: str) -> tuple[int, bytes]:
+            chapter = template.replace("CSS", css)
+            with doc_ex.open(rewrite_epub(source, {"OEBPS/s0.xhtml": chapter})) as book:
+                return rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+
+        control = preview("#grid{row-gap:4px;column-gap:16px}")
+        for rules in (
+            "#grid{row-gap:30px;column-gap:0;gap:4px 16px}",
+            "#grid{column-gap:16px!important;gap:4px 30px}",
+            "#grid{gap:4px 30px;column-gap:16px}",
+            "#holder{gap:.25em calc(.25em + 10%)} #grid{gap:inherit}",
+            "#grid{--gaps:4px calc(10% + 4px);gap:var(--gaps)}",
+            "#grid{gap:4px 16px;gap:8px -13px;gap:normal inherit}",
+        ):
+            with self.subTest(rules=rules):
+                self.assertTrue(preview(rules) == control, "resolved gaps changed grid geometry")
+        self.assertTrue(preview("#grid{gap:normal}") != control)
+
     def test_css_grid_intrinsic_and_fit_tracks_in_reflow(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic grid</title>
           <style>body,p{margin:0;font-size:10px}

@@ -434,12 +434,16 @@ impl Cascade {
             }) {
                 return Err(unsupported("unsupported EPUB CSS intrinsic box size"));
             }
-            if pair.is_some()
+            if (pair.is_some() || matches!(name.as_str(), "row-gap" | "column-gap"))
                 && computed.as_deref().is_some_and(|value| {
                     logical::value_kind(name, value) == logical::ValueKind::Unsupported
                 })
             {
-                return Err(unsupported("EPUB logical CSS length expression"));
+                return Err(unsupported(if pair.is_some() {
+                    "EPUB logical CSS length expression"
+                } else {
+                    "EPUB CSS gap length expression"
+                }));
             }
             let computed = if computed.as_deref().is_none_or(css_wide) {
                 let geometry = pair.or_else(|| logical::physical_pair(physical, flow));
@@ -1247,6 +1251,9 @@ fn valid_literal(
             css_wide(value) || grid::valid_auto_tracks(value, components)
         }
         "grid-auto-flow" => css_wide(value) || grid::flow(components).is_some(),
+        "row-gap" | "column-gap" => {
+            css_wide(value) || logical::value_kind(name, value) != logical::ValueKind::Invalid
+        }
         _ if grid::is_placement(name) => css_wide(value) || grid::valid_placement(components),
         "font-family" => font_family_value(components).is_some(),
         "font-variation-settings" => axis_value(components).is_some(),
@@ -1333,7 +1340,7 @@ fn expand(name: &str, value: &str) -> Vec<(String, String)> {
     }
     if let Some(names) = logical::shorthand(name) {
         let pieces = value_components(value);
-        if logical::pair(names[0]).is_some()
+        if (logical::pair(names[0]).is_some() || name == "gap")
             && !(pieces.len() == 1 && css_wide(pieces[0]))
             && !pieces
                 .iter()
