@@ -10304,6 +10304,98 @@ Resume
                 with self.assertRaises(ValueError):
                     list(document.epub_narration(0, chunk_frames=frames))
 
+    def test_media_overlay_navigation_starts_at_decoded_sequence_target(self) -> None:
+        source, wav = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</manifest>",
+                b'<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+                b'<item id="intro" href="Media/intro.flac" media-type="audio/flac"/></manifest>',
+            )
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Media/intro.flac": b"fLaC",
+            "OEBPS/nav.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head>
+                <body><nav epub:type="toc"><ol>
+                <li><a href="one.xhtml#caf%C3%A9-section">First section</a></li>
+                <li><a href="two.xhtml#caf%C3%A9-section">Second section</a></li>
+                </ol></nav></body></html>""",
+            "OEBPS/one.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+                <p id="intro">Earlier sound</p>
+                <section id="café-section"><div id="recording"><p id="spoken">Recorded text</p></div>
+                  <p id="aside">Text cue</p></section>
+                <p id="after">Following text</p></body></html>""",
+            "OEBPS/two.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+                <section id="café-section"><p id="spoken">Other chapter</p></section></body></html>""",
+            "OEBPS/Sync/read.smil": """<smil xmlns="http://www.w3.org/ns/SMIL"
+                xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body>
+                <par><text src="../one.xhtml#intro"/><audio src="../Media/intro.flac" clipEnd="1s"/></par>
+                <seq epub:textref="../one.xhtml#caf%C3%A9-section" epub:type="chapter">
+                  <seq epub:textref="../one.xhtml#recording" epub:type="section">
+                    <par id="recorded"><text src="../one.xhtml#spoken"/>
+                      <audio src="../Media/voice.wav" clipBegin="750ms" clipEnd="850ms"/></par>
+                  </seq>
+                  <par epub:type="aside"><text src="../one.xhtml#aside"/></par>
+                </seq>
+                <par><text src="../one.xhtml#after"/></par>
+                <seq epub:textref="../two.xhtml#caf%C3%A9-section">
+                  <par><text src="../two.xhtml#spoken"/></par>
+                </seq></body></smil>""",
+        })
+        with doc_ex.open(source) as document:
+            toc = document.metadata["navigation"][0]["items"]
+            self.assertEqual([(item["path"], item["fragment"]) for item in toc], [
+                ("OEBPS/one.xhtml", "café-section"), ("OEBPS/two.xhtml", "café-section"),
+            ])
+            self.assertEqual(
+                [cue["text"]["fragment"] for cue in document.epub_media_cues(0)],
+                ["intro", "spoken", "aside", "after"],
+            )
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                next(document.epub_narration(0))
+            sought = list(document.epub_narration(0, start_fragment=toc[0]["fragment"]))
+            self.assertEqual(sought, list(document.epub_narration(0, start_cue=1)))
+            self.assertEqual([(cue.fragment, cue.roles) for cue in sought], [
+                ("spoken", ("chapter", "section")), ("aside", ("chapter", "aside")), ("after", ()),
+            ])
+            self.assertEqual(
+                list(document.epub_narration(0, start_fragment="aside", skip_roles={"aside"})), sought[-1:],
+            )
+            [other] = document.epub_narration(-1, start_fragment=toc[1]["fragment"])
+            self.assertEqual(
+                (other.path, other.fragment, other.text),
+                ("OEBPS/two.xhtml", "spoken", "Other chapter"),
+            )
+
+            chunks: list[doc_ex.EpubAudioClip] = []
+            spoken: list[str] = []
+            targets: list[str | None] = []
+            document.play_epub_narration(
+                0, start_fragment=toc[0]["fragment"], skip_roles={"aside"}, chunk_frames=251,
+                play_audio=chunks.append, speak_text=spoken.append,
+                on_cue=lambda cue: targets.append(cue.fragment if cue else None),
+            )
+            self.assertEqual(targets, ["spoken", None, "after", None])
+            self.assertEqual(spoken, ["Following text"])
+            self.assertEqual([chunk.frame_count for chunk in chunks], [251, 251, 251, 47])
+            samples = bytearray()
+            for chunk in chunks:
+                with wave.open(io.BytesIO(chunk.wave), "rb") as pcm:
+                    samples.extend(pcm.readframes(chunk.frame_count))
+            with wave.open(io.BytesIO(wav), "rb") as control:
+                control.setpos(6000)
+                reference = b"".join(struct.pack("<h", (sample - 128) * 256) for sample in control.readframes(800))
+            self.assertEqual(samples, reference)
+            with self.assertRaisesRegex(IndexError, "target is absent"):
+                list(document.epub_narration(1, start_fragment="aside"))
+            with self.assertRaisesRegex(ValueError, "start_cue"):
+                list(document.epub_narration(0, start_fragment="spoken", start_cue=1))
+            with self.assertRaisesRegex(ValueError, "nonempty"):
+                list(document.epub_narration(0, start_fragment=""))
+        with doc_ex.open(epub_fixture()) as document, self.assertRaisesRegex(IndexError, "target is absent"):
+            list(document.epub_narration(0, start_fragment="chapter"))
+
     def test_media_overlay_streams_long_cue_with_one_active_target(self) -> None:
         source, _ = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:

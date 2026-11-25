@@ -1572,3 +1572,9 @@ The installed baseline rejected spot light markup. Standalone and inline fixed-l
 A specular cone composited inside SourceAlpha retains the illuminated Unicode label, its search rectangle, link and authored tspan destination. An off-cone label in the same text leaf disappears from PDF text and annotations. The test retains the refusal of direct generated-light attribution and rejects an invalid cone, focus exponent, coincident aim, nonfinite positions and an excessive transformed aim.
 
 The Linux CPython 3.11 release wheel passed 64 SVG-related EPUB tests. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, and the task roadmap check passed. [SVG spot lighting](https://www.w3.org/TR/SVG11/filters.html#feSpotLightElement)
+
+## 2026-11-25 Narration navigation by fragment
+
+The previous Python facade on the same native extension rejects `start_fragment`. The installed regression follows percent-encoded XHTML navigation targets on two chapters that share one SMIL document and reuse the same fragment ID. It starts at the first descendant of the addressed sequence, bypasses an earlier unsupported audio resource, and retains inherited roles and later cues in playback order. The blocking callbacks keep the active target across four independent PCM chunks. The combined 800 samples match the corresponding source WAVE interval byte for byte after conversion to signed 16-bit PCM.
+
+Six focused installed EPUB tests passed. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, strict installed public typing and the roadmap check passed. The Linux x86-64 CPython 3.11 wheel was 25,993,341 bytes and its uncompressed extension was 60,487,176 bytes. The change uses the existing pinned dependency graph. [EPUB reading system navigation](https://www.w3.org/TR/epub-rs-33/#sec-rsconf-navigation)

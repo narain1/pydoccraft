@@ -942,7 +942,9 @@ class Document:
         """Return SMIL cues for a spine page, in playback order."""
         return [cue for cue, _ in self._epub_cues(page)]
 
-    def _epub_cues(self, page: int) -> Iterator[tuple[dict[str, Any], tuple[str, ...]]]:
+    def _epub_cues(
+        self, page: int, *, start_fragment: str | None = None,
+    ) -> Iterator[tuple[dict[str, Any], tuple[str, ...]]]:
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError
@@ -951,15 +953,21 @@ class Document:
         index = operator.index(page)
         chapter = self.load_page(index).metadata
         overlay_id = chapter.get("media_overlay")
-        if overlay_id is None:
-            return
-        overlay = self.metadata["media_overlays"][overlay_id]
-        stack: list[tuple[dict[str, Any], tuple[str, ...]]] = [(overlay["body"], ())]
+        started = start_fragment is None
+        chapter_path = chapter["chapter_path"]
+        stack: list[tuple[dict[str, Any], tuple[str, ...], bool]] = []
+        if overlay_id is not None:
+            overlay = self.metadata["media_overlays"][overlay_id]
+            stack.append((overlay["body"], (), False))
         while stack:
-            node, parent_roles = stack.pop()
+            node, parent_roles, within_target = stack.pop()
             roles = (*parent_roles, *(node.get("epub_type") or "").split())
+            target = node.get("text")
+            if not started and not within_target and target is not None:
+                within_target = target["path"] == chapter_path and target["fragment"] == start_fragment
             if node["kind"] == "par":
-                if node["text"]["path"] == chapter["chapter_path"]:
+                if (started or within_target) and node["text"]["path"] == chapter_path:
+                    started = True
                     yield {
                         "id": node["id"],
                         "text": dict(node["text"]),
@@ -967,13 +975,16 @@ class Document:
                         "epub_type": node["epub_type"],
                     }, roles
             else:
-                stack.extend((child, roles) for child in reversed(node["children"]))
+                stack.extend((child, roles, within_target) for child in reversed(node["children"]))
+        if not started:
+            raise IndexError("EPUB narration target is absent on this page")
 
     def _epub_narration_groups(
         self,
         page: int,
         skip_roles: Iterable[str],
         start_cue: int,
+        start_fragment: str | None,
         chunk_frames: int | None,
         opus_tracks: Mapping[str, int] | None,
         audio_tracks: Mapping[str, int] | None,
@@ -983,6 +994,13 @@ class Document:
         start_cue = operator.index(start_cue)
         if start_cue < 0:
             raise IndexError("EPUB narration cue index out of range")
+        if start_fragment is not None:
+            if not isinstance(start_fragment, str):
+                raise TypeError("EPUB narration target must be a string")
+            if not start_fragment:
+                raise ValueError("EPUB narration target must be a nonempty fragment ID")
+            if start_cue:
+                raise ValueError("start_fragment requires start_cue to be zero")
         if chunk_frames is not None:
             chunk_frames = _epub_chunk_size(chunk_frames)
         skipped = frozenset(skip_roles)
@@ -991,7 +1009,7 @@ class Document:
         current_track = None
         decoder = None
         found_start = start_cue == 0
-        for index, (cue, roles) in enumerate(self._epub_cues(page)):
+        for index, (cue, roles) in enumerate(self._epub_cues(page, start_fragment=start_fragment)):
             self._ensure_open()
             if index < start_cue:
                 continue
@@ -1062,13 +1080,14 @@ class Document:
         *,
         skip_roles: Iterable[str] = (),
         start_cue: int = 0,
+        start_fragment: str | None = None,
         chunk_frames: int | None = None,
         opus_tracks: Mapping[str, int] | None = None,
         audio_tracks: Mapping[str, int] | None = None,
     ) -> Iterator[EpubNarrationCue]:
-        """Read cues with optional chunking and zero-based Ogg Opus or WebM audio selections."""
+        """Read cues, optionally starting at a cue index or decoded XHTML fragment ID."""
         for group in self._epub_narration_groups(
-            page, skip_roles, start_cue, chunk_frames, opus_tracks, audio_tracks,
+            page, skip_roles, start_cue, start_fragment, chunk_frames, opus_tracks, audio_tracks,
         ):
             yield from group
 
@@ -1081,13 +1100,14 @@ class Document:
         on_cue: Callable[[EpubNarrationCue | None], None] | None = None,
         skip_roles: Iterable[str] = (),
         start_cue: int = 0,
+        start_fragment: str | None = None,
         chunk_frames: int | None = None,
         opus_tracks: Mapping[str, int] | None = None,
         audio_tracks: Mapping[str, int] | None = None,
     ) -> None:
-        """Play cues through blocking sinks with optional Ogg Opus or WebM audio selections."""
+        """Play from a cue index or decoded XHTML fragment ID through blocking sinks."""
         for group in self._epub_narration_groups(
-            page, skip_roles, start_cue, chunk_frames, opus_tracks, audio_tracks,
+            page, skip_roles, start_cue, start_fragment, chunk_frames, opus_tracks, audio_tracks,
         ):
             first = next(group)
             if on_cue is not None:

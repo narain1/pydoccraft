@@ -43,6 +43,8 @@ For an open EPUB, `document.read_epub_resource(path, offset=0, length=None)` rea
 
 `document.epub_narration(page, skip_roles=())` yields `EpubNarrationCue` values in playback order. Each value identifies a chapter path, element fragment, and inherited roles. Recorded cues carry an `EpubAudioClip` with signed 16-bit PCM WAVE bytes and sample geometry. Text-only cues carry the target's readable text.
 
+To resume at a chapter's navigation destination, pass the decoded element ID as `start_fragment` to either narration method. Use the destination's spine page and its `fragment` value from `document.metadata["navigation"]`. A SMIL sequence target starts at the first cue within the sequence on that page. For a position in `epub_media_cues(page)`, pass the zero-based `start_cue` instead.
+
 ```python
 with doc_ex.open(epub_bytes) as book:
     book.play_epub_narration(
