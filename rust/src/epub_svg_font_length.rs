@@ -17,6 +17,9 @@ use crate::{
     EngineError,
 };
 
+#[path = "epub_svg_nested_length.rs"]
+mod nested;
+
 #[path = "epub_svg_font_spacing.rs"]
 mod spacing;
 use spacing::SpacingCheck;
@@ -29,6 +32,7 @@ pub(in crate::epub::svg) struct TextLength {
     id: String,
     temporary_id: bool,
     owners: Vec<LengthOwner>,
+    nested: Option<nested::NestedLength>,
 }
 
 struct LengthOwner {
@@ -92,7 +96,32 @@ pub(super) fn prepare_lengths(
             "EPUB SVG mixed-font textLength with an effect on the text element",
         ));
     }
-    let id_attribute = root.attribute_node("id");
+    let (id, temporary_id) = measurement_id(root, ids, next_id, source, edits)?;
+    let nested = nested::prepare(root, ids, next_id, source, edits)?;
+    let owners = if nested.is_some() {
+        Vec::new()
+    } else {
+        owners
+            .into_iter()
+            .map(|owner| prepare_owner(root, owner, edits))
+            .collect::<Result<_, _>>()?
+    };
+    Ok(TextLength {
+        id,
+        temporary_id,
+        owners,
+        nested,
+    })
+}
+
+fn measurement_id(
+    node: Node<'_, '_>,
+    ids: &HashMap<&str, bool>,
+    next_id: &mut usize,
+    source: &str,
+    edits: &mut Vec<Edit>,
+) -> Result<(String, bool), EngineError> {
+    let id_attribute = node.attribute_node("id");
     let supplied = id_attribute.filter(|value| !value.value().is_empty());
     let temporary_id = supplied.is_none();
     let id = if let Some(supplied) = supplied {
@@ -111,21 +140,13 @@ pub(super) fn prepare_lengths(
             }
         };
         let position = id_attribute.map_or_else(
-            || svg::style_insertion(source.as_bytes(), root),
+            || svg::style_insertion(source.as_bytes(), node),
             |attr| Ok(attr.range()),
         )?;
         edits.push((position, format!(" id=\"{id}\"")));
         id
     };
-    let owners = owners
-        .into_iter()
-        .map(|owner| prepare_owner(root, owner, edits))
-        .collect::<Result<_, _>>()?;
-    Ok(TextLength {
-        id,
-        temporary_id,
-        owners,
-    })
+    Ok((id, temporary_id))
 }
 
 fn prepare_owner(
@@ -152,6 +173,15 @@ fn prepare_owner(
         ));
     }
     let chunk = nested_chunk(root, owner, adjust)?;
+    let target = length_target(owner, edits)?;
+    Ok(LengthOwner {
+        target,
+        adjust,
+        chunk,
+    })
+}
+
+fn length_target(owner: Node<'_, '_>, edits: &mut Vec<Edit>) -> Result<f32, EngineError> {
     let length = owner
         .attribute_node("textLength")
         .ok_or_else(|| invalid("missing SVG textLength"))?;
@@ -171,11 +201,7 @@ fn prepare_owner(
         ));
     }
     edits.push((length.range(), String::new()));
-    Ok(LengthOwner {
-        target,
-        adjust,
-        chunk,
-    })
+    Ok(target)
 }
 
 fn nested_chunk(
@@ -307,6 +333,23 @@ pub(in crate::epub::svg) fn fit_lengths(
         let &(index, text) = measured.get(id).ok_or_else(|| {
             unsupported("EPUB SVG mixed-font textLength source has no native layout")
         })?;
+        if let Some(nested) = &length.nested {
+            let probe = probe_ids
+                .get(&(id, 0))
+                .and_then(|id| probes.get(id.as_str()).copied())
+                .ok_or_else(nested::error)?;
+            let (check, fitted) = nested.fit(node, index, text, probe, source)?;
+            for edit in fitted {
+                charge(
+                    &mut bytes,
+                    edit.1.len(),
+                    XML_BYTES,
+                    "EPUB SVG textLength edits exceed 8 MiB",
+                )?;
+                edits.push(edit);
+            }
+            spacing.push(check);
+        }
         for adjustment in &length.owners {
             let (chunk, start, owner) = if let Some(origin) = adjustment.chunk {
                 if text.chunks().len() != origin.count {
@@ -415,10 +458,9 @@ fn probe_chunks<'a>(
     lengths: &HashMap<&'a str, &TextLength>,
     measure: impl FnOnce(&[u8]) -> Result<usvg::Tree, EngineError>,
 ) -> Result<(Option<usvg::Tree>, ProbeIds<'a>), EngineError> {
-    if !lengths
-        .values()
-        .any(|length| length.owners.iter().any(|owner| owner.chunk.is_some()))
-    {
+    if !lengths.values().any(|length| {
+        length.nested.is_some() || length.owners.iter().any(|owner| owner.chunk.is_some())
+    }) {
         return Ok((None, HashMap::new()));
     }
     let ids: HashSet<_> = root
@@ -444,8 +486,15 @@ fn probe_chunks<'a>(
             range.start - text.range().start..range.end - text.range().start
         };
         let mut replacement = String::new();
-        for origin in length.owners.iter().filter_map(|owner| owner.chunk) {
-            let owner = positioned_owner(text, origin)?;
+        let mut selected = Vec::new();
+        if let Some(nested) = &length.nested {
+            selected.push((0, nested.owner(text)?));
+        } else {
+            for origin in length.owners.iter().filter_map(|owner| owner.chunk) {
+                selected.push((origin.index, positioned_owner(text, origin)?));
+            }
+        }
+        for (index, owner) in selected {
             let probe_id = loop {
                 let id = format!("pydoccraft-svg-spacing-probe-{next_id}");
                 next_id += 1;
@@ -467,7 +516,7 @@ fn probe_chunks<'a>(
                 "EPUB SVG textLength probes exceed 8 MiB",
             )?;
             append(&mut replacement, &copy, XML_BYTES)?;
-            probe_ids.insert((id, origin.index), probe_id);
+            probe_ids.insert((id, index), probe_id);
         }
         if !replacement.is_empty() {
             edits.push((range, replacement));

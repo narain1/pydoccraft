@@ -3617,6 +3617,96 @@ class EpubTests(unittest.TestCase):
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
             render(unsupported, False)
 
+    def test_epub_svg_overlapping_spacing_preserves_a_nested_owner_and_search_geometry(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+        resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
+        fixture = fixed_spread_fixture([("", "white", 278, 108)])
+        labels = ("B\u0301", "é", "B\u0301", "é")
+        colors = ((133, 42, 139), (40, 66, 151), (34, 133, 48), (158, 94, 22))
+        sides = ((162, 32, 34), (35, 124, 112))
+        label = "".join(labels)
+
+        def svg(outer: int | None, inner: int, *, inner_attributes: str = "", kerning: str = "none") -> str:
+            length = f' textLength="{outer}"' if outer is not None else ""
+            before, after = ("", "") if outer is None else tuple(
+                f'<a href="https://example.org/{side}" fill="#{bytes(color).hex()}">B</a>'
+                for side, color in zip(("left", "right"), sides)
+            )
+            own = "".join(f'<tspan fill="#{bytes(rgb).hex()}">{part}</tspan>' for rgb, part in zip(colors, labels))
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 278 108">
+              <style>
+                @font-face {{font-family:Proof;src:url(variable.ttf);unicode-range:U+00E9;
+                             font-variation-settings:"wght" 340}}
+                @font-face {{font-family:Proof;src:url(variable.ttf);unicode-range:U+0042,U+0301;
+                             font-variation-settings:"wght" 760}}
+                text {{font-family:Proof;font-size:34px;font-optical-sizing:none;
+                       font-kerning:{kerning};text-anchor:middle;transform:translate(5 2)}}
+              </style>
+              <a href="#inner"><rect x="7" y="7" width="10" height="10" fill="#216840"/></a>
+              <text x="134" y="70"{length}>{before}<tspan id="inner" textLength="{inner}" {inner_attributes}><a
+                href="https://example.org/inner">{own}</a></tspan>{after}</text></svg>"""
+
+        def render(source: str, inline: bool) -> tuple:
+            if inline:
+                path = "OEBPS/s0.xhtml"
+                authored = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Nested lengths</title>
+                    <meta name="viewport" content="width=278,height=108"/>
+                    <style>body {{margin:0}} svg {{width:278px;height:108px}}</style>
+                    </head><body>{source}</body></html>"""
+                with doc_ex.open(rewrite_epub(fixture, {path: authored})) as book:
+                    data = book.edit_epub_structure([0], resources=resources)
+            else:
+                path, authored = "OEBPS/nested.svg", source
+                with doc_ex.open(epub_fixture()) as book:
+                    data = book.edit_epub_structure(
+                        [doc_ex.EpubSvgChapterSource("Nested lengths", authored, path), 0], resources=resources,
+                    )
+            with doc_ex.open(data) as book:
+                self.assertEqual(book.read_epub_resource(path), authored.encode())
+                width, pixels = preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                output = book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+            with doc_ex.open(output) as pdf, pdf.edit() as edit:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                self.assertIn(label, "".join(pdf[0].get_text().split()))
+                search = tuple(pdf[0].search_for("B\u0301"))
+                self.assertEqual(len(search), 2)
+                links = {link.uri.rsplit("/", 1)[1]: link.bbox for link in pdf[0].get_links()
+                         if link.uri and link.uri.startswith("https://example.org/")}
+                target, = re.findall(rb"/XYZ[ ]+([1-9][0-9.]*)[ ]+([0-9.]+)[ ]+null",
+                                     edit.to_bytes(object_streams=False))
+            painted = [{(offset // 4 % width, offset // 4 // width) for offset in range(0, len(pixels), 4)
+                        if pixels[offset:offset + 4] == bytes((*rgb, 255))}
+                       for rgb in (*colors, *sides)]
+            self.assertTrue(all(painted[:4]))
+            return painted, tuple(search), links, tuple(map(float, target))
+
+        for inline in (False, True):
+            with self.subTest(inline=inline):
+                independent = render(svg(None, 92), inline)
+                original = render(svg(182, 92), inline)
+                self.assertEqual(original[0][:4], independent[0][:4])
+                self.assertEqual(original[1], independent[1])
+                self.assertEqual(original[2]["inner"], independent[2]["inner"])
+                self.assertEqual(original[3], independent[3])
+
+                wider_outer = render(svg(206, 92), inline)
+                self.assertEqual(wider_outer[0][:4], original[0][:4])
+                self.assertEqual(wider_outer[2]["inner"], original[2]["inner"])
+                for index, dx in ((4, -12), (5, 12)):
+                    self.assertEqual({(x + dx, y) for x, y in original[0][index]}, wider_outer[0][index])
+
+                wider_inner = render(svg(182, 116), inline)
+                expanded_control = render(svg(None, 116), inline)
+                self.assertEqual(wider_inner[0][:4], expanded_control[0][:4])
+                self.assertEqual(wider_inner[0][4:], original[0][4:])
+                self.assertEqual(wider_inner[2]["left"], original[2]["left"])
+                self.assertEqual(wider_inner[2]["right"], original[2]["right"])
+
+        for source in (svg(182, 92, kerning="normal"), svg(182, 20),
+                       svg(182, 92, inner_attributes='lengthAdjust="spacingAndGlyphs"')):
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength owners"):
+                render(source, False)
+
     def test_epub_svg_use_instances_keep_inherited_variable_font_requests(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
         resources = {

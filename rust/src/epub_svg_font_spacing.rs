@@ -15,8 +15,12 @@ pub(super) struct SpacingCheck {
     index: usize,
     width: Option<f32>,
     cluster_range: Range<usize>,
-    gap: f32,
-    anchor: f32,
+    shift: Shift,
+}
+
+enum Shift {
+    Even { gap: f32, anchor: f32 },
+    Explicit(Vec<f32>),
 }
 
 impl SpacingCheck {
@@ -64,9 +68,25 @@ impl SpacingCheck {
             index,
             width: verify_full_width.then_some(target),
             cluster_range: offset..offset + count,
-            gap,
-            anchor,
+            shift: Shift::Even { gap, anchor },
         })
+    }
+
+    pub(super) fn from_offsets(index: usize, target: f32, offsets: Vec<f32>) -> Self {
+        Self {
+            index,
+            width: Some(target),
+            cluster_range: 0..offsets.len(),
+            shift: Shift::Explicit(offsets),
+        }
+    }
+
+    fn offset(&self, cluster: usize) -> f32 {
+        let index = cluster - self.cluster_range.start;
+        match &self.shift {
+            Shift::Even { gap, anchor } => *gap * (index as f32 - *anchor),
+            Shift::Explicit(offsets) => offsets[index],
+        }
     }
 
     pub(super) fn apply(
@@ -76,7 +96,9 @@ impl SpacingCheck {
         edits: &mut Vec<Edit>,
         bytes: &mut usize,
     ) -> Result<(), EngineError> {
-        let gap = self.gap;
+        let Shift::Even { gap, .. } = self.shift else {
+            return Err(spacing_error());
+        };
         for parent in node
             .descendants()
             .filter(|node| node.is_element() && node.children().any(|child| child.is_text()))
@@ -235,9 +257,7 @@ pub(super) fn verify(
             let shift = checks
                 .peek()
                 .filter(|check| check.cluster_range.contains(&index))
-                .map_or(0.0, |check| {
-                    check.gap * ((index - check.cluster_range.start) as f32 - check.anchor)
-                });
+                .map_or(0.0, |check| check.offset(index));
             if cluster.len() != adjusted.len()
                 || cluster.iter().zip(adjusted).any(|(glyph, adjusted)| {
                     let mut old = glyph.transform();

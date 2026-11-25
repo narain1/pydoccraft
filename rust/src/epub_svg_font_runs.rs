@@ -363,13 +363,19 @@ fn split_text<'a, 'input>(
         if ancestor.has_tag_name((NS, "textPath")) {
             return Err(unsupported("EPUB SVG mixed-font text path"));
         }
+        if ancestor.has_tag_name((NS, "text")) {
+            return Ok((
+                ancestor,
+                ancestor
+                    .has_attribute("textLength")
+                    .then_some(ancestor)
+                    .or(owner),
+            ));
+        }
         if ancestor.has_attribute("textLength") && owner.replace(ancestor).is_some() {
             return Err(unsupported(
                 "EPUB SVG mixed-font overlapping textLength owners",
             ));
-        }
-        if ancestor.has_tag_name((NS, "text")) {
-            return Ok((ancestor, owner));
         }
     }
     Err(invalid("missing EPUB SVG text root"))
