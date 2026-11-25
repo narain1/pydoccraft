@@ -4940,6 +4940,108 @@ first
                     self.assertTrue(any(blue > 220 and red < 30 for red, _, blue in colors))
                     self.assertTrue(any(165 < red == green == blue < 235 for red, green, blue in colors))
 
+    def test_svg_drop_shadow_preserves_source_alpha_pixels_and_search_geometry(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="152" height="112" viewBox="0 0 152 112">
+          <style>.echo { color: #a020e0; flood-color: currentColor; flood-opacity: 60%; }</style>
+          <defs>
+            <filter id="graphic" x="0" y="0" width="152" height="112" filterUnits="userSpaceOnUse"
+                    color-interpolation-filters="sRGB">
+              <feDropShadow in="SourceGraphic" dx="22" dy="2" stdDeviation="1.2, 2.4"
+                            flood-color="#2040f0" flood-opacity=".5"/>
+            </filter>
+            <filter id="alpha" x="0" y="0" width="152" height="112" filterUnits="userSpaceOnUse"
+                    color-interpolation-filters="sRGB">
+              <feDropShadow class="echo" in="SourceAlpha" dx="-16" dy="4" stdDeviation="0"
+                            flood-color="red" flood-opacity="0%"/>
+            </filter>
+          </defs>
+          <rect x="10" y="15" width="30" height="22" fill="#e64a18" filter="url(#graphic)"/>
+          <rect x="98" y="59" width="25" height="22" fill="green" fill-opacity=".6" filter="url(#alpha)"/>
+          <g id="label" filter="url(#graphic)"><text x="11" y="104" font-size="14">
+            <a href="https://example.org/label">LABEL</a></text></g>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 152, 112)] * 2)
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        xhtml = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Drop shadows</title>
+          <meta name="viewport" content="width=152,height=112"/>
+          <style>html, body {{ margin: 0 }} svg {{ display: block }}</style>
+          </head><body>{svg}</body></html>"""
+        replacements = {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg, "OEBPS/s1.xhtml": xhtml}
+        source = rewrite_epub(fixture, replacements)
+        with doc_ex.open(source) as book:
+            previews = [rgba_pixels(png_chunks(book.render_page(i, dpi=96))) for i in range(2)]
+            fixed = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            unfiltered = book.edit_epub_chapters({0: svg.replace('id="label" filter="url(#graphic)"', 'id="label"')})
+        with doc_ex.open(unfiltered) as control:
+            plain = control.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+        with doc_ex.open(fixed) as pdf, doc_ex.open(plain) as ordinary:
+            for i, preview in enumerate(previews):
+                width, rgba = preview
+
+                def pixel(x: int, y: int) -> bytes:
+                    offset = 4 * (y * width + x)
+                    return rgba[offset:offset + 3]
+
+                self.assertEqual(pixel(25, 25), bytes((230, 74, 24)))
+                self.assertTrue(120 < pixel(46, 27)[0] < 180 and pixel(46, 27)[2] > 230)
+                alpha = pixel(115, 70)
+                self.assertTrue(99 <= alpha[0] == alpha[1] == alpha[2] <= 105)
+                tinted = pixel(87, 70)
+                self.assertGreater(tinted[0] - tinted[1], 25)
+                self.assertGreater(tinted[2] - tinted[1], 50)
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(i, dpi=96))), preview)
+                self.assertEqual(pdf[i].search_for("LABEL"), ordinary[0].search_for("LABEL"))
+                link, = pdf[i].get_links()
+                self.assertEqual(link.uri, "https://example.org/label")
+                self.assertEqual(link.bbox, ordinary[0].get_links()[0].bbox)
+
+        semantic = xhtml.replace('<a href="https://example.org/label">', "").replace("</a>", "")
+        with doc_ex.open(epub_fixture(chapter_one=semantic)) as reflowable:
+            for output in ("docx", "pdf"):
+                with doc_ex.open(reflowable.convert(output)) as reopened:
+                    _, rgba = rgba_pixels(png_chunks(reopened.render_page(0, dpi=96)))
+                    pixels = set(zip(rgba[::4], rgba[1::4], rgba[2::4]))
+                    self.assertIn((230, 74, 24), pixels)
+                    self.assertTrue(any(120 < red < 180 and blue > 230 for red, _, blue in pixels))
+
+    def test_svg_drop_shadow_checks_source_parameters_and_scaled_work(self) -> None:
+        def svg(body: str) -> str:
+            return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 48">{body}</svg>'
+
+        def effect(primitive: str, body: str) -> str:
+            return f'<defs><filter id="ds">{primitive}</filter></defs>{body}'
+
+        shape = '<rect width="12" height="12" filter="url(#ds)"/>'
+        cases = (
+            ('<feDropShadow in="BackgroundAlpha"/>', doc_ex.UnsupportedFormatError, "SourceGraphic or SourceAlpha"),
+            ('<feDropShadow dx="NaN"/>', doc_ex.MalformedDocumentError, "invalid SVG drop shadow offset"),
+            ('<feDropShadow dy="-16001"/>', doc_ex.UnsafeArchiveError, "drop shadow offset"),
+            ('<feDropShadow stdDeviation="-2 3"/>', doc_ex.MalformedDocumentError, "blur deviation"),
+            ('<feDropShadow flood-color="not-a-color"/>', doc_ex.MalformedDocumentError, "flood color"),
+            ('<feDropShadow flood-color="url(#ds)"/>', doc_ex.UnsupportedFormatError, "active attributes"),
+            ('<feDropShadow flood-opacity="1em"/>', doc_ex.MalformedDocumentError, "flood opacity"),
+            ('<feDropShadow/><feGaussianBlur/>', doc_ex.UnsupportedFormatError, "one Gaussian blur or drop shadow"),
+        )
+        with doc_ex.open(epub_fixture()) as book:
+            for primitive, error, message in cases:
+                with self.subTest(primitive=primitive), self.assertRaisesRegex(error, message):
+                    book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Invalid shadow", svg(effect(primitive, shape))), 0])
+
+            scaled = effect('<feDropShadow dx="1800" stdDeviation=".1"/>',
+                            '<rect width="1" height="1" transform="scale(9)" filter="url(#ds)"/>')
+            large_offset = book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Offset", svg(scaled)), 0])
+            many = effect('<feDropShadow stdDeviation="0"/>',
+                          '<rect width="1100" height="1100" filter="url(#ds)"/>' * 9)
+            large_work = book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Work", svg(many)), 0])
+        for data, reason in ((large_offset, "drop shadow offset"), (large_work, "filter work")):
+            with self.subTest(reason=reason), doc_ex.open(data) as book:
+                with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, reason):
+                    book.render_page(0, dpi=96)
+
     def test_svg_gradient_templates_and_blur_reject_unsafe_inputs(self) -> None:
         def svg(body: str) -> str:
             return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 48">'

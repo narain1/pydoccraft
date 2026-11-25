@@ -859,6 +859,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         | "marker"
                         | "filter"
                         | "feGaussianBlur"
+                        | "feDropShadow"
                 ))
         {
             return Err(unsupported("SVG contains unsupported or active elements"));
@@ -908,8 +909,16 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if tag == "a" && key == "target" => true,
                 None if tag == "svg" && key == "baseProfile" => true,
                 None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
-                None if tag == "feGaussianBlur" && key == "stdDeviation" => true,
-                None if tag == "feGaussianBlur" && key == "in" => true,
+                None if super::svg::effects::is_blur_primitive(tag)
+                    && matches!(key, "stdDeviation" | "in") =>
+                {
+                    true
+                }
+                None if tag == "feDropShadow"
+                    && matches!(key, "dx" | "dy" | "flood-color" | "flood-opacity") =>
+                {
+                    true
+                }
                 Some(XML) => matches!(key, "lang" | "space"),
                 None => matches!(
                     key,

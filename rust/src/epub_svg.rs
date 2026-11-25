@@ -601,6 +601,15 @@ fn apply_styles(
             style.push_str(&encoded);
             style.push(';');
         }
+        if node.has_tag_name((NS, "feDropShadow")) {
+            for property in ["flood-color", "flood-opacity"] {
+                if !props.iter().any(|(key, _)| key == property) {
+                    if let Some(value) = node.attribute(property) {
+                        props.push((property.to_owned(), value.to_owned()));
+                    }
+                }
+            }
+        }
         props.retain(|(key, _)| key != "font-family");
         for (key, mut value) in props {
             if key == "font-optical-sizing" {
@@ -622,6 +631,8 @@ fn apply_styles(
                     .get_or_insert_with(|| effects::Effects::new(root))
                     .validate_filter(node, &value)?
                     .map_or_else(|| "none".into(), |id| format!("url(#{id})"));
+            } else if matches!(key.as_str(), "flood-color" | "flood-opacity") {
+                value = effects::flood_paint(&key, &value)?;
             } else {
                 validate_paint(&value)?;
             }
@@ -692,6 +703,8 @@ fn svg_property(key: &str) -> bool {
             | "mask-type"
             | "filter"
             | "color-interpolation-filters"
+            | "flood-color"
+            | "flood-opacity"
             | "stop-color"
             | "stop-opacity"
             | "marker-start"

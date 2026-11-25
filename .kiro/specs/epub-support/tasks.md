@@ -37,6 +37,7 @@
 - [x] Resolve author-defined CSS custom properties in supported XHTML and SVG styles, including scoped inheritance, fallback cycles and deferred shorthands.
 - [x] Render bounded same-document SVG use references, including nested instances and symbols, in fixed-layout and inline content.
 - [x] Render SVG gradient templates and bounded Gaussian blur in fixed-layout previews, visual PDF and rasterized inline SVG exports.
+- [x] Render a bounded SVG drop-shadow primitive with SourceGraphic and SourceAlpha input, signed offsets, and CSS flood color and opacity.
 - [x] Apply Unicode ranges and ordered font fallback to static SVG text, including inherited lists and matching in reopened exports.
 - [x] Match SVG font-face weight, width and signed oblique intervals and apply selected font variation defaults to the laid-out runs.
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
