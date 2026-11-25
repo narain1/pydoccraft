@@ -140,12 +140,8 @@ pub(in crate::epub) fn selected(node: Node<'_, '_>) -> bool {
 }
 
 pub(in crate::epub) fn needs_layout(root: Node<'_, '_>) -> bool {
-    root.descendants().any(|node| {
-        node.tag_name().namespace() == Some(MATHML)
-            && selected(node)
-            && !node
-                .ancestors()
-                .any(|anc| matches!(anc.tag_name().name(), "annotation" | "annotation-xml"))
+    super::any_presentation(root, |node| {
+        node.tag_name().namespace() == Some(MATHML) && selected(node)
     })
 }
 

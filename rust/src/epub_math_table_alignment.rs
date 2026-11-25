@@ -6,7 +6,7 @@ use wordcraft_doc::{
 };
 use wordcraft_layout::math::MathLayout;
 
-use super::super::{append_token_text, xml_space, DEPTH};
+use super::super::{append_token_text, presentation_children, xml_space, DEPTH};
 use super::{compose, indexed, invalid, limited, unsupported, AlignedEquation, MATHML};
 use crate::EngineError;
 
@@ -286,17 +286,14 @@ fn visit_group_items<'xml, 'input>(
         return Err(limited("MathML structure exceeds its layout budget"));
     }
     *remaining -= 1;
-    let count = match tag(node) {
-        Some("mrow" | "mstyle") => usize::MAX,
-        Some("semantics") => 1,
+    match tag(node) {
+        Some("mrow" | "mstyle" | "semantics" | "maction") => {}
         _ => return emit(GroupItem::Element(node)),
-    };
-    let mut children = node
-        .children()
+    }
+    let mut children = presentation_children(node)?
         .filter(Node::is_element)
-        .take(count)
         .peekable();
-    if count == 1 && children.peek().is_none() {
+    if tag(node) == Some("semantics") && children.peek().is_none() {
         return Err(invalid("MathML semantics has no presentation child"));
     }
     emit(GroupItem::Enter(node))?;
@@ -380,10 +377,10 @@ pub(super) fn leading_group<'xml, 'input>(
     mut node: Node<'xml, 'input>,
 ) -> Option<Node<'xml, 'input>> {
     loop {
-        node = node.children().find(Node::is_element)?;
+        node = presentation_children(node).ok()?.find(Node::is_element)?;
         match tag(node)? {
             "maligngroup" => return Some(node),
-            "mrow" | "mstyle" | "semantics" => {}
+            "mrow" | "mstyle" | "semantics" | "maction" => {}
             _ => return None,
         }
     }
@@ -493,9 +490,9 @@ fn first_mark<'xml, 'input>(
         Some("mtable" | "annotation" | "annotation-xml") => return Ok(None),
         _ => {}
     }
-    for child in node.children().filter(Node::is_element) {
+    for child in presentation_children(node)?.filter(Node::is_element) {
         let result = first_mark(child, depth + 1)?;
-        if result.is_some() || tag(node) == Some("semantics") {
+        if result.is_some() {
             return Ok(result);
         }
     }
@@ -545,6 +542,7 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
                         "mrow"
                             | "mstyle"
                             | "semantics"
+                            | "maction"
                             | "mfrac"
                             | "msqrt"
                             | "mroot"
@@ -642,6 +640,7 @@ fn decimal_offset(cell: Node<'_, '_>, number: Node<'_, '_>) -> Result<usize, Eng
                     "mrow"
                         | "mstyle"
                         | "semantics"
+                        | "maction"
                         | "msqrt"
                         | "mroot"
                         | "menclose"
@@ -704,11 +703,14 @@ fn first_baseline_number<'xml, 'input>(
         ) => usize::MAX,
         Some(
             "msub" | "msup" | "msubsup" | "munder" | "mover" | "munderover" | "mmultiscripts"
-            | "mroot" | "semantics",
+            | "mroot" | "semantics" | "maction",
         ) => 1,
         _ => return Ok(None),
     };
-    for child in node.children().filter(Node::is_element).take(count) {
+    for child in presentation_children(node)?
+        .filter(Node::is_element)
+        .take(count)
+    {
         if let Some(number) = first_baseline_number(child, depth + 1)? {
             return Ok(Some(number));
         }

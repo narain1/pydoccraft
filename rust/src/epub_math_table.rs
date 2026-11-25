@@ -157,24 +157,24 @@ pub(super) fn has_authored_geometry(table: Node<'_, '_>) -> bool {
 
 pub(in crate::epub) fn has_spans(root: Node<'_, '_>) -> bool {
     // A spanning cell can contain a plain equation. Its own span belongs to the parent grid.
-    root.descendants().skip(1).any(|node| {
-        node.has_tag_name((MATHML, "mtd"))
+    super::any_presentation(root, |node| {
+        node != root
+            && node.has_tag_name((MATHML, "mtd"))
             && ["rowspan", "columnspan"].into_iter().any(|key| {
                 node.attribute(key)
                     .is_some_and(|value| value.trim().parse::<usize>() != Ok(1))
             })
-            && is_presentation(node)
     })
 }
 
 pub(in crate::epub) fn has_rule_requests(root: Node<'_, '_>) -> bool {
-    root.descendants().any(|node| {
-        node.has_tag_name((MATHML, "mtable")) && rules::requested(node) && is_presentation(node)
+    super::any_presentation(root, |node| {
+        node.has_tag_name((MATHML, "mtable")) && rules::requested(node)
     })
 }
 
 pub(in crate::epub) fn has_relative_widths(root: Node<'_, '_>) -> bool {
-    root.descendants().any(|node| {
+    super::any_presentation(root, |node| {
         node.has_tag_name((MATHML, "mtable"))
             && (node
                 .attribute("width")
@@ -187,19 +187,11 @@ pub(in crate::epub) fn has_relative_widths(root: Node<'_, '_>) -> bool {
                             .children()
                             .any(|row| row.has_tag_name((MATHML, "mlabeledtr")))
                 }))
-            && is_presentation(node)
             && node
                 .ancestors()
                 .skip(1)
                 .take_while(|ancestor| *ancestor != root)
                 .all(shares_line_width)
-    })
-}
-
-fn is_presentation(node: Node<'_, '_>) -> bool {
-    !node.ancestors().any(|ancestor| {
-        ancestor.tag_name().namespace() == Some(MATHML)
-            && matches!(ancestor.tag_name().name(), "annotation" | "annotation-xml")
     })
 }
 
@@ -215,19 +207,17 @@ pub(super) fn project_group<'xml>(
     let outer_equation = group.has_tag_name((MATHML, "math"));
     let mut wrappers = Vec::new();
     loop {
-        let mut children = group.children().filter(Node::is_element);
+        let mut children = super::presentation_children(group)?.filter(Node::is_element);
         let Some(child) = children.next() else {
             return Err(invalid("empty MathML spanning equation"));
         };
-        if (!group.has_tag_name((MATHML, "semantics")) && children.next().is_some())
-            || child.tag_name().namespace() != Some(MATHML)
-        {
+        if children.next().is_some() || child.tag_name().namespace() != Some(MATHML) {
             return Ok(None);
         }
         wrappers.push(child);
         match child.tag_name().name() {
             "mtable" => break,
-            "mrow" | "mstyle" | "semantics" => group = child,
+            "mrow" | "mstyle" | "semantics" | "maction" => group = child,
             _ => return Ok(None),
         }
     }

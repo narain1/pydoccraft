@@ -11741,6 +11741,80 @@ Resume
                 self.assertIn("Before", pdf[0].get_text())
                 self.assertIn("After", word[0].get_text())
 
+    def test_mathml_static_actions_render_only_the_selected_expression(self) -> None:
+        fraction = "<m:mfrac><m:mi>Alpha</m:mi><m:mi>Beta</m:mi></m:mfrac>"
+        active = (
+            '<m:maction actiontype="toggle" selection="2" mathcolor="#1659b0">'
+            '<m:mtable width="50%"><m:mtr><m:mtd><m:mtext>Hidden</m:mtext></m:mtd>'
+            '</m:mtr></m:mtable>' + fraction + '</m:maction>'
+            '<m:mo>+</m:mo><m:maction actiontype="tooltip" selection="2">'
+            '<m:mi>Gamma</m:mi><m:mtext>Tooltip text</m:mtext></m:maction>'
+            '<m:mo>+</m:mo><m:maction actiontype="custom"><m:mi>Delta</m:mi>'
+            '<m:mtext>Alternative</m:mtext></m:maction>'
+        )
+        control = (
+            '<m:mstyle mathcolor="#1659b0">' + fraction + '</m:mstyle>'
+            '<m:mo>+</m:mo><m:mi>Gamma</m:mi><m:mo>+</m:mo><m:mi>Delta</m:mi>'
+        )
+
+        def chapter(contents: str) -> str:
+            return f"""<html xmlns="http://www.w3.org/1999/xhtml"
+              xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Static math actions</title>
+              <meta name="viewport" content="width=320,height=128"/></head>
+              <body><p>Before <m:math mathsize="22px">{contents}</m:math> After</p></body></html>"""
+
+        def fixed(contents: str) -> bytes:
+            source = fixed_spread_fixture([("", "white", 320, 128)])
+            return rewrite_epub(source, {"OEBPS/s0.xhtml": chapter(contents)})
+
+        math_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+        with (doc_ex.open(epub_fixture(chapter_one=chapter(active))) as book,
+              doc_ex.open(epub_fixture(chapter_one=chapter(control))) as reference):
+            self.assertEqual(book[0].get_text(), reference[0].get_text())
+            metadata = book[0].blocks[0].metadata["mathml"][0]
+            self.assertIn("Hidden", metadata["source"])
+            self.assertNotIn("relative_table", metadata)
+            self.assertEqual(book.render_page(0, dpi=96), reference.render_page(0, dpi=96))
+            docx = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            self.assertEqual(len(xml.findall(".//" + math_ns + "f")), 1)
+            tokens = "".join(node.text or "" for node in xml.iter(math_ns + "t"))
+            self.assertEqual(tokens, "AlphaBeta+Gamma+Delta")
+            with doc_ex.open(docx) as word, doc_ex.open(reference.convert("docx")) as expected:
+                self.assertEqual(word.render_page(0, dpi=96), expected.render_page(0, dpi=96))
+            with doc_ex.open(book.convert("pdf")) as pdf, doc_ex.open(reference.convert("pdf")) as expected:
+                self.assertEqual(pdf[0].get_text(), expected[0].get_text())
+
+        with doc_ex.open(fixed(active)) as book, doc_ex.open(fixed(control)) as reference:
+            self.assertEqual(book.render_page(0, dpi=96), reference.render_page(0, dpi=96))
+            with (doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf,
+                  doc_ex.open(reference.export_epub_fixed_pdf(dpi=96, searchable=True)) as expected):
+                for token in ("Alpha", "Beta", "Gamma", "Delta"):
+                    self.assertTrue(pdf[0].search_for(token))
+                    self.assertEqual(pdf[0].search_for(token), expected[0].search_for(token))
+                self.assertEqual(pdf[0].get_links(), expected[0].get_links())
+
+        selected_row = "<m:mrow><m:maligngroup/><m:mn>12.345</m:mn></m:mrow>"
+        action_row = (
+            '<m:maction actiontype="toggle" selection="2">'
+            '<m:mn>555.999</m:mn>' + selected_row + '</m:maction>'
+        )
+        table = """<m:mtable groupalign="{decimalpoint}" columnwidth="110pt">
+          <m:mtr><m:mtd>ROW</m:mtd></m:mtr>
+          <m:mtr><m:mtd><m:maligngroup/><m:mn>7.89</m:mn></m:mtd></m:mtr>
+          </m:mtable>"""
+        with (doc_ex.open(fixed(table.replace("ROW", action_row))) as book,
+              doc_ex.open(fixed(table.replace("ROW", selected_row))) as reference):
+            self.assertEqual(book[0].get_text(), reference[0].get_text())
+            self.assertEqual(book.render_page(0, dpi=96), reference.render_page(0, dpi=96))
+
+        for selection in ("0", "-1", "3", "invalid"):
+            with self.subTest(selection=selection):
+                invalid = active.replace('selection="2"', f'selection="{selection}"', 1)
+                with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "MathML action selection"):
+                    doc_ex.open(epub_fixture(chapter_one=chapter(invalid)))
+
     def test_mathml_normalizes_xml_whitespace_but_keeps_nonbreaking_spaces(self) -> None:
         def one_chapter(formula: str) -> bytes:
             return epub_fixture(chapter_one=f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML"><body><p>Before {formula} After</p></body></html>')

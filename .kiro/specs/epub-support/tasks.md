@@ -114,6 +114,7 @@
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
+- [x] Render the authored static MathML action selection in extraction, previews, editable DOCX and searchable PDF.
 - [x] Apply chapter CSS to MathML colors, font sizes, bold and italic runs, and movable limit placement in previews and native exports.
 - [x] Preview top-level MathML tables with row and column spans. Export standalone tables with editable DOCX cell equations and searchable PDF text.
 - [x] Render nested spanning MathML tables that are the sole expression in a containing cell. Export native nested tables in DOCX and searchable cell text in PDF.

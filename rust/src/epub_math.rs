@@ -91,8 +91,56 @@ impl Css {
     }
 }
 
-pub(super) fn presentation_text(root: Node<'_, '_>) -> String {
-    fn append(node: Node<'_, '_>, output: &mut String) {
+fn presentation_children<'a, 'input>(
+    node: Node<'a, 'input>,
+) -> Result<impl Iterator<Item = Node<'a, 'input>>, EngineError> {
+    let children = || node.children().filter(Node::is_element);
+    let (all, selected) = match (node.tag_name().namespace(), node.tag_name().name()) {
+        (Some(MATHML), "semantics") => (false, children().next()),
+        (Some(MATHML), "annotation" | "annotation-xml") => (false, None),
+        (Some(MATHML), "maction") => {
+            let index = match node.attribute("actiontype").map(str::trim) {
+                Some("tooltip" | "statusline") => 1,
+                _ => node
+                    .attribute("selection")
+                    .unwrap_or("1")
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|index| *index > 0)
+                    .ok_or_else(|| invalid("invalid MathML action selection"))?,
+            };
+            let child = children()
+                .nth(index - 1)
+                .ok_or_else(|| invalid("MathML action selection has no matching expression"))?;
+            (false, Some(child))
+        }
+        _ => (true, None),
+    };
+    Ok(all
+        .then(|| node.children())
+        .into_iter()
+        .flatten()
+        .chain(selected))
+}
+
+fn any_presentation<'a, 'input>(
+    root: Node<'a, 'input>,
+    mut matches: impl FnMut(Node<'a, 'input>) -> bool,
+) -> bool {
+    fn visit<'a, 'input>(
+        node: Node<'a, 'input>,
+        matches: &mut impl FnMut(Node<'a, 'input>) -> bool,
+    ) -> bool {
+        matches(node)
+            || presentation_children(node)
+                .is_ok_and(|mut children| children.any(|child| visit(child, matches)))
+    }
+    visit(root, &mut matches)
+}
+
+pub(super) fn presentation_text(root: Node<'_, '_>) -> Result<String, EngineError> {
+    fn append(node: Node<'_, '_>, output: &mut String) -> Result<(), EngineError> {
         if node.is_text() {
             // Preserve indentation in the source markup and omit it from equation text.
             output.push_str(node.text().unwrap_or_default().trim_matches(xml_space));
@@ -100,21 +148,16 @@ pub(super) fn presentation_text(root: Node<'_, '_>) -> String {
             && matches!(node.tag_name().name(), "mi" | "mn" | "mo" | "ms" | "mtext")
         {
             append_token_text(node, output);
-        } else if node.has_tag_name((MATHML, "semantics")) {
-            if let Some(presentation) = node.children().find(Node::is_element) {
-                append(presentation, output);
-            }
-        } else if !node.has_tag_name((MATHML, "annotation"))
-            && !node.has_tag_name((MATHML, "annotation-xml"))
-        {
-            for child in node.children() {
-                append(child, output);
+        } else {
+            for child in presentation_children(node)? {
+                append(child, output)?;
             }
         }
+        Ok(())
     }
     let mut output = String::new();
-    append(root, &mut output);
-    output
+    append(root, &mut output)?;
+    Ok(output)
 }
 
 fn xml_space(character: char) -> bool {
@@ -376,7 +419,7 @@ fn shares_line_width(node: Node<'_, '_>) -> bool {
         return false;
     }
     match node.tag_name().name() {
-        "math" | "mrow" | "mstyle" | "merror" | "semantics" => true,
+        "math" | "mrow" | "mstyle" | "merror" | "semantics" | "maction" => true,
         // Vertical padding keeps the horizontal advance and origin of its row.
         "mpadded" => node.attribute("width").is_none() && node.attribute("lspace").is_none(),
         _ => false,
@@ -569,10 +612,9 @@ impl<'xml> Projection<'_, 'xml> {
         let native = match tag {
             "mi" | "mn" | "mo" | "ms" | "mtext" => self.token(node, style, depth)?,
             "math" | "mrow" | "mstyle" | "merror" => return self.elements(node, depth, style),
-            "semantics" => {
-                let presentation = node
-                    .children()
-                    .find(Node::is_element)
+            "semantics" | "maction" => {
+                let presentation = presentation_children(node)?
+                    .next()
                     .ok_or_else(|| invalid("MathML semantics has no presentation child"))?;
                 return self.element(presentation, depth + 1, style);
             }
