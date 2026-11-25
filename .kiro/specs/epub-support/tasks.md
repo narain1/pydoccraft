@@ -8,7 +8,7 @@
 - [x] Add semantic reflow preview and DOCX/PDF conversion with explicit errors for unsupported features.
 - [x] Update locked dependencies, license inventories, and format and authoring documentation.
 - [x] Accept inert XHTML and selected legacy doctypes. Reopen and edit the original W3C Accessible EPUB 3 sample.
-- [ ] Expand the public EPUB conformance corpus.
+- [x] Expand the public EPUB conformance corpus with a repeatable four-book installed-wheel check.
 - [x] Limit packaged-font outline emission to glyphs that can paint the requested EPUB preview region. Verify clipped regions of the public Children’s Literature EPUB.
 - [x] Open the unmodified math-heavy *Linear Algebra* sample within the semantic output budget and exercise its spine previews.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.

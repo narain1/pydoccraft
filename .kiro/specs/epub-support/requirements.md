@@ -43,3 +43,5 @@
 ## Verification
 
 Run the locked Rust, license, and installed-wheel checks. Generate local fixtures to exercise EPUB 2 and 3, semantic links and tables, archive bounds, authoring and targeted edits, preview, and reopened conversion outputs. Keep all engine and shared backend Git pins immutable and compatible.
+
+Run the public smoke corpus from an installed wheel with `python tools/validate_epub_samples.py SAMPLE_DIRECTORY`. Supply the original `childrens-literature.epub`, `internallinks.epub`, `cole-voyage-of-life.epub`, and `cc-shared-culture.epub` archives. The validator checks their release digests and exercises clipped previews, spine reordering, fixed-layout PDF and WebM playback using local files. [W3C EPUB sample release](https://github.com/IDPF/epub3-samples/releases/tag/20230704)
