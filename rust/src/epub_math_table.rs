@@ -746,6 +746,7 @@ pub(in crate::epub) struct Layout {
     label_width: f32,
     label_inset: f32,
     overlapping_labels: bool,
+    edge_label_heights: [f32; 2],
     rules: Vec<MItem>,
     occupancy: Option<Occupancy>,
     rule_color: Rgb,
@@ -1160,17 +1161,31 @@ impl Table {
                 "MathML overlap labels or their data grid exceed the available width",
             ));
         }
-        if self.rules.visible() || self.cells.iter().any(|cell| cell.rows.len() != 1) {
-            return Err(unsupported(
-                "MathML overlap labels with table rules or row spans",
-            ));
-        }
+        self.check_overlap_bands()?;
         Ok(ColumnsLayout {
             widths,
             inset: ((width - data) / 2.0).max(0.0),
             width: width.max(data),
             overlapping_labels: true,
         })
+    }
+
+    fn check_overlap_bands(&self) -> Result<(), EngineError> {
+        let row_count = self.row_gaps.len() + 1;
+        let mut crossed = [false; MAX_ROWS + 1];
+        for cell in self.cells.iter().filter(|cell| !cell.columns.is_empty()) {
+            crossed[cell.rows.start + 1..cell.rows.end].fill(true);
+        }
+        for label in self.cells.iter().filter(|cell| cell.columns.is_empty()) {
+            let cut = label.rows.start + usize::from(!label.label_above);
+            if crossed[cut] {
+                return Err(unsupported("MathML overlap label crosses a data row span"));
+            }
+            if self.rules.visible() && cut != 0 && cut != row_count {
+                return Err(unsupported("MathML overlap label inside ruled data rows"));
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn editable_matrix(
@@ -1527,8 +1542,10 @@ impl Table {
             heights.fill(common_height);
         }
         let x = starts(&widths, &self.column_gaps);
-        let mut y = starts(&heights, &self.row_gaps);
+        let rule_y = starts(&heights, &self.row_gaps);
+        let mut y = rule_y.clone();
         let [left_inset, top_inset] = self.rules.inset();
+        let edge_label_heights = [label_bands[0][0], label_bands[row_count - 1][1]];
         let mut label_positions = vec![0.0; row_count];
         if overlapping_labels {
             // Reserve an adjacent band for each displaced label. Two labels
@@ -1539,7 +1556,7 @@ impl Table {
                 label_positions[row] = if before > 0.0 {
                     y[row] - before
                 } else {
-                    y[row] + heights[row]
+                    y[row] + heights[row] + 2.0 * top_inset
                 };
                 added += before + after;
             }
@@ -1606,7 +1623,11 @@ impl Table {
             })
             .collect();
         let data_bounds = if overlapping_labels {
-            (y[0], y[row_count - 1] + heights[row_count - 1], None)
+            (
+                y[0],
+                y[row_count - 1] + heights[row_count - 1] + 2.0 * top_inset,
+                None,
+            )
         } else {
             (0.0, height, None)
         };
@@ -1639,10 +1660,10 @@ impl Table {
             .as_ref()
             .map(|map| {
                 self.rules.draw(
-                    [&x, &y],
+                    [&x, &rule_y],
                     [&self.column_gaps, &self.row_gaps],
                     map,
-                    baseline,
+                    baseline - edge_label_heights[0],
                     rule_color,
                     rule_budget,
                 )
@@ -1666,6 +1687,7 @@ impl Table {
             label_width,
             label_inset,
             overlapping_labels,
+            edge_label_heights,
             rules,
             occupancy,
             rule_color,
@@ -1693,8 +1715,24 @@ impl Table {
         available_height: f32,
         align: Option<Align>,
     ) -> Result<NativeTable, EngineError> {
+        let mut edge_rows = [false; 2];
         if layout.overlapping_labels {
-            return Err(unsupported("MathML overlap labels in a native Word table"));
+            for label in self.cells.iter().filter(|cell| cell.columns.is_empty()) {
+                let edge = usize::from(!label.label_above);
+                if (edge == 0 && label.rows.start != 0)
+                    || (edge == 1 && label.rows.end != layout.heights.len())
+                {
+                    return Err(unsupported(
+                        "MathML overlap label inside a native Word table",
+                    ));
+                }
+                if layout.edge_label_heights[edge] <= 0.0 {
+                    return Err(unsupported(
+                        "empty MathML overlap label in a native Word table",
+                    ));
+                }
+                edge_rows[edge] = true;
+            }
         }
         let [frame_inline, frame_block] = self.rules.native_margin();
         let mut widths = margins_for_tracks(&layout.widths, &self.column_gaps, frame_inline);
@@ -1717,7 +1755,15 @@ impl Table {
                 "MathML spanning table exceeds the semantic export page",
             ));
         }
-        let mut native = NativeTable::new(heights.len(), widths.len(), width);
+        let first_data_row = usize::from(edge_rows[0]);
+        let data_rows = first_data_row..first_data_row + nrows;
+        let native_rows = data_rows.end + usize::from(edge_rows[1]);
+        if native_rows > MAX_ROWS {
+            return Err(limited(
+                "MathML table exceeds 128 native rows with displaced labels",
+            ));
+        }
+        let mut native = NativeTable::new(native_rows, widths.len(), width);
         native.grid = widths;
         native.props.style = None;
         native.props.width = Some(width);
@@ -1730,14 +1776,20 @@ impl Table {
             .iter()
             .zip(&layout.cells)
             .map(|(cell, (_, top, _))| {
-                self.native_vertical_margins(cell, *top, &layout, frame_block)
+                if layout.overlapping_labels && cell.columns.is_empty() {
+                    Ok([0.0; 2])
+                } else {
+                    self.native_vertical_margins(cell, *top, &layout, frame_block)
+                }
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut row_margins = vec![[f32::INFINITY, 0.0]; nrows];
         if self.labels.is_some() {
             for (cell, &[before, _]) in self.cells.iter().zip(&vertical) {
-                let row = &mut row_margins[cell.rows.start][0];
-                *row = row.min(before);
+                if !layout.overlapping_labels || !cell.columns.is_empty() {
+                    let row = &mut row_margins[cell.rows.start][0];
+                    *row = row.min(before);
+                }
             }
             for (row, [before, after]) in row_margins.iter_mut().enumerate() {
                 if !before.is_finite() {
@@ -1751,7 +1803,17 @@ impl Table {
                 };
             }
         }
-        for (index, (row, height)) in native.rows.iter_mut().zip(heights).enumerate() {
+        for (edge, row) in [0, data_rows.end].into_iter().enumerate() {
+            if edge_rows[edge] {
+                native.rows[row].props.height_rule = HeightRule::AtLeast;
+                native.rows[row].props.height = Some(layout.edge_label_heights[edge]);
+            }
+        }
+        for (index, (row, height)) in native.rows[data_rows.clone()]
+            .iter_mut()
+            .zip(heights)
+            .enumerate()
+        {
             row.props.height_rule = HeightRule::AtLeast;
             row.props.height = Some(if self.labels.is_some() {
                 layout.heights[index]
@@ -1770,10 +1832,21 @@ impl Table {
         for ((cell, (_, _, drawing)), [mut before, mut after]) in
             self.cells.into_iter().zip(layout.cells).zip(vertical)
         {
-            let row = cell.rows.start;
-            let last_row = cell.rows.end - 1;
+            let logical_row = cell.rows.start;
             let label = self.labels.as_ref().filter(|_| cell.columns.is_empty());
-            let columns = if let Some(labels) = label {
+            let displaced = layout.overlapping_labels && label.is_some();
+            let (row, last_row) = if displaced {
+                let band = if cell.label_above { 0 } else { data_rows.end };
+                (band, band)
+            } else {
+                (
+                    first_data_row + logical_row,
+                    first_data_row + cell.rows.end - 1,
+                )
+            };
+            let columns = if displaced {
+                0..native.grid.len()
+            } else if let Some(labels) = label {
                 let column = if labels.left { 0 } else { data_start + ncols };
                 column..column + 1
             } else {
@@ -1789,6 +1862,7 @@ impl Table {
             let cell_width: f32 = native.grid[columns].iter().sum();
             target.props.width = Some(cell_width);
             target.props.no_wrap = true;
+            target.props.hide_mark = true;
             let [left, right] = if let Some(labels) = label {
                 let gap = (cell_width - layout.label_width).max(0.0);
                 if labels.left {
@@ -1815,9 +1889,9 @@ impl Table {
             // Word uses the row's largest top margin in every cell and
             // adds border clearance individually. Retain each label's and
             // data cell's remaining offset as native paragraph spacing.
-            let space_before = if self.labels.is_some() {
-                let additional = before - row_margins[row][0];
-                [before, after] = row_margins[row];
+            let space_before = if self.labels.is_some() && !displaced {
+                let additional = before - row_margins[logical_row][0];
+                [before, after] = row_margins[logical_row];
                 additional
             } else {
                 0.0
@@ -1872,8 +1946,13 @@ impl Table {
             }];
         }
         if let Some(map) = layout.occupancy {
-            self.rules
-                .set_native_edges(&mut native, &map, layout.rule_color, data_start);
+            self.rules.set_native_edges(
+                &mut native,
+                &map,
+                layout.rule_color,
+                data_start,
+                data_rows,
+            );
         }
         Ok(native)
     }

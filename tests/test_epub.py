@@ -9620,12 +9620,23 @@ Trailing
         spanning = source().replace(
             "<m:mtd><m:mtext>DataOne", '<m:mtd rowspan="2"><m:mtext>DataOne',
         ).replace("<m:mtd><m:mtext>DataTwo</m:mtext></m:mtd>", "")
+        crossing = spanning.replace('<m:mlabeledtr rowalign="top">', '<m:mlabeledtr>', 1)
+        with doc_ex.open(epub_fixture(chapter_one=spanning)) as book:
+            with doc_ex.open(book.convert("pdf")) as direct, doc_ex.open(book.convert("docx")) as word:
+                with doc_ex.open(word.convert("pdf")) as native:
+                    for term in ("TopTag", "DataOne", "LowerTag", "UpperTag", "DataThree", "BottomTag"):
+                        expected, = direct[0].search_for(term)
+                        actual, = native[0].search_for(term)
+                        for a, b in zip(actual, expected):
+                            self.assertAlmostEqual(a, b, delta=0.35)
+                        self.assertEqual(word[0].get_text().count(term), 1)
+                self.assertTrue(book.render_page(0))
         unsized = source(attrs="").replace("<m:mtable", "<m:msqrt><m:mtable")
         unsized = unsized.replace("</m:mtable>", "</m:mtable></m:msqrt>")
         for chapter, message in (
             (source(attrs='width="250pt"'), "MathML overlap labels or their data grid exceed the available width"),
-            (source(attrs='width="320pt" rowlines="solid"'), "MathML overlap labels with table rules or row spans"),
-            (spanning, "MathML overlap labels with table rules or row spans"),
+            (source(attrs='width="320pt" rowlines="solid"'), "MathML overlap label inside ruled data rows"),
+            (crossing, "MathML overlap label crosses a data row span"),
             (unsized, "MathML overlap labels require a definite available width"),
         ):
             with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
@@ -9698,6 +9709,105 @@ Trailing
             for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "labeled contents exceed the authored"):
                     operation()
+
+    def test_mathml_ruled_overlap_labels_stay_outside_the_native_frame(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Ruled overflow labels</title><meta name="viewport" content="width=500,height=340"/>
+          <style>body {margin:0}</style></head><body><p style="text-align:center"><m:math mathsize="12pt">
+          <m:mtable width="330pt" side="EDGEoverlap" columnwidth="170pt 130pt" columnspacing="12pt"
+            rowspacing="12pt" minlabelspacing="20pt" mathcolor="#a01b70"
+            frame="solid" framespacing="6pt 7pt" rowlines="solid dashed" columnlines="dashed">
+            <m:mlabeledtr rowalign="top"><m:mtd columnalign="EDGE" mathcolor="#e04b00"><m:mtext>Overhead</m:mtext></m:mtd>
+              <m:mtd rowspan="2" mathcolor="#252525"><m:mtext>Spanning</m:mtext></m:mtd>
+              <m:mtd mathcolor="#bf222d" columnalign="right"><m:mtext>DataFirst</m:mtext></m:mtd></m:mlabeledtr>
+            <m:mtr><m:mtd mathcolor="#198144" columnalign="right"><m:mtext>Intermediate</m:mtext></m:mtd></m:mtr>
+            <m:mlabeledtr rowalign="center"><m:mtd columnalign="EDGE" mathcolor="#8343cd"><m:mtext>Underfoot</m:mtext></m:mtd>
+              <m:mtd mathcolor="#252525"><m:mtext>DataLast</m:mtext></m:mtd>
+              <m:mtd mathcolor="#1644df" columnalign="right"><m:mtext>Rightmost</m:mtext></m:mtd></m:mlabeledtr>
+          </m:mtable></m:math></p></body></html>"""
+        terms = ("Overhead", "Underfoot", "Spanning", "DataFirst", "Intermediate", "DataLast", "Rightmost")
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+              "m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        val = "{" + ns["w"] + "}val"
+
+        def bounds(doc: doc_ex.Document) -> tuple[int, int]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=192)))
+
+            def color(hex_value: str) -> set[tuple[int, int]]:
+                ink = bytes.fromhex(hex_value + "ff")
+                points, index = set(), 0
+                while (index := pixels.find(ink, index)) != -1:
+                    if index % 4 == 0:
+                        points.add(divmod(index // 4, width))
+                    index += 1
+                self.assertTrue(points, hex_value)
+                return points
+
+            rules = color("a01b70")
+            left, right = min(x for _, x in rules), max(x for _, x in rules)
+            top, bottom = min(y for y, _ in rules), max(y for y, _ in rules)
+            self.assertLess(max(y for y, _ in color("e04b00")), top)
+            self.assertGreater(min(y for y, _ in color("8343cd")), bottom)
+            for y in (top, bottom):
+                self.assertGreater(sum((y, x) in rules for x in range(left, right + 1)), (right - left) * 0.9)
+            upper = min(y for y, _ in color("bf222d"))
+            middle = min(y for y, _ in color("198144"))
+            cut = [y for y in range(upper + 10, middle) if (y, right - 70) in rules]
+            self.assertTrue(cut)
+            self.assertFalse(any((y, left + 90) in rules for y in cut))
+            return right - left, bottom - top
+
+        def boxes(pdf: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            found = {}
+            for term in terms:
+                found[term], = pdf[0].search_for(term)
+            self.assertLess(found["Overhead"][1], found["DataFirst"][1] - 5)
+            self.assertGreater(found["Underfoot"][1], found["DataLast"][1] + 5)
+            return found
+
+        for side in ("left", "right"):
+            chapter = template.replace("EDGE", side)
+            with self.subTest(side=side), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                preview = bounds(book)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    expected = boxes(pdf)
+                    for direct, visual in zip(bounds(pdf), preview):
+                        self.assertAlmostEqual(direct, visual, delta=2)
+                converted = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+                root = ET.fromstring(archive.read("word/document.xml"))
+            table = root.find(".//w:body/w:tbl", ns)
+            rows = table.findall("./w:tr", ns)
+            self.assertEqual(len(rows), 5)
+            self.assertFalse(table.findall("./w:tblPr/w:tblBorders/*", ns))
+            for row, label in ((rows[0], "Overhead"), (rows[-1], "Underfoot")):
+                band, = row.findall("./w:tc", ns)
+                self.assertEqual(band.find("./w:tcPr/w:gridSpan", ns).get(val), "4")
+                self.assertFalse(band.findall("./w:tcPr/w:tcBorders/*", ns))
+                self.assertEqual(band.find(".//m:oMath/m:r/m:t", ns).text, label)
+            self.assertEqual(len(table.findall(".//w:vMerge", ns)), 2)
+            self.assertTrue(any(edge.get(val) == "dashed" for edge in table.findall(".//w:tcBorders/*", ns)))
+            with doc_ex.open(converted) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                self.assertAlmostEqual(bounds(word)[0], preview[0], delta=4)
+                actual = boxes(pdf)
+                for term in terms:
+                    self.assertEqual(word[0].get_text().count(term), 1)
+                    self.assertAlmostEqual(actual[term][0] - actual["Spanning"][0],
+                                           expected[term][0] - expected["Spanning"][0], delta=1.0)
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 340)])
+        with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": chapter})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=192)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=192, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=192))), preview)
+                boxes(pdf)
+                bounds(pdf)
+
+        nested = chapter.replace('<m:mtable width=', '<m:msqrt><m:mtable width=')
+        nested = nested.replace('</m:mtable></m:math>', '</m:mtable></m:msqrt></m:math>')
+        with doc_ex.open(epub_fixture(chapter_one=nested)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML table rules inside equations"):
+                book.convert("docx")
 
     def test_mathml_ruled_labeled_rows_keep_native_borders_inside_the_data_grid(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">

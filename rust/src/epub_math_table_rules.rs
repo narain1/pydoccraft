@@ -1,5 +1,6 @@
 //! Measured MathML rules and editable Word cell borders share one span map.
 use roxmltree::Node;
+use std::ops::Range;
 use wordcraft_doc::{
     props::{Border, BorderStyle, Borders, Rgb},
     Table,
@@ -179,16 +180,17 @@ impl Rules {
         map: &Occupancy,
         color: Rgb,
         data_start: usize,
+        data_rows: Range<usize>,
     ) {
         let frame = border(self.frame, color);
-        let cell_frame = if data_start == 0 {
+        let cell_frame = if data_start == 0 && data_rows.len() == table.rows.len() {
             table.props.borders = Some(frame.map_or_else(Borders::default, Borders::box_));
             None
         } else {
             frame
         };
-        let [nrows, ncols] = [table.rows.len(), map.columns];
-        for (r, row) in table.rows.iter_mut().enumerate() {
+        let [nrows, ncols] = [data_rows.len(), map.columns];
+        for (r, row) in table.rows[data_rows].iter_mut().enumerate() {
             let mut col = 0usize;
             for cell in &mut row.cells {
                 let start = col.checked_sub(data_start);
