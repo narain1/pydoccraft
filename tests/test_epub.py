@@ -1515,6 +1515,63 @@ class EpubTests(unittest.TestCase):
                 results.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
         self.assertTrue(results[0] == results[1], "stepped and literal grid geometry differs")
 
+    def test_epub_css_trigonometry_preserves_fixed_layout_and_links(self) -> None:
+        source = fixed_spread_fixture([("", "white", 320, 140)])
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Angles</title>
+          <meta name="viewport" content="width=320,height=140"/><style>
+          html,body,p{{margin:0;font-size:10px}} #holder{{position:absolute;left:12px;top:16px;
+          width:{width}px;height:80px;background:#2a405b}}
+          #plate{{position:absolute;background:#96ba75}} #note{{position:absolute;top:107px}}
+          {style}</style></head><body><div id="holder"><p id="plate">
+          <a href="https://example.org/angles">Angle label</a></p></div>
+          <p id="note"><a href="#plate">Destination</a></p></body></html>"""
+        trig = """
+          #plate{width:calc(80px + 16px * sin(atan2(50% - 100px,0px)));
+            left:calc(12px + 8px * tan(atan(1)));top:calc(4px + 8px * sin(asin(.5)));
+            height:calc(36px + 4px * COS(acos(-.5)));padding-left:calc(8px * cos(100grad - .25turn));
+            width:calc(1px + sin(45px));width:atan2(1,2)}
+          #note{left:calc(12px + 6px * sin(pi / 2))}
+        """
+        for width, plate in ((160, 64), (200, 80), (240, 96)):
+            with self.subTest(width=width):
+                explicit = (f"#plate{{width:{plate}px;left:20px;top:8px;"
+                            "height:34px;padding-left:8px}#note{left:18px}")
+                results = []
+                for style in (trig, explicit):
+                    xhtml = chapter.format(width=width, style=style)
+                    with doc_ex.open(rewrite_epub(source, {"OEBPS/s0.xhtml": xhtml})) as book:
+                        pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                        rendered = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(rendered) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                        matches = pdf[0].search_for("Angle label")
+                        self.assertEqual(len(matches), 1)
+                        external, internal = pdf[0].get_links()
+                        self.assertEqual(external.uri, "https://example.org/angles")
+                        self.assertEqual(internal.metadata["target_page"], 0)
+                        results.append((pixels, matches, external.bbox, internal.bbox))
+                self.assertTrue(results[0] == results[1], "trigonometric and explicit geometry differ")
+
+    def test_epub_css_trigonometry_grid_tracks_and_tangent_limits(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Angle grid</title><style>
+          body,p{margin:0} section{display:grid;width:220px;gap:4px;grid-template-columns:TRACKS}
+          p:nth-child(odd){background:#1b6b80} p:nth-child(even){background:#ae6247}
+          </style></head><body><section><p>One</p><p>Two</p><p>Three</p></section></body></html>"""
+        outputs = []
+        for tracks in (
+            "calc(50px + 10px * tan(atan(sign(50% - 100px)))) "
+            "calc(40px + 8px * cos(max(100grad - .25turn,0rad))) 1fr",
+            "60px 48px 1fr",
+        ):
+            with doc_ex.open(epub_fixture(chapter_one=chapter.replace("TRACKS", tracks))) as book:
+                outputs.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertTrue(outputs[0] == outputs[1], "trigonometric grid sizes differ")
+        for tracks in ("calc(1px * tan(90deg))", "calc(1px * tan(atan2(25%,0px)))"):
+            with self.subTest(tracks=tracks):
+                with doc_ex.open(epub_fixture(chapter_one=chapter.replace("TRACKS", tracks))) as book:
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"):
+                        book.render_page(0, dpi=96)
+
     def test_epub_css_calc_rejects_unsupported_operations_and_excess_geometry(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
           <style>div {background:green; CSS}</style></head><body><div>Panel</div></body></html>"""

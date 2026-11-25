@@ -14,6 +14,10 @@ use crate::{
     EngineError,
 };
 
+#[path = "epub_css_trig.rs"]
+mod trigonometry;
+use trigonometry::{Input, Trig};
+
 const MAX_EXPRESSION_BYTES: usize = 512;
 const MAX_RESULT: f32 = 25_000.0;
 const MAX_PERCENT: f32 = 10_000.0;
@@ -96,6 +100,8 @@ enum Expression {
     Sign(Box<Expression>),
     Product(Box<Expression>, Box<Expression>),
     Step(Step, Box<Expression>, Box<Expression>),
+    Trig(Trig, Box<Expression>),
+    Atan2(Box<Expression>, Box<Expression>),
 }
 
 impl Expression {
@@ -115,6 +121,8 @@ impl Expression {
             Self::Sign(value) => sign(value.at(basis)),
             Self::Product(left, right) => left.at(basis) * right.at(basis),
             Self::Step(step, value, interval) => step.evaluate(value.at(basis), interval.at(basis)),
+            Self::Trig(operation, value) => operation.evaluate(value.at(basis)),
+            Self::Atan2(y, x) => trigonometry::atan2(y.at(basis), x.at(basis)),
         }
     }
 }
@@ -248,6 +256,24 @@ impl Calculation {
 enum Value {
     Number(Calculation),
     Length(Calculation),
+    Angle(Calculation),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Measure {
+    Number,
+    Length,
+    Angle,
+}
+
+impl Measure {
+    fn supply(self, value: Calculation) -> Value {
+        match self {
+            Self::Number => Value::Number(value),
+            Self::Length => Value::Length(value),
+            Self::Angle => Value::Angle(value),
+        }
+    }
 }
 
 impl Value {
@@ -255,11 +281,30 @@ impl Value {
         Self::Number(Calculation::constant(value))
     }
 
-    fn map(self, map: impl FnOnce(Calculation) -> Calculation) -> Self {
+    fn split(self) -> (Measure, Calculation) {
         match self {
-            Self::Number(value) => Self::Number(map(value)),
-            Self::Length(value) => Self::Length(map(value)),
+            Self::Number(value) => (Measure::Number, value),
+            Self::Length(value) => (Measure::Length, value),
+            Self::Angle(value) => (Measure::Angle, value),
         }
+    }
+
+    fn map(self, map: impl FnOnce(Calculation) -> Calculation) -> Self {
+        let (kind, value) = self.split();
+        kind.supply(map(value))
+    }
+
+    fn combine(
+        self,
+        other: Self,
+        combine: impl FnOnce(Calculation, Calculation) -> Calculation,
+    ) -> Result<Self, Issue> {
+        let (kind, one) = self.split();
+        let (other_kind, other) = other.split();
+        if kind != other_kind {
+            return Err(Issue::Invalid);
+        }
+        Ok(kind.supply(combine(one, other)))
     }
 
     fn scale(self, factor: f32) -> Self {
@@ -267,29 +312,29 @@ impl Value {
     }
 
     fn add(self, other: Self) -> Result<Self, Issue> {
-        match (self, other) {
-            (Self::Number(one), Self::Number(other)) => Ok(Self::Number(one.add(other))),
-            (Self::Length(one), Self::Length(other)) => Ok(Self::Length(one.add(other))),
-            _ => Err(Issue::Invalid),
-        }
+        self.combine(other, Calculation::add)
     }
 
     fn compare(comparison: Comparison, mut values: Vec<Self>) -> Result<Self, Issue> {
         if values.len() == 1 {
             return values.pop().ok_or(Issue::Invalid);
         }
-        let numeric = matches!(values.first(), Some(Self::Number(_)));
+        let kind = match values.first() {
+            Some(Self::Number(_)) => Measure::Number,
+            Some(Self::Length(_)) => Measure::Length,
+            Some(Self::Angle(_)) => Measure::Angle,
+            None => return Err(Issue::Invalid),
+        };
         let mut parts = Vec::with_capacity(values.len());
         let mut nodes = 1;
         let mut point_bound = None::<f32>;
         let mut percent_bound = None::<f32>;
         let mut relative_scalar = false;
         for value in values {
-            let value = match value {
-                Self::Number(value) if numeric => value,
-                Self::Length(value) if !numeric => value,
-                _ => return Err(Issue::Invalid),
-            };
+            let (current_kind, value) = value.split();
+            if current_kind != kind {
+                return Err(Issue::Invalid);
+            }
             point_bound = point_bound
                 .into_iter()
                 .chain(value.point_bound)
@@ -302,25 +347,17 @@ impl Value {
             nodes += value.nodes;
             parts.push(value.expression);
         }
-        if parts.is_empty() {
-            return Err(Issue::Invalid);
-        }
-        let value = Calculation {
+        Ok(kind.supply(Calculation {
             expression: Expression::Compare(comparison, parts),
             point_bound,
             percent_bound,
             relative_scalar,
             nodes,
-        };
-        Ok(if numeric {
-            Self::Number(value)
-        } else {
-            Self::Length(value)
-        })
+        }))
     }
 
     fn sign(self) -> Self {
-        let (Self::Number(value) | Self::Length(value)) = self;
+        let (_, value) = self.split();
         if let Some(fixed) = value.fixed() {
             if fixed.is_finite() {
                 return Self::number(sign(fixed));
@@ -336,15 +373,9 @@ impl Value {
     }
 
     fn step(self, operation: Step, interval: Self) -> Result<Self, Issue> {
-        match (self, interval) {
-            (Self::Number(value), Self::Number(interval)) => {
-                Ok(Self::Number(value.stepped(operation, interval)))
-            }
-            (Self::Length(value), Self::Length(interval)) => {
-                Ok(Self::Length(value.stepped(operation, interval)))
-            }
-            _ => Err(Issue::Invalid),
-        }
+        self.combine(interval, |value, interval| {
+            value.stepped(operation, interval)
+        })
     }
 }
 
@@ -401,7 +432,8 @@ enum Issue {
 pub(super) fn is_math(value: &str) -> bool {
     value.split_once('(').is_some_and(|(name, _)| {
         [
-            "calc", "min", "max", "clamp", "round", "mod", "rem", "abs", "sign",
+            "calc", "min", "max", "clamp", "round", "mod", "rem", "abs", "sign", "sin", "cos",
+            "tan", "asin", "acos", "atan", "atan2",
         ]
         .iter()
         .any(|keyword| name.eq_ignore_ascii_case(keyword))
@@ -441,6 +473,11 @@ fn evaluate(
             let raw = format!("{}{unit}", dimension.value.raw);
             let resolved = points(&raw, font, viewport).ok_or(Issue::Unsupported)?;
             Value::Length(Calculation::linear(Some(resolved), None))
+        }
+        ComponentValue::Dimension(dimension) if dimension.kind == DimensionKind::Angle => {
+            let degrees = trigonometry::degrees(dimension.value.value, &dimension.unit.name)
+                .ok_or(Issue::Invalid)?;
+            Value::Angle(Calculation::constant(degrees))
         }
         ComponentValue::Dimension(_) => return Err(Issue::Invalid),
         ComponentValue::InterpolableIdent(name) => match ident(name).ok_or(Issue::Unsupported)? {
@@ -495,28 +532,29 @@ fn evaluate(
         }
         _ => return Err(Issue::Unsupported),
     };
-    let value = match value {
-        Value::Number(scalar) => match scalar.fixed() {
-            Some(number) => Value::number(number),
-            None => Value::Number(scalar),
-        },
-        value => value,
+    let (kind, calculation) = value.split();
+    let value = if kind != Measure::Length {
+        calculation
+            .fixed()
+            .map_or(calculation, Calculation::constant)
+    } else {
+        calculation
     };
     let bounded = |value: f32, limit| value.is_finite() && value.abs() <= limit;
-    let fits = match &value {
-        Value::Number(length) | Value::Length(length) => {
-            length
-                .point_bound
-                .is_none_or(|value| bounded(value, MAX_RESULT))
-                && length
-                    .percent_bound
-                    .is_none_or(|value| bounded(value, MAX_PERCENT))
-        }
-    };
+    let fits = value
+        .point_bound
+        .is_none_or(|value| bounded(value, MAX_RESULT))
+        && value
+            .percent_bound
+            .is_none_or(|value| bounded(value, MAX_PERCENT));
     if !fits {
         return Err(Issue::Limit);
     }
-    Ok(value)
+    Ok(kind.supply(value))
+}
+
+fn comma(arg: &ComponentValue<'_>) -> bool {
+    matches!(arg, ComponentValue::Delimiter(delimiter) if delimiter.kind == DelimiterKind::Comma)
 }
 
 fn evaluate_function(
@@ -547,7 +585,12 @@ fn evaluate_function(
     {
         return stepped_function(name, args, parse);
     }
-    let comma = |arg: &ComponentValue<'_>| matches!(arg, ComponentValue::Delimiter(delimiter) if delimiter.kind == DelimiterKind::Comma);
+    if ["sin", "cos", "tan", "asin", "acos", "atan", "atan2"]
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    {
+        return evaluate_trig(&name.to_ascii_lowercase(), args, parse);
+    }
     if name.eq_ignore_ascii_case("clamp") {
         let [lower, first, center, second, upper] = args else {
             return Err(Issue::Invalid);
@@ -597,7 +640,6 @@ fn stepped_function(
     args: &[ComponentValue<'_>],
     parse: impl Fn(&ComponentValue<'_>) -> Result<Value, Issue>,
 ) -> Result<Value, Issue> {
-    let comma = |arg: &ComponentValue<'_>| matches!(arg, ComponentValue::Delimiter(delimiter) if delimiter.kind == DelimiterKind::Comma);
     let (step, args) = if name.eq_ignore_ascii_case("round") {
         let strategy = match args {
             [ComponentValue::InterpolableIdent(strategy), separator, rest @ ..]
@@ -630,6 +672,69 @@ fn stepped_function(
     }
 }
 
+fn evaluate_trig(
+    name: &str,
+    args: &[ComponentValue<'_>],
+    parse: impl Fn(&ComponentValue<'_>) -> Result<Value, Issue>,
+) -> Result<Value, Issue> {
+    if name == "atan2" {
+        let [y, separator, x] = args else {
+            return Err(Issue::Invalid);
+        };
+        if !comma(separator) {
+            return Err(Issue::Invalid);
+        }
+        let (y_kind, y) = parse(y)?.split();
+        let (x_kind, x) = parse(x)?.split();
+        if y_kind != x_kind {
+            return Err(Issue::Invalid);
+        }
+        let relative = y.uses_basis() || x.uses_basis();
+        return Ok(Value::Angle(Calculation {
+            expression: Expression::Atan2(Box::new(y.expression), Box::new(x.expression)),
+            point_bound: Some(180.0),
+            percent_bound: None,
+            relative_scalar: relative,
+            nodes: y.nodes + x.nodes + 1,
+        }));
+    }
+    let [argument] = args else {
+        return Err(Issue::Invalid);
+    };
+    let (kind, value) = parse(argument)?.split();
+    let input = match kind {
+        Measure::Number => Input::Radians,
+        Measure::Angle => Input::Degrees,
+        Measure::Length => return Err(Issue::Invalid),
+    };
+    let (operation, output) = match name {
+        "sin" => (Trig::Sin(input), Measure::Number),
+        "cos" => (Trig::Cos(input), Measure::Number),
+        "tan" => (Trig::Tan(input), Measure::Number),
+        "asin" if kind == Measure::Number => (Trig::Asin, Measure::Angle),
+        "acos" if kind == Measure::Number => (Trig::Acos, Measure::Angle),
+        "atan" if kind == Measure::Number => (Trig::Atan, Measure::Angle),
+        _ => return Err(Issue::Invalid),
+    };
+    if let Some(fixed) = value.fixed() {
+        let result = operation.evaluate(fixed);
+        if result.is_infinite() {
+            return Err(Issue::Unsupported);
+        }
+        return Ok(output.supply(Calculation::constant(result)));
+    }
+    let bound = operation
+        .bound(value.point_bound.unwrap_or_default())
+        .ok_or(Issue::Unsupported)?;
+    Ok(output.supply(Calculation {
+        expression: Expression::Trig(operation, Box::new(value.expression)),
+        point_bound: Some(bound),
+        percent_bound: None,
+        relative_scalar: true,
+        nodes: value.nodes + 1,
+    }))
+}
+
 fn used_length(value: f32, signed: bool) -> f32 {
     // CSS censors NaN at the boundary of a top-level math expression.
     if value.is_nan() || !signed && value < 0.0 {
@@ -641,7 +746,7 @@ fn used_length(value: f32, signed: bool) -> f32 {
 
 pub(super) fn valid(source: &str, percentages: bool) -> bool {
     match read(source, 12.0, [100.0; 2]) {
-        Ok(Value::Number(_)) | Err(Issue::Invalid) => false,
+        Ok(Value::Number(_) | Value::Angle(_)) | Err(Issue::Invalid) => false,
         Ok(Value::Length(length)) => !length.uses_basis() || percentages,
         _ => true,
     }
