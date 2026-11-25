@@ -101,13 +101,10 @@ pub(super) fn edit_spans(
         let elapsed_movie = i128::from(span.movie_end - span.movie_start);
         let media_distance = elapsed_media * i128::from(movie_timescale);
         let movie_distance = elapsed_movie * i128::from(media_timescale);
-        if media_distance < movie_distance {
-            return Err(unsupported(unsupported_layout));
-        }
-        if media_distance > movie_distance || gap != 0 {
+        if media_distance != movie_distance || gap != 0 {
             if !spans.is_empty() {
                 return Err(unsupported(
-                    "MP4 edit lists support one forward source jump or interior empty interval",
+                    "MP4 edit lists support one source jump or interior empty interval",
                 ));
             }
             spans.push(span);

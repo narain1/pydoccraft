@@ -516,6 +516,9 @@ fn playback_range(
                 if interval.is_empty() {
                     return Err(invalid("MP4 video frames are shorter than a microsecond"));
                 }
+                if timeline.len() == MAX_ACCESS_UNITS {
+                    return Err(limited("MP4 video presentation frame count exceeds limits"));
+                }
                 first_packet = first_packet.min(index);
                 timeline.push(FrameTime {
                     pts,

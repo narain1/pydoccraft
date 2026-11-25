@@ -191,6 +191,7 @@
 - [x] Preserve the implicit empty MP4 tail of a shorter continuous edited track with bounded AAC silence and the original chapter and caption clock.
 - [x] Combine multiple MP4 rate-1 edits that are exactly contiguous in the source clock, preserving empty intervals and matching a single edited AVC, AAC and chapter interval.
 - [x] Play one forward MP4 source jump across adjacent movie intervals, including cropped AVC, sample-aligned AAC and a chapter or caption spanning the edit.
+- [x] Play one backward MP4 source jump to repeat a rate-1 media span. Restart AVC and sample-aligned AAC, preserve positioned captions, and join touching chapter projections.
 - [x] Preserve one interior empty MP4 edit through gap-only and crossing seeks, silent AAC, cropped AVC and separately timed chapters and captions.
 - [x] Resolve local MP4 and M4A media fragment IDs from bounded Nero chapter tables, validate coexistence with QuickTime and preserve time-fragment playback.
 - [x] Resolve legacy Adobe F4V chapter tables on the movie clock and synchronize cropped H.264, AAC and captions while preserving Nero and QuickTime behavior.

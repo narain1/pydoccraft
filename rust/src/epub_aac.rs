@@ -165,7 +165,7 @@ impl Track {
                         .is_multiple_of(time_base.den as u128))
             {
                 return Err(unsupported(
-                    "MP4 AAC forward edits require sample-aligned boundaries",
+                    "MP4 AAC discontinuous edits require sample-aligned boundaries",
                 ));
             }
             let (start, duration) = if edit.movie_start == 0 && tail.is_none() && edits.len() == 1 {
