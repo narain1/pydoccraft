@@ -72,6 +72,21 @@ def rewrite_epub(data: bytes, updates: dict[str, bytes | str]) -> bytes:
     return output.getvalue()
 
 
+def mp4_box(tag: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I4s", len(payload) + 8, tag) + payload
+
+
+def mp4_boxes(data: bytes) -> list[tuple[bytes, bytes]]:
+    result = []
+    offset = 0
+    while offset < len(data):
+        size, tag = struct.unpack_from(">I4s", data, offset)
+        assert 8 <= size <= len(data) - offset
+        result.append((tag, data[offset + 8:offset + size]))
+        offset += size
+    return result
+
+
 def mp4_with_chapter_track(
     movie: bytes,
     chapters: tuple[tuple[int, bytes], ...],
@@ -81,51 +96,38 @@ def mp4_with_chapter_track(
     first_offset: int | None = None,
     duplicate_reference: bool = False,
 ) -> bytes:
-    def box(tag: bytes, payload: bytes) -> bytes:
-        return struct.pack(">I4s", len(payload) + 8, tag) + payload
-
-    def boxes(data: bytes) -> list[tuple[bytes, bytes]]:
-        result = []
-        offset = 0
-        while offset < len(data):
-            size, tag = struct.unpack_from(">I4s", data, offset)
-            assert 8 <= size <= len(data) - offset
-            result.append((tag, data[offset + 8:offset + size]))
-            offset += size
-        return result
-
     # Keep all original A/V sample offsets by replacing the old movie index with
     # padding. Append the new chapter samples followed by a rebuilt movie index.
-    top = boxes(movie)
+    top = mp4_boxes(movie)
     original, = (data for tag, data in top if tag == b"moov")
-    children = boxes(original)
+    children = mp4_boxes(original)
     mvhd, = (data for tag, data in children if tag == b"mvhd")
     assert struct.unpack_from(">III", mvhd, 12)[:2] == (1000, 1000)
     assert len([tag for tag, _ in children if tag == b"trak"]) == 2
     payloads = [struct.pack(">H", len(title)) + title for _, title in chapters]
-    media = box(b"mdat", b"".join(payloads))
+    media = mp4_box(b"mdat", b"".join(payloads))
 
-    stsd = box(b"stsd", struct.pack(">II", 0, 1) + box(b"tx3g", bytes(6) + b"\x00\x01" + bytes(30)))
-    stts = box(b"stts", struct.pack(">II", 0, len(chapters)) + b"".join(
+    stsd = mp4_box(b"stsd", struct.pack(">II", 0, 1) + mp4_box(b"tx3g", bytes(6) + b"\x00\x01" + bytes(30)))
+    stts = mp4_box(b"stts", struct.pack(">II", 0, len(chapters)) + b"".join(
         struct.pack(">II", 1, duration) for duration, _ in chapters
     ))
-    stsc = box(b"stsc", struct.pack(">IIIII", 0, 1, 1, len(chapters), 1))
-    stsz = box(b"stsz", struct.pack(">III", 0, 0, len(chapters)) + b"".join(
+    stsc = mp4_box(b"stsc", struct.pack(">IIIII", 0, 1, 1, len(chapters), 1))
+    stsz = mp4_box(b"stsz", struct.pack(">III", 0, 0, len(chapters)) + b"".join(
         struct.pack(">I", len(payload)) for payload in payloads
     ))
-    stco = box(b"stco", struct.pack(">III", 0, 1, len(movie) + 8 if first_offset is None else first_offset))
-    stbl = box(b"stbl", stsd + stts + stsc + stsz + stco)
-    url = box(b"url ", b"\x00\x00\x00\x00https://example.invalid/title\x00" if external else b"\x00\x00\x00\x01")
-    dinf = box(b"dinf", box(b"dref", struct.pack(">II", 0, 1) + url))
-    minf = box(b"minf", box(b"nmhd", bytes(4)) + dinf + stbl)
-    mdhd = box(b"mdhd", struct.pack(">IIIIIHH", 0, 0, 0, 3000, sum(d for d, _ in chapters), 0x55C4, 0))
-    hdlr = box(b"hdlr", bytes(8) + b"text" + bytes(12) + b"Chapters\x00")
+    stco = mp4_box(b"stco", struct.pack(">III", 0, 1, len(movie) + 8 if first_offset is None else first_offset))
+    stbl = mp4_box(b"stbl", stsd + stts + stsc + stsz + stco)
+    url = mp4_box(b"url ", b"\x00\x00\x00\x00https://example.invalid/title\x00" if external else b"\x00\x00\x00\x01")
+    dinf = mp4_box(b"dinf", mp4_box(b"dref", struct.pack(">II", 0, 1) + url))
+    minf = mp4_box(b"minf", mp4_box(b"nmhd", bytes(4)) + dinf + stbl)
+    mdhd = mp4_box(b"mdhd", struct.pack(">IIIIIHH", 0, 0, 0, 3000, sum(d for d, _ in chapters), 0x55C4, 0))
+    hdlr = mp4_box(b"hdlr", bytes(8) + b"text" + bytes(12) + b"Chapters\x00")
     edits = struct.pack(">II", 0, 2) + struct.pack(">Iihh", 25, -1, 1, 0) + struct.pack(">Iihh", 975, 20, 1, 0)
-    edts = box(b"edts", box(b"elst", edits))
+    edts = mp4_box(b"edts", mp4_box(b"elst", edits))
 
     index = next(index for index, (tag, _) in enumerate(children) if tag == b"trak")
     video = children[index][1]
-    original_tkhd, = (data for tag, data in boxes(video) if tag == b"tkhd")
+    original_tkhd, = (data for tag, data in mp4_boxes(video) if tag == b"tkhd")
     assert original_tkhd[0] == 0
     tkhd = bytearray(original_tkhd)
     struct.pack_into(">I", tkhd, 0, 0)
@@ -133,11 +135,32 @@ def mp4_with_chapter_track(
     tkhd[-8:] = bytes(8)
     if references:
         targets = b"".join(struct.pack(">I", target) for target in references)
-        reference = box(b"chap", targets)
-        children[index] = (b"trak", video + box(b"tref", reference * (2 if duplicate_reference else 1)))
-    children.append((b"trak", box(b"tkhd", bytes(tkhd)) + edts + box(b"mdia", mdhd + hdlr + minf)))
-    media_index = box(b"moov", b"".join(box(tag, data) for tag, data in children))
-    return b"".join(box(b"free" if tag == b"moov" else tag, data) for tag, data in top) + media + media_index
+        reference = mp4_box(b"chap", targets)
+        children[index] = (b"trak", video + mp4_box(b"tref", reference * (2 if duplicate_reference else 1)))
+    children.append((b"trak", mp4_box(b"tkhd", bytes(tkhd)) + edts + mp4_box(b"mdia", mdhd + hdlr + minf)))
+    media_index = mp4_box(b"moov", b"".join(mp4_box(tag, data) for tag, data in children))
+    return b"".join(mp4_box(b"free" if tag == b"moov" else tag, data) for tag, data in top) + media + media_index
+
+
+def mp4_chapter_table(entries: tuple[tuple[int, bytes], ...], *, version: int = 1) -> bytes:
+    count = bytes([len(entries)]) if version == 0 else struct.pack(">BI", 0, len(entries))
+    markers = b"".join(struct.pack(">QB", time, len(title)) + title for time, title in entries)
+    return bytes([version, 0, 0, 0]) + count + markers
+
+
+def mp4_with_chapter_table(movie: bytes, *tables: bytes) -> bytes:
+    top = mp4_boxes(movie)
+    original, = (data for tag, data in top if tag == b"moov")
+    index = []
+    user_data = b""
+    for tag, data in mp4_boxes(original):
+        if tag == b"udta":
+            user_data += data
+        else:
+            index.append(mp4_box(tag, data))
+    index.append(mp4_box(b"udta", user_data + b"".join(mp4_box(b"chpl", table) for table in tables)))
+    preserved = b"".join(mp4_box(b"free" if tag == b"moov" else tag, data) for tag, data in top)
+    return preserved + mp4_box(b"moov", b"".join(index))
 
 
 def narrated_epub(*, first_clip_end: str = "00:00:01.125", first_target: str = "../one.xhtml#caf%C3%A9") -> tuple[bytes, bytes]:
@@ -5261,6 +5284,138 @@ Trailing
                     next(book.epub_embedded_video(0, 0, source_index=0))
                 if message == "repeated MP4 chapter reference":
                     self.assertEqual(next(book.epub_embedded_video(0, 1)).start_us, 100_000)
+
+    def test_mp4_nero_chapters_keep_exact_video_audio_and_caption_timing(self) -> None:
+        movie = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        title = "Café & étude".encode()
+        markers = ((0, b"Opening"), (1_646_661, title), (2_650_001, b"Tail"))
+        v1 = mp4_with_chapter_table(movie, mp4_chapter_table(markers))
+        v0 = mp4_with_chapter_table(movie, mp4_chapter_table(markers, version=0))
+        wide = mp4_with_chapter_table(movie, mp4_chapter_table(
+            tuple((i * 10_000, f"Chapter {i}".encode()) for i in range(300)),
+        ))
+        title_id = "Caf%C3%A9%20%26%20%C3%A9tude"
+        chapter = f'''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Nero chapters</title></head>
+          <body><video src="chapters.mp4#id={title_id}&amp;xywh=percent:25,25,50,50">
+          <track src="words.vtt" kind="captions" srclang="en"/></video>
+          <video src="chapters.mp4#t=0.164667,0.265001&amp;xywh=percent:25,25,50,50">
+          <track src="words.vtt" kind="captions" srclang="en"/></video>
+          <audio src="compact.m4a#id={title_id}"/>
+          <video src="chapters.mp4#id=Tail"/>
+          <video src="wide.mp4#id=Chapter%20298"/>
+          </body></html>'''
+        path = "OEBPS/chapters.mp4"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Nero chapters", chapter, "OEBPS/chapters.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("video/mp4", v1),
+                    "OEBPS/compact.m4a": doc_ex.EpubResource("audio/mp4", v0),
+                    "OEBPS/wide.mp4": doc_ex.EpubResource("video/mp4", wide),
+                    "OEBPS/words.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00.150 --> 00:00.280\nChapter text\n",
+                    ),
+                },
+            )
+        with doc_ex.open(data) as book:
+            self.assertEqual(book.epub_embedded_media(0)[0].sources[0].fragment_id, title.decode())
+            pictures = list(book.epub_embedded_video(0, 0, text_track=0))
+            self.assertEqual(pictures, list(book.epub_embedded_video(0, 1, text_track=0)))
+            self.assertEqual((pictures[0].start_us, pictures[-1].start_us + pictures[-1].duration_us),
+                             (164_667, 265_001))
+            self.assertTrue(all((f.width, f.height, f.pixel_aspect_ratio) == (48, 32, (4, 3)) for f in pictures))
+            self.assertTrue(all([(cue.start_us, cue.end_us, cue.text) for cue in f.text_cues]
+                                == [(164_667, 265_001, "Chapter text")] for f in pictures))
+            seek = list(book.epub_embedded_video(0, 0, start_us=175_001, end_us=237_002, text_track=0))
+            self.assertEqual(seek, list(book.epub_embedded_video(
+                0, 1, start_us=175_001, end_us=237_002, text_track=0,
+            )))
+            audio = list(book.epub_embedded_audio(0, 0))
+            self.assertEqual(audio, list(book.epub_embedded_audio(0, 1)))
+            self.assertEqual(audio, list(book.epub_embedded_audio(0, 2)))
+            self.assertEqual(sum(clip.frame_count for clip in audio), 4816)
+            self.assertEqual(list(book.epub_embedded_audio(0, 0, start_us=265_001)), [])
+            tail = list(book.epub_embedded_video(0, 3))
+            self.assertEqual((tail[0].start_us, tail[-1].start_us + tail[-1].duration_us), (265_001, 1_000_000))
+            wide_picture, = book.epub_embedded_video(0, 4)
+            self.assertEqual((wide_picture.start_us, wide_picture.duration_us), (298_000, 1000))
+            revised = book.edit_epub_structure(
+                replacements={0: chapter.replace("Nero chapters", "Revised chapters")},
+            )
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened.epub_embedded_media(0)[0].sources[0].uri,
+                             f"chapters.mp4#id={title_id}&xywh=percent:25,25,50,50")
+            self.assertEqual(reopened.read_epub_resource(path), v1)
+            self.assertEqual(list(reopened.epub_embedded_video(0, 0, text_track=0)), pictures)
+
+    def test_mp4_nero_and_quicktime_chapters_resolve_by_title_or_reject_conflicts(self) -> None:
+        movie = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        quicktime = mp4_with_chapter_track(movie, ((439, b"track-only"), (301, b"shared"), (2280, b"track-tail")))
+        same = ((0, b"table-only"), (1_646_661, b"shared"), (2_650_000, b"table-tail"))
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Multiple chapter indexes</title></head>
+          <body><video src="movie.mp4#id=shared"/><video src="movie.mp4#id=track-only"/>
+          <video src="movie.mp4#id=table-only"/><video src="movie.mp4#t=0.164667,0.265"/></body></html>'''
+        path = "OEBPS/movie.mp4"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Chapters", chapter, "OEBPS/chapters.xhtml")],
+                resources={path: doc_ex.EpubResource(
+                    "video/mp4", mp4_with_chapter_table(quicktime, mp4_chapter_table(same)),
+                )},
+            )
+        with doc_ex.open(data) as book:
+            self.assertEqual(list(book.epub_embedded_video(0, 0)), list(book.epub_embedded_video(0, 3)))
+            self.assertEqual(next(book.epub_embedded_video(0, 1)).start_us, 25_000)
+            self.assertEqual(next(book.epub_embedded_video(0, 2)).start_us, 0)
+        for table, message in (
+            (mp4_chapter_table((same[0], (1_646_675, b"shared"), same[2])), "ambiguous across chapter indexes"),
+            (mp4_chapter_table((same[0], same[1], (2_650_001, b"table-tail"))), "ambiguous across chapter indexes"),
+            (mp4_chapter_table((same[0], same[1], (2_650_001, b"shared"))), "ambiguous in the chapter table"),
+            (mp4_chapter_table(same) + b"unread", "malformed MP4 chapter table"),
+        ):
+            with self.subTest(message=message), doc_ex.open(
+                rewrite_epub(data, {path: mp4_with_chapter_table(quicktime, table)})
+            ) as book:
+                with self.assertRaisesRegex(doc_ex.MalformedDocumentError, message):
+                    next(book.epub_embedded_video(0, 0))
+                self.assertEqual(next(book.epub_embedded_video(0, 3)).start_us, 164_667)
+
+    def test_mp4_nero_chapter_table_bounds_leave_plain_time_fragments_available(self) -> None:
+        movie = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        marker = mp4_chapter_table(((1_000_000, b"marker"),))
+        path = "OEBPS/movie.mp4"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Nero chapters</title></head>
+          <body><video src="movie.mp4#id=marker"/><video src="movie.mp4#t=0.1,0.2"/></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Chapters", chapter, "OEBPS/chapters.xhtml")],
+                resources={path: doc_ex.EpubResource("video/mp4", mp4_with_chapter_table(movie, marker))},
+            )
+        for tables, error, message in (
+            ((b"\x02" + marker[1:],), doc_ex.UnsupportedFormatError, "chapter table version"),
+            ((marker[:3] + b"\x01" + marker[4:],), doc_ex.MalformedDocumentError, "malformed MP4 chapter table"),
+            ((marker[:4] + b"\x01" + marker[5:],), doc_ex.MalformedDocumentError, "malformed MP4 chapter table"),
+            ((marker[:5] + struct.pack(">I", 4097),), doc_ex.UnsafeArchiveError, "exceeds 4096 markers"),
+            ((marker[:-1],), doc_ex.MalformedDocumentError, "malformed MP4 chapter table"),
+            ((mp4_chapter_table(()) + b"x",), doc_ex.MalformedDocumentError, "malformed MP4 chapter table"),
+            ((mp4_chapter_table(((1, b"\xFF"),)),), doc_ex.MalformedDocumentError, "malformed MP4 chapter table"),
+            ((mp4_chapter_table(((300, b"marker"), (299, b"tail"))),),
+             doc_ex.MalformedDocumentError, "starts must be strictly increasing"),
+            ((mp4_chapter_table(((300, b"marker"), (300, b"tail"))),),
+             doc_ex.MalformedDocumentError, "starts must be strictly increasing"),
+            ((mp4_chapter_table(((10_000_000, b"marker"),)),),
+             doc_ex.MalformedDocumentError, "outside the movie"),
+            ((mp4_chapter_table((((1 << 64) - 1, b"marker"),)),),
+             doc_ex.UnsafeArchiveError, "exceeds its clock budget"),
+            ((mp4_chapter_table(((1, b"unknown"),)),), doc_ex.MalformedDocumentError, "ID .* absent"),
+            ((marker, marker), doc_ex.MalformedDocumentError, "duplicate MP4 chapter table"),
+        ):
+            with self.subTest(message=message), doc_ex.open(
+                rewrite_epub(data, {path: mp4_with_chapter_table(movie, *tables)})
+            ) as book:
+                with self.assertRaisesRegex(error, message):
+                    next(book.epub_embedded_video(0, 0, source_index=0))
+                self.assertEqual(next(book.epub_embedded_video(0, 1)).start_us, 100_000)
 
     def test_embedded_mp4_video_frames_follow_presentation_order_and_clip_bounds(self) -> None:
         path = "OEBPS/clip.mp4"

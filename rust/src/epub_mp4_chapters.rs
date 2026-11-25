@@ -1,4 +1,4 @@
-//! Resolve a local QuickTime chapter marker to the MP4 movie timeline.
+//! Resolve local QuickTime and Nero chapter titles on the MP4 movie timeline.
 use std::{borrow::Cow, io::Cursor, ops::Range, sync::Arc};
 
 use oxideav_core::{CodecRegistry, Demuxer, StreamInfo};
@@ -13,6 +13,7 @@ use crate::epub::{
 const MAX_CHAPTERS: usize = 4096;
 const MAX_SAMPLE_BYTES: usize = 64 * 1024;
 const MAX_TITLE_BYTES: usize = 1024;
+const NERO_TIMESCALE: u32 = 10_000_000;
 
 pub(crate) fn chapter_interval(
     epub: &[u8],
@@ -31,7 +32,40 @@ fn resolve(bytes: Vec<u8>, id: &str) -> Result<Range<u64>, EngineError> {
     let bytes: Arc<[u8]> = bytes.into();
     let demux =
         open_typed(Box::new(Cursor::new(bytes.clone())), &CodecRegistry::new()).map_err(invalid)?;
-    let chapter = chapter_stream(&demux)?;
+    let track = chapter_stream(&demux)?;
+    let table = bounds
+        .chapter_list
+        .as_ref()
+        .map(|range| &bytes[range.clone()]);
+    if track.is_none() && table.is_none() {
+        return Err(unsupported(
+            "MP4 fragment IDs require a local QuickTime chapter track or chapter table",
+        ));
+    }
+    let track_interval = track
+        .map(|track| track_interval(&bytes, &bounds, &demux, track, id))
+        .transpose()?
+        .flatten();
+    let table_interval = table
+        .map(|table| table_interval(table, demux.movie_header(), id))
+        .transpose()?
+        .flatten();
+    match (track_interval, table_interval) {
+        (Some(track), Some(table)) if track != table => Err(invalid(format!(
+            "MP4 chapter ID {id:?} is ambiguous across chapter indexes"
+        ))),
+        (Some(interval), _) | (_, Some(interval)) => Ok(interval),
+        _ => Err(invalid(format!("MP4 chapter ID {id:?} is absent"))),
+    }
+}
+
+fn track_interval(
+    bytes: &[u8],
+    bounds: &Mp4Bounds,
+    demux: &Mp4Demuxer,
+    chapter: &StreamInfo,
+    id: &str,
+) -> Result<Option<Range<u64>>, EngineError> {
     let stream = chapter.index;
     let header = demux
         .track_header(stream)
@@ -79,7 +113,7 @@ fn resolve(bytes: Vec<u8>, id: &str) -> Result<Range<u64>, EngineError> {
             .composition_time
             .checked_add(sample.duration)
             .ok_or_else(|| invalid("MP4 chapter sample time overflow"))?;
-        if title(&bytes, &bounds, sample)? == id
+        if title(bytes, bounds, sample)? == id
             && selected
                 .replace(sample.composition_time..previous_end)
                 .is_some()
@@ -87,11 +121,12 @@ fn resolve(bytes: Vec<u8>, id: &str) -> Result<Range<u64>, EngineError> {
             return Err(invalid(format!("MP4 chapter ID {id:?} is ambiguous")));
         }
     }
-    let selected = selected.ok_or_else(|| invalid(format!("MP4 chapter ID {id:?} is absent")))?;
-    clock.interval(selected)
+    selected
+        .map(|interval| clock.interval(interval))
+        .transpose()
 }
 
-fn chapter_stream(demux: &Mp4Demuxer) -> Result<&StreamInfo, EngineError> {
+fn chapter_stream(demux: &Mp4Demuxer) -> Result<Option<&StreamInfo>, EngineError> {
     let mut target = None;
     for stream in demux.streams() {
         if demux
@@ -109,8 +144,9 @@ fn chapter_stream(demux: &Mp4Demuxer) -> Result<&StreamInfo, EngineError> {
             }
         }
     }
-    let target = target
-        .ok_or_else(|| unsupported("MP4 fragment IDs require a local QuickTime chapter track"))?;
+    let Some(target) = target else {
+        return Ok(None);
+    };
     let mut candidates = demux.streams().iter().filter(|stream| {
         demux
             .track_header(stream.index)
@@ -124,7 +160,86 @@ fn chapter_stream(demux: &Mp4Demuxer) -> Result<&StreamInfo, EngineError> {
             "MP4 chapter reference points to a duplicate track ID",
         ));
     }
-    Ok(stream)
+    Ok(Some(stream))
+}
+
+fn table_interval(
+    table: &[u8],
+    movie: MovieHeader,
+    id: &str,
+) -> Result<Option<Range<u64>>, EngineError> {
+    let malformed = || invalid("malformed MP4 chapter table");
+    let ([version, flags @ ..], table) = table.split_first_chunk::<4>().ok_or_else(malformed)?;
+    if *flags != [0; 3] {
+        return Err(malformed());
+    }
+    let (count, mut entries) = match version {
+        0 => {
+            let (count, entries) = table.split_first().ok_or_else(malformed)?;
+            (usize::from(*count), entries)
+        }
+        1 => {
+            let ([reserved, count @ ..], entries) =
+                table.split_first_chunk::<5>().ok_or_else(malformed)?;
+            if *reserved != 0 {
+                return Err(malformed());
+            }
+            (u32::from_be_bytes(*count) as usize, entries)
+        }
+        _ => return Err(unsupported("unsupported MP4 chapter table version")),
+    };
+    if count > MAX_CHAPTERS {
+        return Err(limited("MP4 chapter table exceeds 4096 markers"));
+    }
+    if count == 0 {
+        return if entries.is_empty() {
+            Ok(None)
+        } else {
+            Err(malformed())
+        };
+    }
+    let clock = ChapterClock::new(movie, NERO_TIMESCALE, &[])?;
+    let mut previous = None;
+    let mut selected = None;
+    let mut end = i64::MAX;
+    for _ in 0..count {
+        let (header, payload) = entries.split_first_chunk::<9>().ok_or_else(malformed)?;
+        let (time, length) = header.split_first_chunk::<8>().ok_or_else(malformed)?;
+        let ticks = u64::from_be_bytes(*time);
+        if u128::from(ticks).div_ceil(10) > MAX_TIME {
+            return Err(limited("MP4 chapter time exceeds its clock budget"));
+        }
+        let start = ticks as i64;
+        if previous.is_some_and(|previous| start <= previous) {
+            return Err(invalid(
+                "MP4 chapter table starts must be strictly increasing",
+            ));
+        }
+        if u128::from(ticks) * clock.units_per_media_tick >= clock.movie_end {
+            return Err(invalid("MP4 chapter table start lies outside the movie"));
+        }
+        let (title, rest) = payload
+            .split_at_checked(usize::from(length[0]))
+            .ok_or_else(malformed)?;
+        let title = std::str::from_utf8(title).map_err(|_| malformed())?;
+        if title.chars().any(char::is_control) {
+            return Err(malformed());
+        }
+        if title == id && selected.replace(start).is_some() {
+            return Err(invalid(format!(
+                "MP4 chapter ID {id:?} is ambiguous in the chapter table"
+            )));
+        }
+        if previous.is_some() && selected == previous {
+            end = start;
+        }
+        previous = Some(start);
+        entries = rest;
+    }
+    if !entries.is_empty() {
+        return Err(malformed());
+    }
+    selected.map(|start| clock.interval(start..end)).transpose()
 }
 
 fn title<'a>(
