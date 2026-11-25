@@ -69,7 +69,8 @@
 - [x] Honor equal MathML rows and columns and supported fixed column widths in previews, PDF and editable DOCX grids.
 - [x] Allocate MathML percentage, automatic and fitted columns against a definite authored table width in previews and native exports.
 - [x] Resolve percentage and unitless MathML table widths against definite containing text widths in previews, fixed PDF, and reflowable PDF and DOCX.
-- [ ] Resolve relative widths for MathML tables inside measured equation operands or intrinsically sized containers when their width becomes available.
+- [x] Resolve nested relative MathML widths from definite containing cell tracks, including fixed spans and fitted tracks.
+- [ ] Resolve relative widths for MathML tables inside other equation operands or intrinsically sized containers when their width becomes available.
 - [x] Draw MathML solid and dashed table rules and frames, respect span interruptions and frame spacing, and preserve standalone rules as editable Word table borders.
 - [x] Preserve tight column spacing in editable DOCX matrix projections and recover their logical rows during extraction.
 - [ ] Extend editable DOCX export to negative leading offsets and expand the remaining MathML visual properties.

@@ -6000,6 +6000,83 @@ voice
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "outside the containing line"):
                 book.render_page(0)
 
+    def test_mathml_nested_relative_widths_use_definite_cell_tracks(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Nested relative MathML</title><style>body {{margin:0}}</style></head>
+          <body><p><m:math mathsize="18pt">{}</m:math></p></body></html>"""
+        colors = ("bf222d", "1644df", "198144", "5920ac", "b85124", "006a71")
+        marker = [f'<m:mtext mathcolor="#{color}">H</m:mtext>' for color in colors]
+
+        def inner(width: str, offset: int) -> str:
+            return f"""<m:mtable width="{width}" columnwidth="50% fit" columnspacing="4pt" columnalign="left">
+              <m:mtr><m:mtd>{marker[offset]}</m:mtd><m:mtd>{marker[offset + 1]}</m:mtd></m:mtr>
+              </m:mtable>{marker[offset + 2]}"""
+
+        span = inner("50%", 0)
+        fitted = inner("0.5", 3)
+        outer = """<m:mtable width="260pt" columnwidth="100pt fit 50pt" columnspacing="10pt" columnalign="left">
+          <m:mtr><m:mtd columnspan="2"><m:mstyle><m:mrow>{}</m:mrow></m:mstyle></m:mtd>
+            <m:mtd><m:mtext>Side</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd><m:mtext>Fixed</m:mtext></m:mtd><m:mtd>{}</m:mtd>
+            <m:mtd><m:mtext>End</m:mtext></m:mtd></m:mtr></m:mtable>""".format(span, fitted)
+
+        def positions(doc: doc_ex.Document) -> tuple[int, int, int, int]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=96)))
+            starts = []
+            for color in colors:
+                ink = bytes.fromhex(color + "ff")
+                points = [i // 4 % width for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                self.assertTrue(points, color)
+                starts.append(min(points))
+            return (starts[1] - starts[0], starts[2] - starts[0],
+                    starts[4] - starts[3], starts[5] - starts[3])
+
+        def check_geometry(doc: doc_ex.Document) -> None:
+            # The span contains 100 pt + 10 pt gap + 90 pt of fitted track.
+            # The second nested matrix uses half of the 90-point track alone.
+            expected = (54.0, 100.0, 26.5, 45.0)
+            for actual, points in zip(positions(doc), expected):
+                self.assertAlmostEqual(actual, points * 96 / 72, delta=2)
+
+        chapter = template.format(outer)
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            check_geometry(book)
+            for target in ("pdf", "docx"):
+                with self.subTest(target=target), doc_ex.open(book.convert(target)) as reopened:
+                    check_geometry(reopened)
+                    for label in ("Side", "Fixed", "End"):
+                        self.assertEqual(reopened[0].get_text().count(label), 1)
+            word = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(word)) as archive:
+            xml = archive.read("word/document.xml")
+        self.assertIn(b"<w:gridSpan", xml)
+        self.assertEqual(xml.count(b"<m:m>"), 2)
+        automatic = outer.replace('columnwidth="100pt fit 50pt"', 'columnwidth="100pt auto 50pt"')
+        with doc_ex.open(epub_fixture(chapter_one=template.format(automatic))) as book:
+            check_geometry(book)
+            with doc_ex.open(book.convert("docx")) as reopened:
+                check_geometry(reopened)
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 440, 320)])
+        viewport = '<meta name="viewport" content="width=440,height=320"/>'
+        chapter = chapter.replace("</head>", viewport + "</head>")
+        shrink_wrapped = chapter.replace("<body>", '<body><div style="position:absolute;left:5px;top:5px">')
+        shrink_wrapped = shrink_wrapped.replace("</body>", "</div></body>")
+        for source in (chapter, shrink_wrapped):
+            with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": source})) as book:
+                check_geometry(book)
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as reopened:
+                    self.assertEqual(positions(reopened), positions(book))
+
+        intrinsic = outer.replace('width="260pt" columnwidth="100pt fit 50pt"',
+                                  'columnwidth="100pt auto 50pt"')
+        unknown_operand = outer.replace(span, "<m:mfrac><m:mrow>" + span + "</m:mrow><m:mi>x</m:mi></m:mfrac>")
+        for source in (intrinsic, unknown_operand):
+            with doc_ex.open(epub_fixture(chapter_one=template.format(source))) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing line width"):
+                        operation()
+
     def test_mathml_table_rules_and_frame_preserve_spans(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Ruled MathML</title><style>body {{margin:0}}</style></head>

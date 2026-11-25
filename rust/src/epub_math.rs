@@ -214,7 +214,10 @@ pub(super) fn equation(
         root: style,
         root_id: root.id().get(),
         stylesheet,
-        line_width,
+        width_scope: WidthScope {
+            root: root.id().get(),
+            width: Some(line_width),
+        },
         remaining,
         extras: compose::Extras::default(),
     };
@@ -347,12 +350,62 @@ struct Projection<'a, 'xml> {
     root: Presentation<'xml>,
     root_id: u32,
     stylesheet: Option<&'a FormulaCss>,
-    line_width: f32,
+    width_scope: WidthScope,
     remaining: &'a mut usize,
     extras: compose::Extras,
 }
 
+#[derive(Clone, Copy)]
+struct WidthScope {
+    root: u32,
+    width: Option<f32>,
+}
+
+fn shares_line_width(node: Node<'_, '_>) -> bool {
+    node.tag_name().namespace() == Some(MATHML)
+        && matches!(
+            node.tag_name().name(),
+            "math" | "mrow" | "mstyle" | "merror" | "semantics"
+        )
+}
+
 impl<'xml> Projection<'_, 'xml> {
+    fn with_cell_width<T>(
+        &mut self,
+        cell: Node<'xml, '_>,
+        width: Option<f32>,
+        project: impl FnOnce(&mut Self) -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
+        let outer = std::mem::replace(
+            &mut self.width_scope,
+            WidthScope {
+                root: cell.id().get(),
+                width,
+            },
+        );
+        let result = project(self);
+        self.width_scope = outer;
+        result
+    }
+
+    fn containing_width(&self, node: Node<'xml, '_>) -> Option<f32> {
+        let width = self
+            .width_scope
+            .width
+            .filter(|width| width.is_finite() && *width > 0.0)?;
+        for ancestor in node.ancestors().skip(1).filter(Node::is_element) {
+            if ancestor.id().get() == self.width_scope.root {
+                return Some(width);
+            }
+            // Transparent groups keep the surrounding line width. Operators
+            // must establish their own available width before using it.
+            if !shares_line_width(ancestor) {
+                break;
+            }
+        }
+        None
+    }
+
     fn style(
         &mut self,
         node: Node<'xml, '_>,

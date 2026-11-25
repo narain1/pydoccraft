@@ -12,8 +12,8 @@ use wordcraft_fonts::math::{resolve_math, C};
 use wordcraft_layout::math::{MItem, MathLayout};
 
 use super::{
-    compose, invalid, limited, size_points, unsupported, Presentation, Projection, MATHML,
-    MAX_MATRIX_SIZE,
+    compose, invalid, limited, shares_line_width, size_points, unsupported, Presentation,
+    Projection, MATHML, MAX_MATRIX_SIZE,
 };
 use crate::EngineError;
 
@@ -49,6 +49,15 @@ struct Cell {
     vertical: Vertical,
     content: CellContent,
     format: CharProps,
+}
+
+struct CellPlacement<'xml, 'input> {
+    node: Node<'xml, 'input>,
+    rows: Range<usize>,
+    columns: Range<usize>,
+    horizontal: ColJc,
+    vertical: Vertical,
+    style: Presentation<'xml>,
 }
 
 enum CellContent {
@@ -147,6 +156,11 @@ pub(in crate::epub) fn has_relative_widths(root: Node<'_, '_>) -> bool {
                 .and_then(relative_width)
                 .is_some()
             && is_presentation(node)
+            && node
+                .ancestors()
+                .skip(1)
+                .take_while(|ancestor| *ancestor != root)
+                .all(shares_line_width)
     })
 }
 
@@ -215,7 +229,7 @@ pub(super) fn project<'xml>(
     let (alignment, alignment_row) = table_alignment(table, rows.len())?;
     let mut column_count = 0;
     let mut occupied = [0; MAX_MATRIX_SIZE];
-    let mut cells = Vec::new();
+    let mut placements = Vec::new();
     for (row_index, row) in rows.iter().copied().enumerate() {
         if !row.has_tag_name((MATHML, "mtr")) {
             return Err(unsupported("MathML table row type"));
@@ -243,14 +257,6 @@ pub(super) fn project<'xml>(
             occupied[column..right].fill(bottom);
             projection.charge(depth + 2)?;
             let style = projection.style(cell, row_style)?;
-            let content = if let Some(nested) = project_group(projection, cell, depth + 2, style)? {
-                CellContent::Table(nested)
-            } else {
-                CellContent::Equation(Math {
-                    nodes: math::merge_runs(projection.elements(cell, depth + 2, style)?),
-                    ..Default::default()
-                })
-            };
             let horizontal = match cell
                 .attribute("columnalign")
                 .or_else(|| indexed(row.attribute("columnalign"), column))
@@ -270,17 +276,13 @@ pub(super) fn project<'xml>(
                 .unwrap_or("baseline");
             let vertical = Vertical::parse(row_alignment.trim())
                 .ok_or_else(|| unsupported("MathML table row alignment"))?;
-            cells.push(Cell {
+            placements.push(CellPlacement {
+                node: cell,
                 rows: row_index..bottom,
                 columns: column..right,
                 horizontal,
                 vertical,
-                content,
-                format: CharProps {
-                    size: Some(style.font_size()),
-                    color: style.ink.map(TextColor::Rgb),
-                    ..Default::default()
-                },
+                style,
             });
             column = right;
             column_count = column_count.max(right);
@@ -291,7 +293,7 @@ pub(super) fn project<'xml>(
     }
     // Native export materializes the full grid before merging, including
     // entries implied by sparse rows and spanning cells.
-    let implicit_cells = rows.len() * column_count - cells.len();
+    let implicit_cells = rows.len() * column_count - placements.len();
     *projection.remaining = projection
         .remaining
         .checked_sub(implicit_cells)
@@ -300,9 +302,9 @@ pub(super) fn project<'xml>(
     let mut row_gaps = gaps(table, "rowspacing", rows.len(), em, "1ex")?;
     let mut column_gaps = gaps(table, "columnspacing", column_count, em, "0.8em")?;
     let rules = Rules::read(table, em, &mut row_gaps, &mut column_gaps)?;
-    let width = table_width(table, em, projection.line_width)?;
-    Ok(Table {
-        cells,
+    let width = table_width(table, em, projection)?;
+    let mut grid = Table {
+        cells: Vec::with_capacity(placements.len()),
         row_gaps,
         column_gaps,
         column_widths: column_widths(table, column_count, em, width)?,
@@ -315,7 +317,37 @@ pub(super) fn project<'xml>(
         alignment_row,
         em,
         enclosing_em,
-    })
+    };
+    let definite_columns = grid.definite_columns()?;
+    for cell in placements {
+        let content_width = definite_columns[cell.columns.clone()]
+            .iter()
+            .copied()
+            .sum::<Option<f32>>()
+            .map(|width| width + internal_gaps(&grid.column_gaps, &cell.columns));
+        let content = projection.with_cell_width(cell.node, content_width, |projection| {
+            if let Some(table) = project_group(projection, cell.node, depth + 2, cell.style)? {
+                return Ok(CellContent::Table(table));
+            }
+            Ok(CellContent::Equation(Math {
+                nodes: math::merge_runs(projection.elements(cell.node, depth + 2, cell.style)?),
+                ..Default::default()
+            }))
+        })?;
+        grid.cells.push(Cell {
+            rows: cell.rows,
+            columns: cell.columns,
+            horizontal: cell.horizontal,
+            vertical: cell.vertical,
+            content,
+            format: CharProps {
+                size: Some(cell.style.font_size()),
+                color: cell.style.ink.map(TextColor::Rgb),
+                ..Default::default()
+            },
+        });
+    }
+    Ok(grid)
 }
 
 fn table_alignment(
@@ -430,7 +462,11 @@ fn relative_width(value: &str) -> Option<f32> {
     value.parse::<f32>().ok()
 }
 
-fn table_width(table: Node<'_, '_>, em: f32, line_width: f32) -> Result<Option<f32>, EngineError> {
+fn table_width<'xml>(
+    table: Node<'xml, '_>,
+    em: f32,
+    projection: &Projection<'_, 'xml>,
+) -> Result<Option<f32>, EngineError> {
     let Some(value) = table
         .attribute("width")
         .map(str::trim)
@@ -439,24 +475,9 @@ fn table_width(table: Node<'_, '_>, em: f32, line_width: f32) -> Result<Option<f
         return Ok(None);
     };
     if let Some(fraction) = relative_width(value) {
-        // Only transparent MathML grouping has the same target width as
-        // the surrounding line. A table cell or an operator's argument
-        // would need its own layout width to resolve a relative length.
-        let grouped = table
-            .ancestors()
-            .skip(1)
-            .filter(Node::is_element)
-            .all(|node| {
-                matches!(
-                    node.tag_name().name(),
-                    "math" | "mrow" | "mstyle" | "merror" | "semantics"
-                )
-            });
-        if !grouped || !line_width.is_finite() || line_width <= 0.0 {
-            return Err(unsupported(
-                "MathML relative table width requires a definite containing line width",
-            ));
-        }
+        let line_width = projection.containing_width(table).ok_or_else(|| {
+            unsupported("MathML relative table width requires a definite containing line width")
+        })?;
         if !(0.0..=1.0).contains(&fraction) {
             return Err(unsupported(
                 "MathML relative table width is outside the containing line",
@@ -622,6 +643,42 @@ impl Table {
             ));
         }
         Ok(Some(remaining.max(0.0)))
+    }
+
+    fn definite_columns(&self) -> Result<Vec<Option<f32>>, EngineError> {
+        let total = self.declared_track_width()?;
+        let widths: Vec<_> = self
+            .column_widths
+            .iter()
+            .map(|column| column.fixed())
+            .collect();
+        // Equal columns have a definite width if the table or at least
+        // one fixed track supplies it. Otherwise content sizes decide it.
+        if self.equal_columns && (total.is_some() || widths.iter().any(Option::is_some)) {
+            return Ok(vec![
+                Some(self.equal_column_width(0.0, total)?);
+                widths.len()
+            ]);
+        }
+        // Fitted tracks are definite when none of the tracks needs an
+        // intrinsic size. A lone automatic track is also definite when
+        // all other tracks have fixed widths and it receives the remainder.
+        let automatic = self
+            .column_widths
+            .iter()
+            .filter(|&&column| column == ColumnWidth::Auto)
+            .count();
+        let definite_remainder =
+            automatic == 0 || automatic == 1 && !self.column_widths.contains(&ColumnWidth::Fit);
+        if let Some(total) = total.filter(|_| definite_remainder) {
+            let mut allocated = widths
+                .iter()
+                .map(|width| width.unwrap_or_default())
+                .collect::<Vec<_>>();
+            self.fill_width(&mut allocated, total)?;
+            return Ok(allocated.into_iter().map(Some).collect());
+        }
+        Ok(widths)
     }
 
     fn fill_width(&self, widths: &mut [f32], total: f32) -> Result<(), EngineError> {
