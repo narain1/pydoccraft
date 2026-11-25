@@ -17,13 +17,23 @@ use crate::{
     EngineError,
 };
 
+#[path = "epub_svg_font_spacing.rs"]
+mod spacing;
+use spacing::SpacingCheck;
+
 const MAX_LENGTH: f32 = 25_000.0;
 type Edit = (std::ops::Range<usize>, String);
 
 pub(in crate::epub::svg) struct TextLength {
     id: String,
     target: f32,
+    adjust: usvg::LengthAdjust,
     temporary_id: bool,
+}
+
+pub(in crate::epub::svg) struct FittedLengths {
+    pub(in crate::epub::svg) source: String,
+    spacing: Vec<SpacingCheck>,
 }
 
 pub(super) fn prepare_length(
@@ -33,16 +43,24 @@ pub(super) fn prepare_length(
     source: &str,
     edits: &mut Vec<Edit>,
 ) -> Result<TextLength, EngineError> {
-    if owner.attribute("lengthAdjust") != Some("spacingAndGlyphs")
-        || owner.descendants().filter(Node::is_element).any(|node| {
-            ["dx", "dy", "rotate"]
-                .iter()
-                .any(|attribute| node.has_attribute(*attribute))
-                || node != owner && node.has_attribute("textLength")
-        })
-    {
+    let adjust = match owner.attribute("lengthAdjust") {
+        None | Some("spacing") => usvg::LengthAdjust::Spacing,
+        Some("spacingAndGlyphs") => usvg::LengthAdjust::SpacingAndGlyphs,
+        Some(_) => {
+            return Err(unsupported(
+                "EPUB SVG mixed-font textLength has an invalid lengthAdjust",
+            ))
+        }
+    };
+    if owner.descendants().filter(Node::is_element).any(|node| {
+        ["dx", "dy", "rotate"]
+            .iter()
+            .any(|attribute| node.has_attribute(*attribute))
+            || node != owner
+                && (node.has_attribute("textLength") || node.has_tag_name((NS, "text")))
+    }) {
         return Err(unsupported(
-            "EPUB SVG mixed-font textLength requires a single linear spacingAndGlyphs run",
+            "EPUB SVG mixed-font textLength requires one linear run without per-glyph positioning or nested lengths",
         ));
     }
     for effect in ["filter", "clip-path", "mask"] {
@@ -112,6 +130,7 @@ pub(super) fn prepare_length(
     Ok(TextLength {
         id,
         target,
+        adjust,
         temporary_id,
     })
 }
@@ -120,7 +139,7 @@ pub(in crate::epub::svg) fn fit_lengths(
     source: &str,
     tree: &usvg::Tree,
     lengths: &[TextLength],
-) -> Result<String, EngineError> {
+) -> Result<FittedLengths, EngineError> {
     let xml = parse_xml(source.as_bytes())?;
     let mut remaining: HashMap<_, _> = lengths
         .iter()
@@ -130,24 +149,16 @@ pub(in crate::epub::svg) fn fit_lengths(
     // resolved origin or font scale. Measure only directly drawn text here.
     let uses = svg::use_refs::used_sources(xml.root_element());
     let mut measured = HashMap::new();
-    let mut stack = vec![tree.root().children().iter()];
-    while let Some(children) = stack.last_mut() {
-        match children.next() {
-            Some(usvg::Node::Group(group)) => stack.push(group.children().iter()),
-            Some(usvg::Node::Text(text)) if remaining.contains_key(text.id()) => {
-                if measured.insert(text.id(), text.as_ref()).is_some() {
-                    return Err(unsupported(
-                        "ambiguous EPUB SVG mixed-font textLength source",
-                    ));
-                }
-            }
-            Some(_) => {}
-            None => {
-                stack.pop();
-            }
+    for (index, text) in direct_texts(tree).into_iter().enumerate() {
+        if remaining.contains_key(text.id()) && measured.insert(text.id(), (index, text)).is_some()
+        {
+            return Err(unsupported(
+                "ambiguous EPUB SVG mixed-font textLength source",
+            ));
         }
     }
     let mut edits = Vec::new();
+    let mut spacing = Vec::new();
     let mut bytes = 0;
     for node in xml
         .descendants()
@@ -164,7 +175,7 @@ pub(in crate::epub::svg) fn fit_lengths(
                 "EPUB SVG mixed-font textLength inside a use instance",
             ));
         }
-        let text = measured.get(id).ok_or_else(|| {
+        let &(index, text) = measured.get(id).ok_or_else(|| {
             unsupported("EPUB SVG mixed-font textLength source has no native layout")
         })?;
         let [chunk] = text.chunks() else {
@@ -193,71 +204,23 @@ pub(in crate::epub::svg) fn fit_lengths(
                 "EPUB SVG mixed-font textLength requires horizontal solid-fill text with nonnegative spacing",
             ));
         }
-        // The native text box uses glyph advances rather than ink bounds.
-        // Scale the inline positions and outlines around the author's anchor.
-        let width = text.bounding_box().width();
-        let scale = length.target / width;
-        let x = chunk.x().unwrap_or(0.0);
-        if !scale.is_finite()
-            || !(0.001..=1000.0).contains(&scale)
-            || !x.is_finite()
-            || x.abs() > MAX_LENGTH
-        {
-            return Err(limited(
-                "EPUB SVG mixed-font textLength exceeds its scale budget",
-            ));
-        }
-        let dx = x - x * scale;
-        if !dx.is_finite() {
-            return Err(limited(
-                "EPUB SVG mixed-font textLength exceeds its scale budget",
-            ));
-        }
-        let adjustment = format!("matrix({scale} 0 0 1 {dx} 0)");
-        let style = node.attribute_node("style");
-        let mut declarations = style
-            .map(|style| svg_declarations(style.value()))
-            .transpose()?
-            .unwrap_or_default();
-        let (span, value) = if let Some(transform) = declarations.get_mut("transform") {
-            if transform.eq_ignore_ascii_case("none") {
-                *transform = adjustment;
-            } else {
-                transform.push(' ');
-                transform.push_str(&adjustment);
+        match length.adjust {
+            usvg::LengthAdjust::Spacing => {
+                let check = SpacingCheck::new(index, length.target, text, chunk)?;
+                check.apply(source, node, &mut edits, &mut bytes)?;
+                spacing.push(check);
             }
-            let mut declarations = declarations.into_iter().collect::<Vec<_>>();
-            declarations.sort_unstable_by(|(key, _), (other, _)| key.cmp(other));
-            let mut merged = String::new();
-            for (key, value) in declarations {
-                append(&mut merged, &format!("{key}:{value};"), XML_BYTES)?;
+            usvg::LengthAdjust::SpacingAndGlyphs => {
+                let edit = scale_glyphs(source, node, text, chunk, length.target)?;
+                charge(
+                    &mut bytes,
+                    edit.1.len(),
+                    XML_BYTES,
+                    "EPUB SVG textLength edits exceed 8 MiB",
+                )?;
+                edits.push(edit);
             }
-            let style = style.ok_or_else(|| invalid("missing SVG text style"))?;
-            (
-                style.range(),
-                format!(" style=\"{}\"", escape_attribute(&merged)),
-            )
-        } else if let Some(transform) = node.attribute_node("transform") {
-            let prior = transform.value().trim();
-            let combined = if prior.eq_ignore_ascii_case("none") || prior.is_empty() {
-                adjustment
-            } else {
-                format!("{prior} {adjustment}")
-            };
-            (transform.range_value(), escape_attribute(&combined))
-        } else {
-            (
-                svg::style_insertion(source.as_bytes(), node)?,
-                format!(" transform=\"{adjustment}\""),
-            )
-        };
-        charge(
-            &mut bytes,
-            value.len(),
-            XML_BYTES,
-            "EPUB SVG textLength edits exceed 8 MiB",
-        )?;
-        edits.push((span, value));
+        }
         if length.temporary_id {
             let id = node
                 .attribute_node("id")
@@ -268,7 +231,104 @@ pub(in crate::epub::svg) fn fit_lengths(
     if !remaining.is_empty() {
         return Err(invalid("missing EPUB SVG mixed-font textLength source"));
     }
-    apply_edits(source, edits, XML_BYTES)
+    Ok(FittedLengths {
+        source: apply_edits(source, edits, XML_BYTES)?,
+        spacing,
+    })
+}
+
+fn direct_texts(tree: &usvg::Tree) -> Vec<&usvg::Text> {
+    let mut texts = Vec::new();
+    let mut stack = vec![tree.root().children().iter()];
+    while let Some(children) = stack.last_mut() {
+        match children.next() {
+            Some(usvg::Node::Group(group)) => stack.push(group.children().iter()),
+            Some(usvg::Node::Text(text)) => texts.push(text.as_ref()),
+            Some(_) => {}
+            None => {
+                stack.pop();
+            }
+        }
+    }
+    texts
+}
+
+fn scale_glyphs(
+    source: &str,
+    node: Node<'_, '_>,
+    text: &usvg::Text,
+    chunk: &usvg::TextChunk,
+    target: f32,
+) -> Result<Edit, EngineError> {
+    // The native text box uses glyph advances rather than ink bounds.
+    // Scale the inline positions and outlines around the author's anchor.
+    let width = text.bounding_box().width();
+    let scale = target / width;
+    let x = chunk.x().unwrap_or(0.0);
+    if !scale.is_finite()
+        || !(0.001..=1000.0).contains(&scale)
+        || !x.is_finite()
+        || x.abs() > MAX_LENGTH
+    {
+        return Err(limited(
+            "EPUB SVG mixed-font textLength exceeds its scale budget",
+        ));
+    }
+    let dx = x - x * scale;
+    if !dx.is_finite() {
+        return Err(limited(
+            "EPUB SVG mixed-font textLength exceeds its scale budget",
+        ));
+    }
+    let adjustment = format!("matrix({scale} 0 0 1 {dx} 0)");
+    let style = node.attribute_node("style");
+    let mut declarations = style
+        .map(|style| svg_declarations(style.value()))
+        .transpose()?
+        .unwrap_or_default();
+    let edit = if let Some(transform) = declarations.get_mut("transform") {
+        if transform.eq_ignore_ascii_case("none") {
+            *transform = adjustment;
+        } else {
+            transform.push(' ');
+            transform.push_str(&adjustment);
+        }
+        let mut declarations = declarations.into_iter().collect::<Vec<_>>();
+        declarations.sort_unstable_by(|(key, _), (other, _)| key.cmp(other));
+        let mut merged = String::new();
+        for (key, value) in declarations {
+            append(&mut merged, &format!("{key}:{value};"), XML_BYTES)?;
+        }
+        let style = style.ok_or_else(|| invalid("missing SVG text style"))?;
+        (
+            style.range(),
+            format!(" style=\"{}\"", escape_attribute(&merged)),
+        )
+    } else if let Some(transform) = node.attribute_node("transform") {
+        let prior = transform.value().trim();
+        let combined = if prior.eq_ignore_ascii_case("none") || prior.is_empty() {
+            adjustment
+        } else {
+            format!("{prior} {adjustment}")
+        };
+        (transform.range_value(), escape_attribute(&combined))
+    } else {
+        (
+            svg::style_insertion(source.as_bytes(), node)?,
+            format!(" transform=\"{adjustment}\""),
+        )
+    };
+    Ok(edit)
+}
+
+impl FittedLengths {
+    pub(in crate::epub::svg) fn verify_spacing(
+        &self,
+        original: &usvg::Tree,
+        fitted: &usvg::Tree,
+    ) -> Result<(), EngineError> {
+        spacing::verify(&self.spacing, original, fitted)
+    }
 }
 
 fn solid_fill(fill: Option<&usvg::Fill>, stroke: Option<&usvg::Stroke>) -> bool {

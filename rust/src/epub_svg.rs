@@ -572,12 +572,15 @@ fn parse(
             tree = result?;
             fonts.check_rendered(&tree)?;
             if !fallback.lengths.is_empty() {
-                source = svg_fonts::fit_lengths(&source, &tree, &fallback.lengths)?;
+                let fitted = svg_fonts::fit_lengths(&source, &tree, &fallback.lengths)?;
                 options.fontdb = tree.fontdb().clone();
-                let result = native_tree(source.as_bytes(), &options, has_uses);
+                let result = native_tree(fitted.source.as_bytes(), &options, has_uses);
                 fonts.check()?;
-                tree = result?;
+                let adjusted = result?;
+                fitted.verify_spacing(&tree, &adjusted)?;
+                tree = adjusted;
                 fonts.check_rendered(&tree)?;
+                source = fitted.source;
             }
             Some(source)
         } else {

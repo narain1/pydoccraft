@@ -2435,9 +2435,44 @@ class EpubTests(unittest.TestCase):
                     self.assertAlmostEqual(large[1], small[1], delta=0.75)
                     self.assertAlmostEqual(large[3], small[3], delta=0.75)
 
-        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "spacingAndGlyphs"):
-            preview('textLength="180"')
-        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "spacingAndGlyphs"):
+        def ink_groups(ink: list[int]) -> list[tuple[int, int]]:
+            groups = []
+            for x in sorted(set(ink)):
+                if groups and x == groups[-1][1] + 1:
+                    groups[-1] = (groups[-1][0], x)
+                else:
+                    groups.append((x, x))
+            return groups
+
+        for inline in (False, True):
+            with self.subTest(inline=inline, adjust="spacing"):
+                default = preview('textLength="84"', inline=inline)
+                explicit = preview('textLength="84" lengthAdjust="spacing"', inline=inline)
+                self.assertEqual(default, explicit)
+                loose = preview('textLength="90px" lengthAdjust="spacing"', inline=inline)
+                close_ink, close_link, close_search = default
+                loose_ink, loose_link, loose_search = loose
+                close_groups, loose_groups = ink_groups(close_ink), ink_groups(loose_ink)
+                self.assertEqual((len(close_groups), len(loose_groups)), (4, 4))
+                for before, after, dx in zip(close_groups, loose_groups, (-3, -1, 1, 3)):
+                    self.assertEqual(after, (before[0] + dx, before[1] + dx))
+                for before, after in ((close_link, loose_link), (close_search, loose_search)):
+                    for edge, dx in enumerate((-2.25, 0, 2.25, 0)):
+                        self.assertAlmostEqual(after[edge], before[edge] + dx, delta=0.75)
+
+        _, natural_link, natural_search = preview("")
+        _, compressed_link, compressed_search = preview('textLength="70"')
+        for natural, compressed in ((natural_link, compressed_link), (natural_search, compressed_search)):
+            self.assertLess(compressed[2] - compressed[0], natural[2] - natural[0] - 5)
+            self.assertAlmostEqual(compressed[2] + compressed[0], natural[2] + natural[0], delta=0.5)
+
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "authored letter or word spacing"):
+            preview('textLength="84" style="letter-spacing:1px"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "spacing and glyph geometry"):
+            preview('textLength="3" lengthAdjust="spacing"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "invalid lengthAdjust"):
+            preview('textLength="84" lengthAdjust="scale"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "per-glyph positioning"):
             preview('textLength="180" lengthAdjust="spacingAndGlyphs" rotate="15"')
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "positioned native chunk"):
             preview('textLength="180" lengthAdjust="spacingAndGlyphs"', positions="144 170")
