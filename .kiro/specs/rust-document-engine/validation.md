@@ -3047,3 +3047,12 @@ The Linux x86-64 CPython 3.11 host wheel passed 904 installed tests, including 3
 ## 2026-11-25 EPUB CSS nonlinear ratios, MathML enclosures and SVG wrappers
 
 The Linux x86-64 CPython 3.11 host wheel passed 906 installed tests, including 311 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-nonlinear-ratios-mathml-enclosures-and-svg-wrappers)
+
+## 2026-11-25 EPUB CSS Euclidean ratios and contiguous MP4 edits
+
+The Linux x86-64 CPython 3.11 host wheel passed 907 installed tests, including 312 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-euclidean-ratios-and-contiguous-mp4-edits)
+
+
+## 2026-11-25 EPUB chapter validation, contain-fit sizing, MathML carets and forward media edits
+
+The Linux x86-64 CPython 3.11 host wheel passed 910 installed tests, including 315 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-chapter-validation-contain-fit-sizing-mathml-carets-and-forward-media-edits)
