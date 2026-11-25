@@ -2947,3 +2947,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 770 installed tests, including 1
 ## 2026-11-24 EPUB spine properties, relative math widths, filtered SVG and typed subtitles
 
 The Linux x86-64 CPython 3.11 host wheel passed 779 installed tests, including 184 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-spine-properties-relative-mathml-svg-filters-and-subtitle-styles)
+
+## 2026-11-24 EPUB auxiliary links, tight MathML, translated SVG and timed text
+
+The Linux x86-64 CPython 3.11 host wheel passed 785 installed tests, including 190 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-auxiliary-links-tight-mathml-matrices-translated-svg-and-timed-styles)

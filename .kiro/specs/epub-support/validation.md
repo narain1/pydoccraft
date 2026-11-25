@@ -949,3 +949,13 @@ The isolated CPython 3.11.15 Linux x86-64 release wheel passed all 186 installed
 The installed regression covers standalone and inline SVG exported at 96 and 144 DPI. It checks both offset steps against explicit translation controls, including independent device rounding and a discarded blur branch. A clip removes a translated label that would otherwise be in the viewport. Search retains the original Unicode glyphs for Café, a clipped reused link moves from outside the viewport into view, and a rotated graphic supplies matching local link and bookmark destinations. The PDF reopens with exact preview pixels and the original EPUB resource bytes survive. Stacked filter layers still return an explicit geometry error.
 
 The installed offset regression, Rust 1.95 formatting and locked release all-target Clippy passed.
+
+## 2026-11-24 Integrated EPUB auxiliary links, tight MathML matrices, translated SVG and timed styles
+
+The combined regressions verify access to newly non-linear chapters through local staged links, editable tight MathML matrices with aligned rows, translated SVG text, annotations and fragment destinations on the fixed PDF pixel grid, and discrete TTML style changes synchronized with the original media clock. The moved SVG capture is limited to filter results with a single attributable translation.
+
+The installed Linux x86-64 CPython 3.11.15 release wheel from `abb7811a41` passed 785 tests, including 190 EPUB tests, with zero failures, errors or skips. It measured 25,574,152 bytes with a 59,578,376-byte native extension. Its SHA-256 is `0efdb007f6077f829ec0b8856ee99f4a86667ad86dbe8e12c264a4490a553bb2`. This checkpoint used the host Linux wheel. The macOS and Windows release matrix remains open.
+
+Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. An independently authored EPUB with a chapter reachable through a link to a Unicode fragment passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
+
+The lockfiles and upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. Temporary Cargo output, wheels, test environments, downloaded books, generated site and the Node addon were pruned.
