@@ -1130,6 +1130,14 @@ class EpubTests(unittest.TestCase):
             with doc_ex.open(epub_fixture(chapter_one=markup.replace("STYLES", css).replace("DIR", ""))) as book:
                 preview.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
         self.assertEqual(preview[0], preview[1])
+        for ignored, expected in (
+            ("inline-size: banana; padding-inline: banana 2px", "padding-left:8px"),
+            ("--gap: banana; padding-inline-start:var(--gap)", "padding-left:0"),
+        ):
+            control = markup.replace("STYLES", f"#outer{{{expected}}}").replace("DIR", "")
+            candidate = markup.replace("STYLES", f"#outer{{padding-left:8px;{ignored}}}").replace("DIR", "")
+            with doc_ex.open(epub_fixture(chapter_one=control)) as a, doc_ex.open(epub_fixture(chapter_one=candidate)) as b:
+                self.assertEqual(a.render_page(0, dpi=96), b.render_page(0, dpi=96))
         for css, direction in (
             ("#outer {writing-mode:vertical-rl; inline-size:30px}", ""),
             ("#outer {padding-inline-start:9px}", 'dir="auto"'),

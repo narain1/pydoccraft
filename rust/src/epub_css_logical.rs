@@ -255,3 +255,83 @@ impl Inherited {
         })
     }
 }
+
+#[derive(PartialEq)]
+pub(super) enum ValueKind {
+    Invalid,
+    Supported,
+    Unsupported,
+}
+
+pub(super) fn value_kind(name: &str, value: &str) -> ValueKind {
+    use ValueKind::{Invalid, Supported, Unsupported};
+    let value = value.to_ascii_lowercase();
+    let value = value.as_str();
+    let classified = |valid| if valid { Supported } else { Invalid };
+    if name.starts_with("overflow-") {
+        return classified(matches!(
+            value,
+            "visible" | "hidden" | "clip" | "scroll" | "auto"
+        ));
+    }
+    if name.ends_with("-color") {
+        return classified(value == "currentcolor" || super::color(value).is_some());
+    }
+    if name.ends_with("-style") {
+        return classified(
+            super::simple_border_style(value) || super::additional_border_style(value),
+        );
+    }
+    let margin = name.starts_with("margin-");
+    let inset = name.starts_with("inset-");
+    let border = name.ends_with("-width");
+    let size = name.ends_with("-size");
+    if value == "auto" && (margin || inset || size && !name.starts_with("max-"))
+        || value == "none" && name.starts_with("max-")
+        || border && matches!(value, "thin" | "medium" | "thick")
+    {
+        return Supported;
+    }
+    if size
+        && matches!(
+            value,
+            "min-content" | "max-content" | "fit-content" | "stretch"
+        )
+        || ["calc(", "min(", "max(", "clamp(", "fit-content("]
+            .iter()
+            .any(|prefix| value.starts_with(prefix) && value.ends_with(')'))
+    {
+        return Unsupported;
+    }
+    if let Some(number) = value.strip_suffix('%') {
+        return classified(!border && allowed_length(number, margin || inset));
+    }
+    if let Ok(number) = value.parse::<f32>() {
+        return classified(number == 0.0);
+    }
+    for unit in [
+        "rem", "em", "px", "pt", "pc", "in", "cm", "mm", "vw", "vh", "ch", "ex", "cap", "ic", "lh",
+        "rlh", "vmin", "vmax", "vi", "vb", "q",
+    ] {
+        if let Some(number) = value
+            .strip_suffix(unit)
+            .filter(|number| number.parse::<f32>().is_ok())
+        {
+            if !allowed_length(number, margin || inset) {
+                return Invalid;
+            }
+            return if points(value, 12.0, [1.0; 2]).is_some() {
+                Supported
+            } else {
+                Unsupported
+            };
+        }
+    }
+    Invalid
+}
+
+fn allowed_length(number: &str, negative: bool) -> bool {
+    number
+        .parse::<f32>()
+        .is_ok_and(|number| number.is_finite() && (negative || number >= 0.0))
+}

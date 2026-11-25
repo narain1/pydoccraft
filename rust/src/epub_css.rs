@@ -414,6 +414,13 @@ impl Cascade {
         let mut output = Properties::new();
         for (physical, (_, name, value, pair)) in winners {
             let computed = computed_value(&mut self.variables, name, value)?;
+            if pair.is_some()
+                && computed.as_deref().is_some_and(|value| {
+                    logical::value_kind(name, value) == logical::ValueKind::Unsupported
+                })
+            {
+                return Err(unsupported("EPUB logical CSS length expression"));
+            }
             let computed = if computed.as_deref().is_none_or(css_wide) {
                 let geometry = pair.or_else(|| logical::physical_pair(physical, flow));
                 if let Some(geometry) = geometry {
@@ -454,6 +461,12 @@ impl Cascade {
                             return Err(unsupported("EPUB logical CSS border style"));
                         }
                         computed.to_ascii_lowercase()
+                    } else if pair.is_some() {
+                        if computed.parse::<f32>().is_ok_and(|value| value == 0.0) {
+                            "0".to_owned()
+                        } else {
+                            computed.to_ascii_lowercase()
+                        }
                     } else {
                         computed
                     };
@@ -1192,6 +1205,9 @@ fn valid_literal(
         }
         "font-family" => font_family_value(components).is_some(),
         "font-variation-settings" => axis_value(components).is_some(),
+        _ if logical::pair(name).is_some() => {
+            css_wide(value) || logical::value_kind(name, value) != logical::ValueKind::Invalid
+        }
         "font-optical-sizing" => {
             optical_sizing(value).is_some()
                 || matches!(
@@ -1258,6 +1274,14 @@ fn shorthand_parts(name: &str) -> Option<Vec<String>> {
 fn expand(name: &str, value: &str) -> Vec<(String, String)> {
     if let Some(names) = logical::shorthand(name) {
         let pieces = value_components(value);
+        if logical::pair(names[0]).is_some()
+            && !(pieces.len() == 1 && css_wide(pieces[0]))
+            && !pieces
+                .iter()
+                .all(|piece| logical::value_kind(names[0], piece) != logical::ValueKind::Invalid)
+        {
+            return Vec::new();
+        }
         return match pieces.as_slice() {
             [start] => names
                 .into_iter()
@@ -1302,10 +1326,12 @@ fn expand(name: &str, value: &str) -> Vec<(String, String)> {
             if points(word, 12.0, [0.0; 2]).is_some() || matches!(word, "thin" | "medium" | "thick")
             {
                 width = word;
-            } else if color(word).is_some() {
+            } else if color(word).is_some() || word.eq_ignore_ascii_case("currentcolor") {
                 ink = word;
             } else if simple_border_style(word) || flow_relative && additional_border_style(word) {
                 style = word;
+            } else if flow_relative {
+                return Vec::new();
             }
         }
         return border_names(sides)
