@@ -78,9 +78,10 @@ impl<'a> Links<'a> {
         tree: &usvg::Tree,
         options: &usvg::Options<'_>,
         has_uses: bool,
+        aliases: &super::use_fonts::Aliases,
     ) -> Result<Geometry, EngineError> {
         let clip = Rect::new(0.0, 0.0, tree.size().width(), tree.size().height());
-        let marked = self.mark_text(source, tree, clip)?;
+        let marked = self.mark_text(source, tree, clip, aliases)?;
         let marked_tree = marked
             .as_ref()
             .map(|marked| native_tree(marked.source.as_bytes(), options, has_uses))
@@ -105,7 +106,7 @@ impl<'a> Links<'a> {
         let mut coverage = Coverage::new(tree, [1.0; 2]);
         visit_painted_svg(tree, clip, |paint, clip, effects| {
             let node = paint.node;
-            let id = node.id();
+            let id = authored_id(aliases, node.id());
             if !id.is_empty() && !synthetic_ids.contains(id) {
                 if let Some(rect) = node.abs_bounding_box() {
                     if let Some(rect) =
@@ -181,6 +182,7 @@ impl<'a> Links<'a> {
         source: &[u8],
         tree: &usvg::Tree,
         clip: Rect,
+        aliases: &super::use_fonts::Aliases,
     ) -> Result<Option<MarkedText>, EngineError> {
         if self.text_ids.is_empty() {
             return Ok(None);
@@ -210,7 +212,7 @@ impl<'a> Links<'a> {
         {
             if !text
                 .attribute("id")
-                .is_some_and(|id| self.text_ids.contains(id))
+                .is_some_and(|id| self.text_ids.contains(authored_id(aliases, id)))
             {
                 continue;
             }
@@ -222,6 +224,7 @@ impl<'a> Links<'a> {
                 let mut owner = Owner::default();
                 for ancestor in node.ancestors().take_while(|ancestor| *ancestor != text) {
                     if let Some(id) = ancestor.attribute("id").filter(|id| !id.is_empty()) {
+                        let id = authored_id(aliases, id);
                         charge(
                             &mut bytes,
                             id.len() + 24,
@@ -269,6 +272,10 @@ impl<'a> Links<'a> {
         let source = apply_edits(source, edits, XML_BYTES)?;
         Ok(Some(MarkedText { source, owners }))
     }
+}
+
+fn authored_id<'a>(aliases: &'a super::use_fonts::Aliases, id: &'a str) -> &'a str {
+    aliases.get(id).map_or(id, String::as_str)
 }
 
 fn actual_rect(rect: usvg::Rect) -> Rect {

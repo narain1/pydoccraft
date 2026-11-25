@@ -1811,6 +1811,88 @@ class EpubTests(unittest.TestCase):
                                  expanded.replace("font-width:90.75% 120%;", ""), style),
                          preview(condensed.replace("font-width:74.5% 90.25%;", ""), style))
 
+    def test_epub_svg_use_instances_keep_inherited_variable_font_requests(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+        resources = {
+            "OEBPS/Art/regular.ttf": doc_ex.EpubResource("font/ttf", font),
+            "OEBPS/Art/wide.ttf": doc_ex.EpubResource("font/ttf", font_with_extra_advance(font)),
+        }
+        rules = """@font-face { font-family: Local; src: url(regular.ttf);
+            font-weight: 200 800; font-width: 74.5% 90.25%; font-style: oblique -24deg -8deg;
+            font-variation-settings: "opsz" 24; }
+          @font-face { font-family: Local; src: url(regular.ttf);
+            font-weight: 200 800; font-width: 90.75% 120%; font-style: oblique -24deg -8deg;
+            font-variation-settings: "opsz" 29; }
+          @font-face { font-family: Local; src: url(wide.ttf);
+            font-weight: 200 800; font-width: 90.75% 120%; font-style: oblique 9deg 28deg;
+            font-variation-settings: "opsz" 30; }
+          .first { font-family: Local; font-weight: 312.5; font-width: 90.5%; font-style: oblique -17.25deg; }
+          .second { font-family: Local; font-weight: 712.75; font-width: 91.25%; font-style: oblique 17.5deg;
+              font-variation-settings: "opsz" 18; }
+          .third { font-family: serif; font-weight: 400; }
+          .face text { fill: #245397; }"""
+        label = '''<text x="5" y="34" font-size="24" style="font-optical-sizing:none">
+          <a href="https://example.org/badge">Badge</a><tspan id="target" x="112" font-weight="630">Tag</tspan>
+          </text>'''
+        reused = f'''<defs><g style="font-family:Local;font-weight:800">
+          <g id="face" class="face">{label}</g></g>
+          <use id="nested" href="#face" x="7" y="3"/>
+          <symbol id="symbol" viewBox="0 0 200 60"><use href="#nested"/></symbol>
+          </defs>
+          <use class="first" xlink:href="#nested" x="10" y="8"/>
+          <use class="second" href="#symbol" x="10" y="72" width="200" height="60"/>
+          <use class="third" href="#nested" x="10" y="136"/>
+          <a href="#target"><rect x="230" y="15" width="15" height="12"/></a>'''
+        direct = f'''<defs><symbol id="expected" viewBox="0 0 200 60">
+          <g class="second face" transform="translate(7 3)">{label.replace("target", "second")}</g>
+          </symbol></defs>
+          <g class="first face" transform="translate(17 11)">{label.replace("target", "first")}</g>
+          <use href="#expected" x="10" y="72" width="200" height="60"/>
+          <g class="third face" transform="translate(17 139)">{label.replace("target", "third")}</g>
+          <a href="#first"><rect x="230" y="15" width="15" height="12"/></a>'''
+
+        def preview(markup: str, sheet: str = rules, *, verify: bool = False) -> bytes:
+            svg = f'''<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+              viewBox="0 0 260 200"><style>{sheet}</style>{markup}</svg>'''
+            chapter = doc_ex.EpubSvgChapterSource("Reused variable fonts", svg, "OEBPS/Art/badges.svg")
+            with doc_ex.open(epub_fixture()) as original:
+                data = original.edit_epub_structure([chapter, 0], resources=resources)
+            with doc_ex.open(data) as book:
+                image = book.render_page(0, dpi=96)
+                self.assertEqual(book.read_epub_resource("OEBPS/Art/badges.svg"), svg.encode())
+                if verify:
+                    with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)) as pdf:
+                        self.assertEqual(pdf[0].get_text().count("Badge"), 3)
+                        links = pdf[0].get_links()
+                        rows = {round((link.bbox[1] - 8) / 48) for link in links
+                                if link.uri == "https://example.org/badge"}
+                        self.assertEqual(rows, {0, 1, 2})
+                        self.assertTrue(any(link.metadata.get("target_page") == 0 for link in links))
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))),
+                                         rgba_pixels(png_chunks(image)))
+                return image
+
+        image = preview(reused, verify=True)
+        self.assertEqual(image, preview(direct))
+        self.assertNotEqual(image, preview(reused, rules.replace("712.75", "315.25")))
+        self.assertNotEqual(image, preview(reused, rules.replace("91.25%", "90.5%")))
+        self.assertNotEqual(image, preview(reused, rules.replace("17.5deg", "-17.5deg")))
+
+    def test_epub_svg_use_instance_requests_share_the_font_stack_limit(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+        instances = "".join(
+            f'<use href="#label" style="font-family:Local;font-weight:{300 + i / 10:.1f}"/>'
+            for i in range(513)
+        )
+        svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40">
+          <style>@font-face {{font-family:Local;src:url(variable.ttf);font-weight:200 800}}</style>
+          <defs><text id="label" x="5" y="25">Label</text></defs>{instances}</svg>'''
+        chapter = doc_ex.EpubSvgChapterSource("Font instance limits", svg, "OEBPS/Art/instances.svg")
+        resources = {"OEBPS/Art/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
+        with doc_ex.open(epub_fixture()) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "512 distinct stacks"):
+                book.edit_epub_structure([chapter, 0], resources=resources)
+
     def test_epub_svg_font_ranges_and_stacks_preserve_preferred_glyphs(self) -> None:
         inter = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
         wide = font_with_extra_advance(inter)

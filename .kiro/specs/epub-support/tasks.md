@@ -36,12 +36,13 @@
 - [x] Match XHTML oblique face ranges with signed, fractional angles and apply the selected slant to variable fonts.
 - [x] Resolve author-defined CSS custom properties in supported XHTML and SVG styles, including scoped inheritance, fallback cycles and deferred shorthands.
 - [x] Render bounded same-document SVG use references, including nested instances and symbols, in fixed-layout and inline content.
+- [x] Preserve packaged variable-font selection and inherited axis settings across distinct SVG use instances.
 - [x] Render SVG gradient templates and bounded Gaussian blur in fixed-layout previews, visual PDF and rasterized inline SVG exports.
 - [x] Render a bounded SVG drop-shadow primitive with SourceGraphic and SourceAlpha input, signed offsets, and CSS flood color and opacity.
 - [x] Apply Unicode ranges and ordered font fallback to static SVG text, including inherited lists and matching in reopened exports.
 - [x] Match SVG font-face weight, width and signed oblique intervals and apply selected font variation defaults to the laid-out runs.
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
-- [ ] Extend source CSS and fixed-layout fidelity, including additional SVG effects and complex SVG text fallback and instance typography.
+- [ ] Extend source CSS and fixed-layout fidelity, including additional SVG effects and complex SVG text fallback and instance-scoped CSS custom property substitution.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

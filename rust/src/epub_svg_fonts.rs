@@ -57,12 +57,15 @@ impl Families {
         !self.variant_names.is_empty()
     }
 
-    pub(super) fn variant(&mut self, request: &CssFont) -> Result<Option<String>, EngineError> {
-        if !request
+    pub(super) fn is_variable(request: &CssFont) -> bool {
+        request
             .family
             .split(',')
             .any(|name| name.starts_with("doccraft-svg-variable-"))
-        {
+    }
+
+    pub(super) fn variant(&mut self, request: &CssFont) -> Result<Option<String>, EngineError> {
+        if !Self::is_variable(request) {
             return Ok(None);
         }
         let next = self.requests.len();

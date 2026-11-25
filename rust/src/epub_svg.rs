@@ -22,6 +22,8 @@ mod links;
 #[path = "epub_svg_fonts.rs"]
 mod svg_fonts;
 pub(super) use links::Geometry as LinkGeometry;
+#[path = "epub_svg_use_fonts.rs"]
+mod use_fonts;
 #[path = "epub_svg_use.rs"]
 pub(super) mod use_refs;
 
@@ -463,11 +465,16 @@ fn parse(
         options.default_size.height() * 0.75,
     ];
     let mut cascade = Cascade::load_svg(root, base, book, viewport)?;
-    let (styled, families) = apply_styles(root, source, &mut cascade, links)?;
-    let fonts = if root
+    let has_text = root
         .descendants()
-        .any(|node| node.has_tag_name((NS, "text")))
-    {
+        .any(|node| node.has_tag_name((NS, "text")));
+    let (styled, mut families) = apply_styles(root, source, &mut cascade, links, !has_uses)?;
+    let (styled, aliases) = if has_uses && has_text && families.tracks_variations() {
+        use_fonts::specialize(styled, &mut families)?
+    } else {
+        (styled, use_fonts::Aliases::new())
+    };
+    let fonts = if has_text {
         Some(svg_fonts::Resolver::install(
             &mut options,
             &cascade.fonts,
@@ -504,6 +511,7 @@ fn parse(
                 &tree,
                 &options,
                 has_uses,
+                &aliases,
             )
         })
         .transpose()?;
@@ -533,6 +541,7 @@ fn apply_styles(
     source: &[u8],
     cascade: &mut Cascade,
     links: Option<&links::Links<'_>>,
+    direct_variations: bool,
 ) -> Result<(Vec<u8>, svg_fonts::Families), EngineError> {
     let mut output = Vec::with_capacity(source.len());
     let mut cursor = 0;
@@ -564,7 +573,7 @@ fn apply_styles(
             .map(|value| families.encode(value))
             .transpose()?
             .flatten();
-        if families.tracks_variations() {
+        if direct_variations && families.tracks_variations() {
             let mut text = node
                 .parent_element()
                 .and_then(|parent| typography.get(&parent.id()))

@@ -374,19 +374,7 @@ impl Cascade {
         }
         if let Some(style) = node.attribute("style") {
             self.charge_bytes(style)?;
-            let source = checked_css(&format!("{{{style}}}"))?;
-            let block = value_parser(&source)
-                .parse::<SimpleBlock>()
-                .map_err(|error| {
-                    invalid(format!(
-                        "inline CSS at byte {}: {:?}",
-                        error.span.start, error.kind
-                    ))
-                })?;
-            if block.span.end != source.len() {
-                return Err(invalid("EPUB inline CSS has trailing input"));
-            }
-            for (key, value, important) in declarations(&block, &source, false)? {
+            for (key, value, important) in inline_declarations(style)? {
                 update(&mut selected, &key, &value, (important, true, [0; 3], 0));
             }
         }
@@ -897,6 +885,43 @@ fn unicode_range_list(
         }
     }
     Ok(Some(merged))
+}
+
+fn inline_declarations(style: &str) -> Result<Vec<DeclarationValue>, EngineError> {
+    let source = checked_css(&format!("{{{style}}}"))?;
+    let block = value_parser(&source)
+        .parse::<SimpleBlock>()
+        .map_err(|error| {
+            invalid(format!(
+                "inline CSS at byte {}: {:?}",
+                error.span.start, error.kind
+            ))
+        })?;
+    if block.span.end != source.len() {
+        return Err(invalid("EPUB inline CSS has trailing input"));
+    }
+    declarations(&block, &source, false)
+}
+
+/// Read presentation values back from the adapter's already resolved inline styles.
+pub(super) fn svg_font_declarations(style: &str) -> Result<Properties, EngineError> {
+    let mut result = Properties::new();
+    for (key, value, _) in inline_declarations(style)? {
+        if matches!(
+            key.as_str(),
+            "font-family"
+                | "font-weight"
+                | "font-stretch"
+                | "font-style"
+                | "font-variation-settings"
+                | "font-optical-sizing"
+        ) {
+            if let CssValue::Text(value) = value {
+                result.insert(key, value.to_string());
+            }
+        }
+    }
+    Ok(result)
 }
 
 fn declarations(
