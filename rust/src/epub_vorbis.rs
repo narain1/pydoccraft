@@ -15,7 +15,7 @@ use super::{
 };
 use crate::epub::{
     charge,
-    ogg::{self, Codec, Page},
+    ogg::{self, Codec, NamedTracks, Page},
     webm,
 };
 
@@ -145,8 +145,11 @@ impl Track {
         Ok(track)
     }
 
-    pub(in crate::epub) fn open_ogg(bytes: &[u8]) -> Result<Self, EngineError> {
-        let pages = ogg::groups(bytes, Codec::Vorbis, None)?;
+    pub(in crate::epub) fn open_ogg(
+        bytes: &[u8],
+        named: Option<&NamedTracks>,
+    ) -> Result<Self, EngineError> {
+        let pages = ogg::groups(bytes, Codec::Vorbis, None, named)?;
         if pages.len() > MAX_LINKS {
             return Err(limited("Ogg Vorbis exceeds its chained stream count limit"));
         }

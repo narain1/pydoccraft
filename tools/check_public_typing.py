@@ -32,6 +32,7 @@ def verify_epub_tracks(source: bytes) -> None:
             epub.epub_embedded_media(0)[0].sources[0].fragment_xywh,
             tuple[Literal["pixel", "percent"], int, int, int, int] | None,
         )
+        assert_type(epub.epub_embedded_media(0)[0].sources[0].fragment_tracks, tuple[str, ...])
         frames = epub.epub_embedded_video(0, 0, text_track=1, video_track=0)
         assert_type(frames, Iterator[doc_ex.EpubVideoFrame])
         assert_type(next(frames).text_cues, tuple[doc_ex.EpubTextCue, ...])

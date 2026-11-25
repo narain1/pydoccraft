@@ -70,6 +70,7 @@ impl Reader {
         &self,
         kind: MediaType,
         selection: Option<usize>,
+        names: &[String],
     ) -> Result<u32, EngineError> {
         let mut streams = self
             .demux
@@ -81,7 +82,46 @@ impl Reader {
         } else {
             "audio"
         };
-        let stream = if let Some(ordinal) = selection {
+        let stream = if !names.is_empty() {
+            let mut video = None;
+            let mut audio = None;
+            for name in names {
+                let mut matched = self.demux.streams().iter().filter(|stream| {
+                    self.demux
+                        .track_identity(stream.index)
+                        .and_then(|track| track.name())
+                        == Some(name.as_str())
+                });
+                let entry = matched
+                    .next()
+                    .ok_or_else(|| invalid(format!("WebM track name {name:?} is absent")))?;
+                if matched.next().is_some() {
+                    return Err(invalid(format!("WebM track name {name:?} is ambiguous")));
+                }
+                let slot = match entry.params.media_type {
+                    MediaType::Audio => &mut audio,
+                    MediaType::Video => &mut video,
+                    _ => {
+                        return Err(unsupported(
+                            "named WebM fragments require audio or video tracks",
+                        ))
+                    }
+                };
+                if slot.replace(entry).is_some() {
+                    return Err(unsupported(
+                        "named WebM fragment selects multiple tracks of the same media type",
+                    ));
+                }
+            }
+            let picked = if kind == MediaType::Video {
+                video
+            } else {
+                audio
+            };
+            picked.ok_or_else(|| {
+                unsupported("named WebM fragment does not select the requested media type")
+            })?
+        } else if let Some(ordinal) = selection {
             streams.nth(ordinal).ok_or_else(|| {
                 EngineError::InvalidArgument(format!("WebM {label} track {ordinal} is absent"))
             })?

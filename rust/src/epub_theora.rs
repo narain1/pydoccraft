@@ -15,7 +15,7 @@ use super::{
 use crate::epub::{
     audio::{opus, vorbis},
     media::SpatialFragment,
-    ogg::{self, Codec, Segment},
+    ogg::{self, Codec, NamedTracks, Segment},
 };
 
 const MAX_PREROLL: usize = 512;
@@ -50,15 +50,26 @@ impl TheoraSource {
         bytes: &[u8],
         start_us: u64,
         end_us: Option<u64>,
+        names: &[String],
     ) -> Result<Self, EngineError> {
-        let segments = ogg::groups(bytes, Codec::Theora, None)?;
-        let audio: Option<(u32, Vec<_>)> = match chained_soundtrack(&segments)? {
+        let named = (!names.is_empty())
+            .then(|| ogg::named_tracks(bytes, names))
+            .transpose()?;
+        let segments = ogg::groups(bytes, Codec::Theora, None, named.as_ref())?;
+        let soundtrack = match named.as_ref() {
+            Some(tracks) if segments.len() > 1 => tracks.audio_codec(),
+            Some(_) => None,
+            None => chained_soundtrack(&segments)?,
+        };
+        let audio: Option<(u32, Vec<_>)> = match soundtrack {
             Some(Codec::Opus) => Some((
                 OUTPUT_SAMPLE_RATE_HZ,
-                opus::Track::open(bytes, None)?.link_lengths().collect(),
+                opus::Track::open(bytes, None, named.as_ref())?
+                    .link_lengths()
+                    .collect(),
             )),
             Some(Codec::Vorbis) => {
-                let track = vorbis::Track::open_ogg(bytes)?;
+                let track = vorbis::Track::open_ogg(bytes, named.as_ref())?;
                 Some((track.spec().sample_rate, track.link_lengths().collect()))
             }
             _ => None,
@@ -299,28 +310,39 @@ impl Link {
 pub(in crate::epub) fn align_audio(
     bytes: &[u8],
     track: &mut opus::Track,
+    named: Option<&NamedTracks>,
 ) -> Result<(), EngineError> {
-    if track.link_lengths().len() < 2 {
+    if track.link_lengths().len() < 2 || named.is_some_and(|tracks| !tracks.has_video()) {
         return Ok(());
     }
-    let video = alignment_frames(bytes, Codec::Opus, OUTPUT_SAMPLE_RATE_HZ)?;
+    let video = alignment_frames(bytes, Codec::Opus, OUTPUT_SAMPLE_RATE_HZ, named)?;
     track.align_video_links(&video)
 }
 
 pub(in crate::epub) fn align_vorbis_audio(
     bytes: &[u8],
     track: &mut vorbis::Track,
+    named: Option<&NamedTracks>,
 ) -> Result<(), EngineError> {
-    if track.link_lengths().len() < 2 {
+    if track.link_lengths().len() < 2 || named.is_some_and(|tracks| !tracks.has_video()) {
         return Ok(());
     }
-    let video = alignment_frames(bytes, Codec::Vorbis, track.spec().sample_rate)?;
+    let video = alignment_frames(bytes, Codec::Vorbis, track.spec().sample_rate, named)?;
     track.align_video_links(&video)
 }
 
-fn alignment_frames(bytes: &[u8], codec: Codec, rate: u32) -> Result<Vec<usize>, EngineError> {
-    let segments = ogg::groups(bytes, Codec::Theora, None)?;
-    if chained_soundtrack(&segments)? != Some(codec) {
+fn alignment_frames(
+    bytes: &[u8],
+    codec: Codec,
+    rate: u32,
+    named: Option<&NamedTracks>,
+) -> Result<Vec<usize>, EngineError> {
+    let segments = ogg::groups(bytes, Codec::Theora, None, named)?;
+    let soundtrack = match named {
+        Some(tracks) => tracks.audio_codec(),
+        None => chained_soundtrack(&segments)?,
+    };
+    if soundtrack != Some(codec) {
         return Err(invalid("Ogg video and soundtrack segments disagree"));
     }
     segments

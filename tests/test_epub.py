@@ -2504,6 +2504,132 @@ first
             with self.assertRaisesRegex(ValueError, "still referenced"):
                 book.edit_epub_structure(remove_resources=["OEBPS/sound.wav"])
 
+    def test_named_webm_fragments_keep_picture_soundtrack_and_caption_aligned(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        raw = (fixtures / "epub-video-named-tracks.webm").read_bytes()
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Selected</title></head>
+          <body><video src="choice.webm#track=Voix%20%26%20cloche&amp;xywh=percent:25,25,50,50&amp;t=0.1,0.3&amp;track=Angle_Blue">
+          <track src="caption.vtt" kind="captions" srclang="en"/></video>
+          <video src="choice.webm"><track src="caption.vtt" kind="captions" srclang="en"/></video>
+          <video src="choice.webm#track=Angle_Ruby"/><video src="choice.webm#track=Spoken"/>
+          <video src="choice.webm#track=missing"/><video src="duplicate.webm#track=Angle_Blue"/>
+          <video src="choice.webm#track=Angle_Ruby&amp;track=Angle_Blue"/>
+          <audio src="audio.webm#track=Voix%20%26%20cloche&amp;t=0.1,0.3"/>
+          <audio src="audio.webm"/>
+          </body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Selected", chapter, "OEBPS/selected.xhtml")],
+                resources={
+                    "OEBPS/choice.webm": doc_ex.EpubResource("video/webm", raw),
+                    "OEBPS/duplicate.webm": doc_ex.EpubResource("video/webm", raw.replace(b"Angle_Ruby", b"Angle_Blue")),
+                    "OEBPS/audio.webm": doc_ex.EpubResource(
+                        "audio/webm", (fixtures / "epub-audio-named-tracks.webm").read_bytes()),
+                    "OEBPS/caption.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00:00.150 --> 00:00:00.200\nPicked\n"),
+                },
+            )
+
+        def timing(frame: doc_ex.EpubVideoFrame) -> tuple[int, int, tuple[doc_ex.EpubTextCue, ...]]:
+            return frame.start_us, frame.duration_us, frame.text_cues
+
+        with doc_ex.open(data) as book:
+            source, = book.epub_embedded_media(0)[0].sources
+            self.assertEqual(source.fragment_tracks, ("Voix & cloche", "Angle_Blue"))
+            cropped = list(book.epub_embedded_video(0, 0, text_track=0))
+            ordinary = list(book.epub_embedded_video(0, 1, start_us=100_000, end_us=300_000,
+                                                     text_track=0, video_track=1))
+            self.assertEqual([timing(f) for f in cropped], [timing(f) for f in ordinary])
+            self.assertTrue(cropped)
+            self.assertTrue(all((f.width, f.height) == (32, 20) and f.rgb[2] > 245 for f in cropped))
+            self.assertTrue(any(f.text_cues for f in cropped))
+            sound = list(book.epub_embedded_audio(0, 0))
+            self.assertEqual(sound, list(book.epub_embedded_audio(0, 1, start_us=100_000,
+                                                                 end_us=300_000, audio_track=1)))
+            self.assertEqual(sum(clip.frame_count for clip in sound), 9_600)
+            named_audio = list(book.epub_embedded_audio(0, 7))
+            self.assertEqual(named_audio, list(book.epub_embedded_audio(0, 8, start_us=100_000,
+                                                                       end_us=300_000, audio_track=1)))
+            self.assertEqual(sum(clip.frame_count for clip in named_audio), 9_600)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "does not select"):
+                next(book.epub_embedded_audio(0, 2, source_index=0))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "does not select"):
+                next(book.epub_embedded_video(0, 3, source_index=0))
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "track name .* absent"):
+                next(book.epub_embedded_video(0, 4))
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "track name .* ambiguous"):
+                next(book.epub_embedded_video(0, 5))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "multiple tracks of the same media type"):
+                next(book.epub_embedded_video(0, 6))
+            with self.assertRaisesRegex(ValueError, "video track ordinal"):
+                next(book.epub_embedded_video(0, 0, video_track=0))
+            with self.assertRaisesRegex(ValueError, "audio track ordinal"):
+                next(book.epub_embedded_audio(0, 0, audio_track=0))
+
+    def test_named_ogg_fragments_keep_selected_chains_on_one_presentation_clock(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Selected</title></head>
+          <body><video src="choice.ogv#track=Cloche&amp;xywh=percent:25,25,50,50&amp;track=Azur&amp;t=0.45,0.62">
+          <track src="caption.vtt" kind="captions" srclang="en"/></video>
+          <video src="choice.ogv#track=Azur"/><video src="choice.ogv#track=Spoken"/>
+          <video src="choice.ogv#track=Missing"/><video src="duplicate.ogv#track=Azur"/>
+          <video src="ordinary.ogv#track=Azur"/><video src="choice.ogv#track=Ruby&amp;track=Azur"/>
+          </body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Selected", chapter, "OEBPS/selected.xhtml")],
+                resources={
+                    "OEBPS/choice.ogv": doc_ex.EpubResource(
+                        "video/ogg", (fixtures / "epub-video-named-tracks.ogv").read_bytes()),
+                    "OEBPS/duplicate.ogv": doc_ex.EpubResource(
+                        "video/ogg", (fixtures / "epub-video-ambiguous-tracks.ogv").read_bytes()),
+                    "OEBPS/ordinary.ogv": doc_ex.EpubResource(
+                        "video/ogg", (fixtures / "epub-theora-vorbis-short-audio.ogv").read_bytes()),
+                    "OEBPS/caption.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00:00.470 --> 00:00:00.520\nBoundary\n"),
+                },
+            )
+
+        def pcm(clip: doc_ex.EpubAudioClip) -> bytes:
+            self.assertEqual((clip.sample_rate, clip.channels), (48_000, 1))
+            with wave.open(io.BytesIO(clip.wave), "rb") as samples:
+                return samples.readframes(clip.frame_count)
+
+        with doc_ex.open(data) as book:
+            crops = list(book.epub_embedded_video(0, 0, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us, bool(f.text_cues)) for f in crops], [
+                (450_000, 20_000, False), (470_000, 30_000, True),
+                (500_000, 20_000, True), (520_000, 100_000, False),
+            ])
+            self.assertEqual([(f.width, f.height) for f in crops], [(32, 20)] * 2 + [(28, 18)] * 2)
+            self.assertGreater(crops[0].rgb[2], 245)
+            self.assertGreater(crops[2].rgb[1], 245)
+            sound = b"".join(pcm(clip) for clip in book.epub_embedded_audio(0, 0, chunk_frames=877))
+            self.assertEqual(len(sound), 8_160 * 2)
+            self.assertEqual(sound[:2_400 * 2], bytes(2_400 * 2))
+            samples = [v for (v,) in struct.iter_unpack("<h", sound[2_400 * 2:])]
+            crossings = sum(a <= 0 < b for a, b in zip(samples, samples[1:]))
+            self.assertAlmostEqual(crossings, 580 * 0.12, delta=2)
+            spoken = b"".join(pcm(clip) for clip in book.epub_embedded_audio(
+                0, 2, start_us=250_000, end_us=450_000))
+            self.assertEqual(len(spoken), 9_600 * 2)
+            samples = [v for (v,) in struct.iter_unpack("<h", spoken)]
+            self.assertAlmostEqual(sum(a <= 0 < b for a, b in zip(samples, samples[1:])), 380 * 0.2, delta=2)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "does not select"):
+                next(book.epub_embedded_audio(0, 1))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "does not select"):
+                next(book.epub_embedded_video(0, 2))
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "track name .* absent"):
+                next(book.epub_embedded_video(0, 3))
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "track name .* ambiguous"):
+                next(book.epub_embedded_video(0, 4))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "Skeleton track names"):
+                next(book.epub_embedded_video(0, 5))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "multiple tracks of the same media type"):
+                next(book.epub_embedded_video(0, 6))
+            with self.assertRaisesRegex(ValueError, "audio track ordinal"):
+                next(book.epub_embedded_audio(0, 0, opus_track=0))
+
     def test_spatial_video_fragments_crop_picture_pixels_without_changing_the_clock(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Crops</title></head>
@@ -2592,7 +2718,7 @@ first
             ("xywh=fraction:0,1,2,5", doc_ex.MalformedDocumentError, "fragment unit"),
             ("xywh=0,1,2,5&amp;xywh=1,2,3,4", doc_ex.UnsupportedFormatError, "repeated"),
             ("t=1&amp;t=2", doc_ex.UnsupportedFormatError, "repeated"),
-            ("xywh=0,1,2,5&amp;track=2", doc_ex.UnsupportedFormatError, "fragment dimension"),
+            ("xywh=0,1,2,5&amp;id=2", doc_ex.UnsupportedFormatError, "fragment dimension"),
             ("xywh=0%2C0%2C1%2C1%26t%3D2", doc_ex.MalformedDocumentError, "unsigned integers"),
         ):
             chapter = ('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Crops</title></head>'

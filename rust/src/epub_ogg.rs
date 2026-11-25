@@ -13,6 +13,9 @@ const MAX_PAGES: usize = 150_000;
 const MAX_PACKET_BYTES: usize = 65_536;
 const MAX_COMMENT_BYTES: usize = 1024 * 1024;
 const MAX_VIDEO_PACKET_BYTES: usize = 2 * 1024 * 1024;
+const MAX_SKELETON_BYTES: usize = 1024 * 1024;
+const MAX_NAMED_LINKS: usize = 256;
+const MAX_NAMED_STREAMS: usize = 256;
 const CONTINUED: u8 = 1;
 const BOS: u8 = 2;
 const EOS: u8 = 4;
@@ -42,6 +45,35 @@ impl Codec {
             Self::Opus => "Opus",
             Self::Vorbis => "Vorbis",
             Self::Theora => "Theora",
+        }
+    }
+}
+
+type Serial = [u8; 4];
+
+#[derive(Default)]
+pub(super) struct NamedTracks {
+    audio: Vec<Serial>,
+    video: Vec<Serial>,
+    audio_codec: Option<Codec>,
+}
+
+impl NamedTracks {
+    pub(super) fn audio_codec(&self) -> Option<Codec> {
+        self.audio_codec
+    }
+
+    pub(super) fn has_video(&self) -> bool {
+        !self.video.is_empty()
+    }
+
+    fn serials(&self, codec: Codec) -> Result<&[Serial], EngineError> {
+        match codec {
+            Codec::Theora if self.has_video() => Ok(&self.video),
+            codec if self.audio_codec == Some(codec) => Ok(&self.audio),
+            _ => Err(unsupported(
+                "named Ogg fragment does not select the requested media type",
+            )),
         }
     }
 }
@@ -95,6 +127,12 @@ impl<'a> Page<'a> {
     pub(super) fn empty_eos_granule(&self) -> Option<u64> {
         (self.flag(EOS) && self.lacing.is_empty())
             .then(|| u64::from_le_bytes(self.header[6..14].try_into().expect("Ogg granule field")))
+    }
+
+    fn serial(&self) -> Serial {
+        self.header[14..18]
+            .try_into()
+            .expect("Ogg page serial field")
     }
 
     fn flag(&self, flag: u8) -> bool {
@@ -166,11 +204,13 @@ impl Stream {
 
 /// Each segment starts with adjacent BOS pages and ends after every stream's EOS.
 /// Retain the selected track's page slices. Check the other pages without assembling packets.
-pub(super) fn groups(
-    mut bytes: &[u8],
+pub(super) fn groups<'a>(
+    mut bytes: &'a [u8],
     codec: Codec,
     track: Option<usize>,
-) -> Result<Vec<Segment<'_>>, EngineError> {
+    named: Option<&NamedTracks>,
+) -> Result<Vec<Segment<'a>>, EngineError> {
+    let named = named.map(|tracks| tracks.serials(codec)).transpose()?;
     if bytes.is_empty() {
         return Err(invalid("truncated Ogg header"));
     }
@@ -187,12 +227,7 @@ pub(super) fn groups(
     for _ in 0..MAX_PAGES {
         let (page, rest) = Page::read(bytes)?;
         bytes = rest;
-        let serial = [
-            page.header[14],
-            page.header[15],
-            page.header[16],
-            page.header[17],
-        ];
+        let serial = page.serial();
         if page.flag(BOS) {
             if !beginning {
                 return Err(invalid("Ogg stream begins after its segment headers"));
@@ -202,7 +237,11 @@ pub(super) fn groups(
             }
             let identified = Codec::from_identification(page.body);
             let matches = identified == Some(codec);
-            let selected_track = matches && track.unwrap_or(0) == tracks;
+            let selected_track = matches
+                && named.map_or_else(
+                    || track.unwrap_or(0) == tracks,
+                    |serials| serials.get(groups.len()) == Some(&serial),
+                );
             tracks += usize::from(matches);
             opus_tracks += usize::from(identified == Some(Codec::Opus));
             vorbis_tracks += usize::from(identified == Some(Codec::Vorbis));
@@ -245,7 +284,7 @@ pub(super) fn groups(
                     Codec::Theora => "Ogg segment requires a Theora stream",
                 }));
             }
-            if track.is_none() && tracks > 1 {
+            if named.is_none() && track.is_none() && tracks > 1 {
                 let message = match codec {
                     Codec::Opus => {
                         "multiple Opus tracks in one Ogg segment require an explicit selection"
@@ -284,6 +323,234 @@ pub(super) fn groups(
         }
     }
     Err(limited("Ogg exceeds its page count limit"))
+}
+
+/// Resolve names through each segment's bounded Skeleton headers. The selected
+/// decoder subsequently validates transport and limits for all the streams.
+pub(super) fn named_tracks(mut bytes: &[u8], names: &[String]) -> Result<NamedTracks, EngineError> {
+    let mut selection = NamedTracks::default();
+    let mut active = HashSet::new();
+    let mut codecs = HashMap::new();
+    let mut skeleton = None;
+    let mut metadata = Vec::new();
+    let mut metadata_bytes = 0usize;
+    let mut audio_name = None;
+    let mut link = 0;
+    let mut beginning = true;
+    for _ in 0..MAX_PAGES {
+        let (page, rest) = Page::read(bytes)?;
+        bytes = rest;
+        let serial = page.serial();
+        if page.flag(BOS) {
+            if !beginning {
+                return Err(invalid("Ogg stream begins after its segment headers"));
+            }
+            if codecs.len() >= MAX_NAMED_STREAMS {
+                return Err(limited("named Ogg segment exceeds its stream count limit"));
+            }
+            if page.body.starts_with(b"fishead\0") && skeleton.replace(serial).is_some() {
+                return Err(invalid("Ogg segment repeats its Skeleton stream"));
+            }
+            if codecs
+                .insert(serial, Codec::from_identification(page.body))
+                .is_some()
+            {
+                return Err(invalid("Ogg segment repeats a stream serial"));
+            }
+            active.insert(serial);
+        } else {
+            beginning = false;
+        }
+        if !active.contains(&serial) {
+            return Err(invalid("Ogg page belongs to an inactive stream"));
+        }
+        let eos = page.flag(EOS);
+        if Some(serial) == skeleton {
+            super::charge(
+                &mut metadata_bytes,
+                page.header.len() + page.lacing.len() + page.body.len(),
+                MAX_SKELETON_BYTES,
+                "named Ogg Skeleton headers exceed 1 MiB",
+            )?;
+            metadata.push(page);
+        }
+        if eos {
+            active.remove(&serial);
+        }
+        let more_headers = beginning && bytes.get(5).is_some_and(|flags| flags & BOS != 0);
+        if active.is_empty() && !more_headers {
+            if link >= MAX_NAMED_LINKS {
+                return Err(limited("named Ogg exceeds its segment count limit"));
+            }
+            let NamedSegment { audio, video } =
+                resolve_names(std::mem::take(&mut metadata), &codecs, names)?;
+            let audio_codec = audio.map(|track| track.codec);
+            let name = audio.map(|track| track.name);
+            if link > 0
+                && (selection.audio_codec != audio_codec
+                    || audio_name != name
+                    || selection.has_video() != video.is_some())
+            {
+                return Err(unsupported(
+                    "named Ogg tracks change media type or codec across segments",
+                ));
+            }
+            if let Some(track) = audio {
+                selection.audio.push(track.serial);
+                selection.audio_codec = Some(track.codec);
+                audio_name = name;
+            }
+            if let Some(serial) = video {
+                selection.video.push(serial);
+            }
+            link += 1;
+            skeleton = None;
+            beginning = true;
+            codecs.clear();
+        }
+        if bytes.is_empty() {
+            return if active.is_empty() {
+                Ok(selection)
+            } else {
+                Err(invalid("truncated Ogg segment"))
+            };
+        }
+    }
+    Err(limited("Ogg exceeds its page count limit"))
+}
+
+#[derive(Clone, Copy)]
+struct NamedAudio {
+    serial: Serial,
+    codec: Codec,
+    name: usize,
+}
+
+struct NamedSegment {
+    audio: Option<NamedAudio>,
+    video: Option<Serial>,
+}
+
+fn resolve_names(
+    pages: Vec<Page<'_>>,
+    codecs: &HashMap<Serial, Option<Codec>>,
+    names: &[String],
+) -> Result<NamedSegment, EngineError> {
+    if pages.is_empty() {
+        return Err(unsupported(
+            "named Ogg fragments require Skeleton track names",
+        ));
+    }
+    let mut packets = packets(pages);
+    let head = packets
+        .next()
+        .transpose()?
+        .ok_or_else(|| invalid("missing Ogg Skeleton header"))?;
+    if !head.first_in_stream()
+        || !head.data.starts_with(b"fishead\0")
+        || head.data.len() < 64
+        || !matches!(head.data[8..12], [3 | 4, 0, 0, 0])
+    {
+        return Err(unsupported(
+            "named Ogg requires Skeleton version 3.0 or 4.0",
+        ));
+    }
+    if head.data[12..20] != [0; 8] || head.data[28..36] != [0; 8] {
+        return Err(unsupported(
+            "named Ogg requires a zero Skeleton time origin",
+        ));
+    }
+    let mut matched = vec![None; names.len()];
+    let mut described = HashSet::new();
+    for packet in packets {
+        let packet = packet?;
+        if (packet.data.is_empty() && packet.last_in_stream())
+            || packet.data.starts_with(b"index\0")
+        {
+            continue;
+        }
+        let (serial, name) = skeleton_name(&packet.data)?;
+        let codec = *codecs
+            .get(&serial)
+            .ok_or_else(|| invalid("Ogg Skeleton names an absent stream"))?;
+        if !described.insert(serial) {
+            return Err(invalid("Ogg Skeleton repeats a track header"));
+        }
+        if let Some(index) = names
+            .iter()
+            .position(|requested| Some(requested.as_str()) == name)
+        {
+            if packet.data[36..44] != [0; 8] {
+                return Err(unsupported(
+                    "named Ogg requires a zero Skeleton track base granule",
+                ));
+            }
+            if matched[index].replace((serial, codec)).is_some() {
+                return Err(invalid(format!(
+                    "Ogg track name {:?} is ambiguous",
+                    names[index]
+                )));
+            }
+        }
+    }
+    let mut audio = None;
+    let mut video = None;
+    for (name, (label, entry)) in names.iter().zip(matched).enumerate() {
+        let (serial, codec) =
+            entry.ok_or_else(|| invalid(format!("Ogg track name {label:?} is absent")))?;
+        let unique = match codec {
+            Some(Codec::Theora) => video.replace(serial).is_none(),
+            Some(codec @ (Codec::Opus | Codec::Vorbis)) => audio
+                .replace(NamedAudio {
+                    serial,
+                    codec,
+                    name,
+                })
+                .is_none(),
+            None => {
+                return Err(unsupported(
+                    "named Ogg fragment requires Opus, Vorbis or Theora",
+                ))
+            }
+        };
+        if !unique {
+            return Err(unsupported(
+                "named Ogg fragment selects multiple tracks of the same media type",
+            ));
+        }
+    }
+    Ok(NamedSegment { audio, video })
+}
+
+fn skeleton_name(bytes: &[u8]) -> Result<(Serial, Option<&str>), EngineError> {
+    if !bytes.starts_with(b"fisbone\0") || bytes.len() < 52 {
+        return Err(invalid("invalid Ogg Skeleton track header"));
+    }
+    let offset =
+        u32::from_le_bytes(bytes[8..12].try_into().expect("Skeleton header offset")) as usize;
+    let headers = offset
+        .checked_add(8)
+        .filter(|&start| start >= 52)
+        .and_then(|start| bytes.get(start..))
+        .ok_or_else(|| invalid("invalid Ogg Skeleton message header offset"))?;
+    let serial = bytes[12..16].try_into().expect("Skeleton track serial");
+    let lines = std::str::from_utf8(headers).map_err(invalid)?;
+    let mut picked = None;
+    for line in lines.split("\r\n") {
+        if let Some((key, value)) = line.split_once(':') {
+            if key.eq_ignore_ascii_case("Name") {
+                let name = value.trim_matches([' ', '\t']);
+                if name.is_empty()
+                    || name.len() > 1024
+                    || name.chars().any(char::is_control)
+                    || picked.replace(name).is_some()
+                {
+                    return Err(invalid("invalid or repeated Ogg Skeleton track Name"));
+                }
+            }
+        }
+    }
+    Ok((serial, picked))
 }
 
 /// Recognize the first segment before choosing the full, checksum-checked reader.

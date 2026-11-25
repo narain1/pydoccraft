@@ -121,7 +121,18 @@ impl VideoSource {
         start_us: u64,
         end_us: Option<u64>,
         video_track: Option<usize>,
+        names: &[String],
     ) -> Result<Self, EngineError> {
+        if video_track.is_some() && !names.is_empty() {
+            return Err(EngineError::InvalidArgument(
+                "named media fragments cannot be combined with a video track ordinal".into(),
+            ));
+        }
+        if !names.is_empty() && !matches!(media, "video/webm" | "video/ogg" | "application/ogg") {
+            return Err(unsupported(
+                "named media fragments require local WebM or Ogg",
+            ));
+        }
         if video_track.is_some() && media != "video/webm" {
             return Err(unsupported(
                 "WebM video track selection requires a local WebM source",
@@ -133,13 +144,13 @@ impl VideoSource {
             "video/mp4" => std::panic::catch_unwind(|| AvcSource::decode(bytes, start_us, end_us))
                 .map_err(|_| invalid("malformed embedded MP4 video"))?
                 .map(|source| Self::Avc(Box::new(source))),
-            "video/ogg" | "application/ogg" => {
-                std::panic::catch_unwind(|| theora::TheoraSource::open(&bytes, start_us, end_us))
-                    .map_err(|_| invalid("malformed embedded Ogg video"))?
-                    .map(|source| Self::Theora(Box::new(source)))
-            }
+            "video/ogg" | "application/ogg" => std::panic::catch_unwind(|| {
+                theora::TheoraSource::open(&bytes, start_us, end_us, names)
+            })
+            .map_err(|_| invalid("malformed embedded Ogg video"))?
+            .map(|source| Self::Theora(Box::new(source))),
             "video/webm" => std::panic::catch_unwind(|| {
-                webm::WebmSource::open(bytes, start_us, end_us, video_track)
+                webm::WebmSource::open(bytes, start_us, end_us, video_track, names)
             })
             .map_err(|_| invalid("malformed embedded WebM video"))?
             .map(|source| Self::Webm(Box::new(source))),

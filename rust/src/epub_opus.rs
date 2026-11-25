@@ -14,7 +14,7 @@ use super::{
 };
 
 use super::super::{
-    ogg::{self as ogg_pages, Codec, MAX_PACKETS},
+    ogg::{self as ogg_pages, Codec, NamedTracks, MAX_PACKETS},
     webm,
 };
 
@@ -51,11 +51,12 @@ impl Track {
     pub(in crate::epub) fn open(
         file: &[u8],
         opus_track: Option<usize>,
+        named: Option<&NamedTracks>,
     ) -> Result<Self, EngineError> {
         let mut links = Vec::new();
         let mut frames = 0;
         let mut coded_packets_left = MAX_PACKETS;
-        for encoded in ogg_pages::groups(file, Codec::Opus, opus_track)? {
+        for encoded in ogg_pages::groups(file, Codec::Opus, opus_track, named)? {
             let link = Link::index(encoded.pages, frames, &mut coded_packets_left)?;
             frames = link.timeline.end;
             links.push(link);

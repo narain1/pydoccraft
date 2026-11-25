@@ -105,6 +105,7 @@ class EpubMediaSource:
     fragment_end_us: int | None = None
     playable_video: bool = False
     fragment_xywh: tuple[Literal["pixel", "percent"], int, int, int, int] | None = None
+    fragment_tracks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

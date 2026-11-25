@@ -62,9 +62,10 @@ impl WebmSource {
         start: u64,
         end: Option<u64>,
         video_track: Option<usize>,
+        names: &[String],
     ) -> Result<Self, EngineError> {
         let mut reader = webm::Reader::open(bytes)?;
-        let index = reader.track(MediaType::Video, video_track)?;
+        let index = reader.track(MediaType::Video, video_track, names)?;
         let stream = &reader.demux.streams()[index as usize];
         let coded = stream
             .params

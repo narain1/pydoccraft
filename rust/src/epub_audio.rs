@@ -107,10 +107,16 @@ impl AudioSource {
         opus_track: Option<usize>,
         synchronize_video: bool,
         audio_track: Option<usize>,
+        names: &[String],
     ) -> Result<Self, EngineError> {
-        Self::decode(media, opus_track, synchronize_video, audio_track, || {
-            read(data, path, MAX_ENCODED_BYTES)
-        })
+        Self::decode(
+            media,
+            opus_track,
+            synchronize_video,
+            audio_track,
+            names,
+            || read(data, path, MAX_ENCODED_BYTES),
+        )
     }
 
     fn decode(
@@ -118,9 +124,25 @@ impl AudioSource {
         opus_track: Option<usize>,
         synchronize_video: bool,
         audio_track: Option<usize>,
+        names: &[String],
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<Self, EngineError> {
         let codec = audio_codec(media);
+        if !names.is_empty() && (opus_track.is_some() || audio_track.is_some()) {
+            return Err(EngineError::InvalidArgument(
+                "named media fragments cannot be combined with an audio track ordinal".into(),
+            ));
+        }
+        if !names.is_empty()
+            && !matches!(
+                codec,
+                Some(AudioCodec::Ogg | AudioCodec::Opus | AudioCodec::Vorbis | AudioCodec::Webm)
+            )
+        {
+            return Err(unsupported(
+                "named media fragments require local WebM or Ogg",
+            ));
+        }
         if opus_track.is_some() && audio_track.is_some() {
             return Err(EngineError::InvalidArgument(
                 "Opus and WebM audio track selections are mutually exclusive".into(),
@@ -140,22 +162,28 @@ impl AudioSource {
             Some(AudioCodec::Ogg | AudioCodec::Opus | AudioCodec::Vorbis) => {
                 let bytes = load()?;
                 std::panic::catch_unwind(|| {
-                    let codec = match codec {
-                        Some(AudioCodec::Vorbis) => Codec::Vorbis,
-                        Some(AudioCodec::Opus) => Codec::Opus,
+                    let named = (!names.is_empty())
+                        .then(|| ogg::named_tracks(&bytes, names))
+                        .transpose()?;
+                    let codec = match (named.as_ref(), codec) {
+                        (Some(tracks), _) => tracks.audio_codec().ok_or_else(|| {
+                            unsupported("named Ogg fragment does not select an audio track")
+                        })?,
+                        (_, Some(AudioCodec::Vorbis)) => Codec::Vorbis,
+                        (_, Some(AudioCodec::Opus)) => Codec::Opus,
                         _ if opus_track.is_some() => Codec::Opus,
                         _ => ogg::audio_codec(&bytes)?,
                     };
                     if codec == Codec::Vorbis {
-                        let mut track = vorbis::Track::open_ogg(&bytes)?;
+                        let mut track = vorbis::Track::open_ogg(&bytes, named.as_ref())?;
                         if synchronize_video {
-                            super::video::align_vorbis_audio(&bytes, &mut track)?;
+                            super::video::align_vorbis_audio(&bytes, &mut track, named.as_ref())?;
                         }
                         Ok(Decoder::Vorbis(Box::new(track)))
                     } else {
-                        let mut track = opus::Track::open(&bytes, opus_track)?;
+                        let mut track = opus::Track::open(&bytes, opus_track, named.as_ref())?;
                         if synchronize_video {
-                            super::video::align_audio(&bytes, &mut track)?;
+                            super::video::align_audio(&bytes, &mut track, named.as_ref())?;
                         }
                         Ok(Decoder::Opus(Box::new(track)))
                     }
@@ -166,7 +194,7 @@ impl AudioSource {
                 let bytes = load()?;
                 std::panic::catch_unwind(|| {
                     let reader = super::webm::Reader::open(bytes)?;
-                    let index = reader.track(oxideav_core::MediaType::Audio, audio_track)?;
+                    let index = reader.track(oxideav_core::MediaType::Audio, audio_track, names)?;
                     use oxideav_core::Demuxer;
                     match reader.demux.streams()[index as usize]
                         .params
@@ -212,7 +240,7 @@ impl AudioSource {
         media: &str,
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<u64, EngineError> {
-        let mut source = Self::decode(media, None, false, None, load)?;
+        let mut source = Self::decode(media, None, false, None, &[], load)?;
         let (format, frames) = source.geometry()?;
         let frames = match (&source.decoder, frames) {
             (_, Some(frames)) => frames,

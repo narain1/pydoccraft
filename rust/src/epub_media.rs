@@ -121,6 +121,7 @@ fn source(
         start: fragment_start_us,
         end: fragment_end_us,
         spatial,
+        tracks,
     } = fragment
         .map(|fragment| media_fragment(fragment, kind))
         .transpose()?
@@ -133,6 +134,16 @@ fn source(
         && !(kind == "audio" && media == "video/ogg")
     {
         return Err(invalid("embedded EPUB media type differs from its element"));
+    }
+    if !tracks.is_empty()
+        && !matches!(
+            media,
+            "audio/ogg" | "video/ogg" | "application/ogg" | "video/webm" | "audio/webm"
+        )
+    {
+        return Err(unsupported(
+            "named media fragments require local WebM or Ogg",
+        ));
     }
     let ogg_video = kind == "video" && matches!(media, "video/ogg" | "application/ogg");
     let webm_video = kind == "video" && media == "video/webm";
@@ -169,6 +180,9 @@ fn source(
         let unit = if percent { "percent" } else { "pixel" };
         source["fragment_xywh"] = json!([unit, x, y, width, height]);
     }
+    if !tracks.is_empty() {
+        source["fragment_tracks"] = json!(tracks);
+    }
     Ok(source)
 }
 
@@ -179,6 +193,7 @@ struct MediaFragment {
     start: u64,
     end: Option<u64>,
     spatial: Option<SpatialFragment>,
+    tracks: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -230,10 +245,11 @@ impl SpatialFragment {
 fn media_fragment(fragment: &str, kind: &str) -> Result<MediaFragment, EngineError> {
     let mut timing = None;
     let mut spatial = None;
+    let mut tracks = Vec::new();
     for pair in fragment.split('&') {
-        let (name, value) = pair.split_once('=').ok_or_else(|| {
-            unsupported("embedded media fragment requires t or xywh name-value dimensions")
-        })?;
+        let (name, value) = pair
+            .split_once('=')
+            .ok_or_else(|| unsupported("embedded media fragment requires name-value dimensions"))?;
         match percent_decode(name)?.as_str() {
             "t" if timing.is_none() => timing = Some(temporal_fragment(&percent_decode(value)?)?),
             "xywh" if kind != "video" => {
@@ -243,6 +259,20 @@ fn media_fragment(fragment: &str, kind: &str) -> Result<MediaFragment, EngineErr
             }
             "xywh" if spatial.is_none() => {
                 spatial = Some(SpatialFragment::parse(&percent_decode(value)?)?)
+            }
+            "track" => {
+                let name = percent_decode(value)?;
+                if name.is_empty() || name.len() > 1024 || name.chars().any(char::is_control) {
+                    return Err(invalid("invalid embedded media fragment track name"));
+                }
+                if !tracks.contains(&name) {
+                    if tracks.len() == 2 {
+                        return Err(unsupported(
+                            "media fragment requires at most one audio and one video track",
+                        ));
+                    }
+                    tracks.push(name);
+                }
             }
             _ => {
                 return Err(unsupported(
@@ -256,6 +286,7 @@ fn media_fragment(fragment: &str, kind: &str) -> Result<MediaFragment, EngineErr
         start,
         end,
         spatial,
+        tracks,
     })
 }
 
