@@ -1048,7 +1048,8 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
     }
     if root.descendants().any(|node| {
         node.is_element()
-            && (matches!(node.tag_name().name(), "filter" | "feGaussianBlur")
+            && (node.has_tag_name("filter")
+                || super::svg::effects::is_blur_primitive(node.tag_name().name())
                 || node.attribute("filter").is_some()
                 || (super::svg::effects::is_gradient(node.tag_name().name())
                     && (node.attribute("href").is_some()

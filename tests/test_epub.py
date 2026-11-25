@@ -5340,6 +5340,10 @@ first
                 with self.subTest(primitive=primitive), self.assertRaisesRegex(error, message):
                     book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Invalid shadow", svg(effect(primitive, shape))), 0])
 
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "misplaced SVG filter primitive"):
+                orphan = svg('<feDropShadow dx="NaN"/>')
+                book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Invalid shadow", orphan), 0])
+
             scaled = effect('<feDropShadow dx="1800" stdDeviation=".1"/>',
                             '<rect width="1" height="1" transform="scale(9)" filter="url(#ds)"/>')
             large_offset = book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Offset", svg(scaled)), 0])
