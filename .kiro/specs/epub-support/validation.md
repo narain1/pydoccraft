@@ -815,3 +815,9 @@ A separate NCX probe reproduced a remaining play-order issue. After the spine mo
 ## 2026-11-24 NCX play order across staged navigation lists
 
 The previous wheel numbered a page-list destination in the first chapter after a TOC entry in the second chapter. The new regression reorders the spine and swaps the relative positions of two IDs in the staged first chapter. The final NCX numbers the page-list destination before the later TOC destination and assigns the same number to the normalized URI in an auxiliary list. Six focused NCX regressions passed on the installed Linux wheel, including EPUB 2 and EPUB 3 compatibility navigation, generated navigation and exact resource-only replacement.
+
+## 2026-11-24 Supplemental XHTML and auxiliary chapters
+
+The installed-wheel tests stage replacement XHTML, a new supplemental XHTML file, a referenced PNG and navigation edits with a reordered spine. The original linked ID is protected until its inbound reference is updated in the same transaction. A conforming hyperlinked endnote is inserted with `linear="no"`. Both supplemental documents keep their exact staged bytes and the OPF declares their MathML and SVG properties. Malformed XHTML, unavailable resources or anchors, edits targeting an effective spine fallback, and an order without a linear chapter fail explicitly. XHTML iframe and object rendering remains separately tracked.
+
+An independently authored EPUB 3 book with the inserted endnote, two primary chapters and the supplemental XHTML member reopened with the expected navigation and passed EPUBCheck 5.4.0 without errors, warnings or informational messages. The EPUB 2 and EPUB 3 NCX proofs and the public typing check passed again. [EPUB 3.3 spine](https://www.w3.org/TR/epub-33/#sec-spine)

@@ -27,7 +27,7 @@ mod removal;
 #[path = "epub_toc_edit.rs"]
 mod toc;
 
-type ChapterEdit = (String, String, Option<String>, bool, bool);
+type ChapterEdit = (String, String, Option<String>, bool, bool, bool);
 pub(crate) type SpineEdit = (Option<i64>, Option<ChapterEdit>);
 pub(crate) type ResourceEdit = (String, String, Vec<u8>);
 // Depth-first timing entries keep the native boundary flat and bounded.
@@ -183,11 +183,21 @@ pub(crate) fn update_structure<'a>(
         manifest_additions: String::new(),
         files: Files::new(),
     };
-    let original = if order.is_some() || !chapters.is_empty() || authored_nav.is_some() {
+    let original = if order.is_some()
+        || !chapters.is_empty()
+        || resources
+            .iter()
+            .any(|(_, media, _)| media == "application/xhtml+xml")
+    {
         Some(extract(data, None)?)
     } else {
         None
     };
+    let effective_spine: HashSet<&str> = original
+        .iter()
+        .flat_map(|original| &original.pages)
+        .filter_map(|page| page.metadata["chapter_path"].as_str())
+        .collect();
     let mut edits = Vec::new();
     let mut removed_anchors = editor::RemovedAnchors::new();
     let mut anchor_bytes = 0;
@@ -222,14 +232,7 @@ pub(crate) fn update_structure<'a>(
             continue;
         };
         check_path(path)?;
-        if spine_paths.contains(path)
-            || original.as_ref().is_some_and(|original| {
-                original
-                    .pages
-                    .iter()
-                    .any(|page| page.metadata["chapter_path"].as_str() == Some(path))
-            })
-        {
+        if spine_paths.contains(path) || effective_spine.contains(path.as_str()) {
             return Err(argument(
                 "replace a spine navigation chapter through replacements",
             ));
@@ -273,6 +276,7 @@ pub(crate) fn update_structure<'a>(
                 && m.text().is_some_and(|text| text.trim() == "pre-paginated")
         });
         let mut read_order = String::new();
+        let mut has_linear = false;
         for entry in order {
             match entry {
                 (Some(index), None) => {
@@ -287,6 +291,7 @@ pub(crate) fn update_structure<'a>(
                     if !used.insert(index) {
                         return Err(argument("EPUB spine index was selected more than once"));
                     }
+                    has_linear |= references[index].attribute("linear") != Some("no");
                     let page = &original.pages[index];
                     let path = page
                         .metadata
@@ -313,7 +318,8 @@ pub(crate) fn update_structure<'a>(
                         METADATA_BYTES,
                     )?;
                 }
-                (None, Some((label, source, path, fixed, svg))) => {
+                (None, Some((label, source, path, fixed, svg, linear))) => {
+                    has_linear |= *linear;
                     validate_text(label, 1024, "chapter title")?;
                     if label.trim().is_empty() {
                         return Err(argument("EPUB chapter title is empty"));
@@ -378,9 +384,12 @@ pub(crate) fn update_structure<'a>(
                     } else {
                         ""
                     };
+                    let auxiliary = if *linear { "" } else { " linear=\"no\"" };
                     append(
                         &mut read_order,
-                        &format!("<itemref xmlns=\"{OPF}\" idref=\"{id}\"{properties}/>"),
+                        &format!(
+                            "<itemref xmlns=\"{OPF}\" idref=\"{id}\"{auxiliary}{properties}/>"
+                        ),
                         METADATA_BYTES,
                     )?;
                     selected.push(toc::Chapter {
@@ -396,6 +405,9 @@ pub(crate) fn update_structure<'a>(
         }
         if selected.is_empty() {
             return Err(argument("EPUB must retain at least one chapter"));
+        }
+        if !has_linear {
+            return Err(argument("EPUB must retain at least one linear chapter"));
         }
         if !read_order.is_empty()
             && (used.len() != references.len()
@@ -522,6 +534,8 @@ pub(crate) fn update_structure<'a>(
             )?;
         }
     }
+    let mut supplemental = HashSet::new();
+    let mut supplemental_properties = HashMap::new();
     for (path, media, data) in resources {
         if [authored_nav, authored_ncx]
             .into_iter()
@@ -531,9 +545,11 @@ pub(crate) fn update_structure<'a>(
             continue;
         }
         check_path(path)?;
+        let xhtml = media == "application/xhtml+xml";
         if plan.files.contains_key(path)
             || existing_toc.as_ref() == Some(path)
             || spine_paths.contains(path)
+            || (xhtml && effective_spine.contains(path.as_str()))
             || !editable_resource(media)
         {
             return Err(argument(
@@ -561,10 +577,39 @@ pub(crate) fn update_structure<'a>(
             }
             parse_xml(data)?;
         }
-        if book.archive.index_for_name(path).is_none() {
+        let existing = book.archive.index_for_name(path).is_some();
+        let mut properties = Vec::new();
+        if xhtml {
+            if data.len() > XML_BYTES {
+                return Err(limited("supplemental XHTML exceeds its XML byte budget"));
+            }
+            let xml = parse_xml(data)?;
+            let root = xml.root_element();
+            if !name(root, XHTML, "html") || child(root, XHTML, "body").is_none() {
+                return Err(invalid("supplemental XHTML requires a document body"));
+            }
+            if epub3 {
+                properties = editor::xhtml_properties(root);
+                if paths.contains_key(path) {
+                    supplemental_properties.insert(path.as_str(), properties.clone());
+                }
+            }
+            if existing {
+                editor::collect_removed_anchors(
+                    &mut book,
+                    path,
+                    data,
+                    &xml,
+                    &mut removed_anchors,
+                    &mut anchor_bytes,
+                )?;
+            }
+            supplemental.insert(path.as_str());
+        }
+        if !existing {
             if !paths.contains_key(path) {
                 plan.claim_path(path)?;
-                plan.add_manifest(path, media, "")?;
+                plan.add_manifest(path, media, &editor::properties_attribute(&properties))?;
             } else if paths.get(path) != Some(&media.as_str()) {
                 return Err(argument(
                     "EPUB resource media type conflicts with its manifest",
@@ -575,7 +620,7 @@ pub(crate) fn update_structure<'a>(
                 "EPUB resource replacement requires its existing manifest and media type",
             ));
         }
-        if media == "image/svg+xml" && book.archive.index_for_name(path).is_some() {
+        if media == "image/svg+xml" && existing {
             let xml = parse_xml(data)?;
             editor::collect_removed_anchors(
                 &mut book,
@@ -611,6 +656,15 @@ pub(crate) fn update_structure<'a>(
             Cow::Borrowed(data.as_slice())
         };
         plan.files.insert(path.clone(), replacement);
+    }
+    if !supplemental_properties.is_empty() {
+        editor::chapter_property_edits(
+            package_source,
+            &package_path,
+            manifest_node,
+            &supplemental_properties,
+            &mut edits,
+        )?;
     }
     if let Some((path, chapters)) = reordered_ncx {
         let data = plan
@@ -718,13 +772,14 @@ pub(crate) fn update_structure<'a>(
             .collect(),
         &removals,
     )?;
-    let extracted = extract(&updated, None)?;
+    let extracted = super::extract_impl(&updated, None, false, &supplemental)?;
     if authored_nav.is_some() || authored_ncx.is_some() {
         toc::validate_replacement(
             &updated,
             &extracted.metadata,
             authored_nav.is_some(),
             authored_ncx.map(|(path, _, _)| path.as_str()),
+            &supplemental,
         )?;
     }
     editor::validate_svg_chapters(&updated, svg_chapters.iter().map(String::as_str))?;
@@ -858,7 +913,8 @@ fn check_path(path: &str) -> Result<(), EngineError> {
 fn editable_resource(media: &str) -> bool {
     matches!(
         media,
-        "text/css"
+        "application/xhtml+xml"
+            | "text/css"
             | "text/vtt"
             | "application/smil+xml"
             | "application/ttml+xml"

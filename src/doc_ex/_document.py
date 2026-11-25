@@ -1130,7 +1130,7 @@ class Document:
         from . import _core, _native
 
         chapters, total_bytes = ([], 0) if replacements is None else self._epub_chapter_replacements(replacements)
-        selected: list[tuple[int | None, tuple[str, str, str | None, bool, bool] | None]] | None = None
+        selected: list[tuple[int | None, tuple[str, str, str | None, bool, bool, bool] | None]] | None = None
         if order is not None:
             selected = []
             count = len(self._pages)
@@ -1152,7 +1152,9 @@ class Document:
                     total_bytes += len(title.encode()) + len(markup.encode())
                     if path is not None:
                         total_bytes += len(path.encode())
-                    selected.append((None, (title, markup, path, fixed, svg)))
+                    if type(entry.linear) is not bool:
+                        raise TypeError("linear must be a bool")
+                    selected.append((None, (title, markup, path, fixed, svg, entry.linear)))
                 else:
                     index = operator.index(entry)
                     self._ensure_open()

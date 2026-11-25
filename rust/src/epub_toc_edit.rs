@@ -69,6 +69,7 @@ pub(super) fn validate_replacement(
     metadata: &Map<String, Value>,
     xhtml: bool,
     ncx: Option<&str>,
+    supplemental: &HashSet<&str>,
 ) -> Result<(), EngineError> {
     let manifest: HashMap<_, _> = metadata["manifest"]
         .as_array()
@@ -86,6 +87,7 @@ pub(super) fn validate_replacement(
     if let Some(path) = ncx {
         let source = book.read(path, XML_BYTES)?;
         let xml = ncx_replacement_xml(&source)?;
+        super::super::reject_hyperlinked_supplemental(xml.root_element(), path, supplemental)?;
         let groups = super::super::read_ncx(xml.root_element(), path)?;
         validate_targets(&mut book, &manifest, &groups, true)?;
     }
@@ -152,21 +154,13 @@ fn validate_targets(
             "replacement EPUB navigation requires one nonempty table of contents",
         ));
     }
-    for (path, mut missing) in fragments {
-        let source = book.read(path, XML_BYTES)?;
-        let xml = parse_xml(&source)?;
-        for id in xml
-            .descendants()
-            .filter(Node::is_element)
-            .flat_map(super::super::element_ids)
-        {
-            missing.remove(id);
-        }
-        if !missing.is_empty() {
-            return Err(invalid(
-                "replacement EPUB navigation targets a missing fragment",
-            ));
-        }
+    for (path, missing) in fragments {
+        super::super::validate_fragment_ids(
+            book,
+            path,
+            missing,
+            "replacement EPUB navigation targets a missing fragment",
+        )?;
     }
     Ok(())
 }

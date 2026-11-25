@@ -16,6 +16,7 @@ class EpubChapterSource:
     xhtml: str
     path: str | None = None
     fixed_layout: bool = False
+    linear: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,7 @@ class EpubSvgChapterSource:
     title: str
     svg: str
     path: str | None = None
+    linear: bool = True
 
 
 @dataclass(frozen=True, slots=True)

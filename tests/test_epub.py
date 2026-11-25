@@ -5357,6 +5357,101 @@ first
             )
             self.assertEqual(points[-1].find("{*}content").attrib["src"], "one.xhtml#fresh-%C3%A9")
 
+    def test_structure_stages_supplemental_xhtml_links_navigation_and_assets(self) -> None:
+        source, nav_path, nav, html = self.nonspine_navigation_fixture()
+        notes, glossary = "OEBPS/notes.xhtml", "OEBPS/glossary.xhtml"
+        endnotes, index = "OEBPS/endnotes.xhtml", "OEBPS/notes-index.xhtml"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            opf = archive.read("OEBPS/content.opf").replace(b"</manifest>", b"""
+                <item id="notes" href="notes.xhtml" media-type="application/xhtml+xml" properties="svg"/>
+                <item id="notes-index" href="notes-index.xhtml" media-type="application/xhtml+xml"/>
+                </manifest>""")
+        original_notes = html.format('<p id="old-note">Original endnote</p>')
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": opf, notes: original_notes,
+            index: html.format('<h1>Index</h1><a href="notes.xhtml#old-note">Note</a>'),
+        })
+        note_markup = html.format("""<p id="note-é">Edited endnote</p>
+            <p><a href="one.xhtml#old">Back to chapter</a><a href="glossary.xhtml#definition">Definition</a></p>
+            <p><img src="Visual/figure.png" alt="Figure"/>
+            <math xmlns="http://www.w3.org/1998/Math/MathML"><mn>2</mn></math></p>""")
+        glossary_markup = html.format("""<p id="definition"><a href="one.xhtml#old">Chapter</a></p>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="12" viewBox="0 0 20 12">
+            <rect width="20" height="12" fill="#3264a0"/></svg>""")
+        xhtml = "application/xhtml+xml"
+        resources = {
+            notes: doc_ex.EpubResource(xhtml, note_markup.encode()),
+            glossary: doc_ex.EpubResource(xhtml, glossary_markup.encode()),
+            "OEBPS/Visual/figure.png": doc_ex.EpubResource("image/png", PNG),
+        }
+        with doc_ex.open(source) as book:
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_structure(resources=resources)
+            index_markup = html.format('<h1>Index</h1><a href="notes.xhtml#note-%C3%A9">Note</a>')
+            revised_nav = nav.replace("https://example.org/", "../endnotes.xhtml#endnote")
+            note = doc_ex.EpubChapterSource(
+                "Endnotes", html.format('<p id="endnote"><a href="one.xhtml#old">Back</a></p>'),
+                endnotes, linear=False,
+            )
+            revised = book.edit_epub_structure(
+                [1, 0, note], replacements={
+                    0: html.format('<h1 id="old">Edited</h1><a href="endnotes.xhtml#endnote">Note</a>')
+                }, resources={
+                    **resources, index: doc_ex.EpubResource(xhtml, index_markup.encode()),
+                    nav_path: doc_ex.EpubResource(xhtml, revised_nav.encode()),
+                },
+            )
+            self.assertEqual(book.read_epub_resource(notes), original_notes.encode())
+        with doc_ex.open(revised) as book:
+            self.assertEqual(len(book), 3)
+            self.assertEqual([page.metadata["linear"] for page in book], [True, True, False])
+            self.assertIn("Edited", book[1].get_text())
+            self.assertEqual(book[1].get_links()[0].metadata["target_path"], endnotes)
+            self.assertEqual(book.read_epub_resource(notes), note_markup.encode())
+            self.assertEqual(book.read_epub_resource(index), index_markup.encode())
+            self.assertEqual(book.read_epub_resource(glossary), glossary_markup.encode())
+            self.assertEqual(book.read_epub_resource("OEBPS/Visual/figure.png"), PNG)
+            props = {item["path"]: item["properties"] for item in book.metadata["manifest"]}
+            self.assertEqual((props[notes], props[glossary]), ("mathml", "svg"))
+            related = next(item for item in book.metadata["navigation"] if item["kind"] == "related")
+            self.assertEqual(related["items"][0]["fragment"], "endnote")
+
+    def test_structure_rejects_invalid_supplemental_xhtml(self) -> None:
+        xhtml = "application/xhtml+xml"
+        html = '<html xmlns="http://www.w3.org/1999/xhtml"><body>{}</body></html>'
+        cases = (
+            ("<empty/>", "document body"),
+            (html.format('<a href="absent.xhtml">Missing</a>'), "missing packaged resource"),
+            (html.format('<a href="one.xhtml#absent">Missing</a>'), "missing fragment"),
+            (html.format('<img src="missing.png" alt="Missing"/>'), "missing.png"),
+        )
+        source = epub_fixture()
+        with doc_ex.open(source) as book:
+            for markup, reason in cases:
+                with self.subTest(reason=reason), self.assertRaisesRegex(doc_ex.MalformedDocumentError, reason):
+                    book.edit_epub_structure(resources={
+                        "OEBPS/notes.xhtml": doc_ex.EpubResource(xhtml, markup.encode())
+                    })
+            with self.assertRaisesRegex(ValueError, "hyperlinked EPUB content must be in the spine"):
+                book.edit_epub_structure(
+                    replacements={0: html.format('<a href="notes.xhtml">Note</a>')},
+                    resources={"OEBPS/notes.xhtml": doc_ex.EpubResource(xhtml, html.format("<p>Note</p>").encode())},
+                )
+            with self.assertRaisesRegex(ValueError, "at least one linear chapter"):
+                book.edit_epub_structure([doc_ex.EpubChapterSource("Notes", html.format("<p>Note</p>"), linear=False)])
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            opf = archive.read("OEBPS/content.opf").replace(
+                b'<itemref idref="one"/>', b'<itemref idref="foreign"/>',
+            ).replace(b"</manifest>", b"""
+              <item id="foreign" href="unreadable.xml" media-type="application/xml" fallback="one"/>
+              </manifest>""")
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/content.opf": opf})) as book:
+            self.assertEqual(book[0].metadata["chapter_path"], "OEBPS/one.xhtml")
+            with self.assertRaisesRegex(ValueError, "conflicts with chapter"):
+                book.edit_epub_structure(resources={
+                    "OEBPS/one.xhtml": doc_ex.EpubResource(xhtml, html.format("<p>Wrong entry point</p>").encode())
+                })
+
     def test_structure_replaces_nonspine_navigation_verbatim_without_reorder(self) -> None:
         source, nav_path, nav, _ = self.nonspine_navigation_fixture()
         revised_nav = nav.replace("Old introduction", "Edited label").encode()

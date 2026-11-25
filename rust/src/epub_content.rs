@@ -602,6 +602,26 @@ fn inline(
     Ok(())
 }
 
+pub(super) fn hyperlink_target<'a>(node: Node<'a, '_>) -> Option<&'a str> {
+    if node.has_tag_name((SVG, "a")) {
+        super::svg::image_href(node)
+    } else if name(node, XHTML, "a") || name(node, XHTML, "area") {
+        node.attribute("href")
+    } else {
+        None
+    }
+}
+
+pub(super) fn embedded_document_target<'a>(node: Node<'a, '_>) -> Option<&'a str> {
+    if name(node, XHTML, "iframe") {
+        node.attribute("src")
+    } else if name(node, XHTML, "object") {
+        node.attribute("data")
+    } else {
+        None
+    }
+}
+
 fn link(
     href: &str,
     label: &str,

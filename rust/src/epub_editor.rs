@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::{
     charge, external, extract, invalid, limited, name, parse_xml, percent_decode, required,
-    resolve, svg, unsupported, Book, DC, METADATA_BYTES, MIME, NCX, OPF, XHTML, XML_BYTES,
+    resolve, unsupported, Book, DC, METADATA_BYTES, MIME, NCX, OPF, XHTML, XML_BYTES,
 };
 use crate::{
     author_epub::{escape_attribute, escape_text, validate_text, BoundedOutput},
@@ -602,10 +602,10 @@ fn check_markup_anchors(
         ) && name(root, namespace, "smil")
     });
     for node in root.descendants().filter(Node::is_element) {
-        let href = if node.has_tag_name((svg::NS, "a")) {
-            svg::image_href(node)
-        } else if name(node, XHTML, "a") || name(node, XHTML, "area") {
-            node.attribute("href")
+        let content_target = super::content::hyperlink_target(node)
+            .or_else(|| super::content::embedded_document_target(node));
+        let href = if content_target.is_some() {
+            content_target
         } else if ncx && name(node, NCX, "content")
             || smil.is_some_and(|namespace| name(node, namespace, "text"))
         {

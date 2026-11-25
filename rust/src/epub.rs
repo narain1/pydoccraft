@@ -1,6 +1,6 @@
 //! Bounded OCF package traversal using the shared ZIP guard and a namespace-aware XML parser.
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     io::{Cursor, Read},
 };
 
@@ -119,7 +119,11 @@ pub(crate) fn convert(
     target: &str,
     password: Option<&str>,
 ) -> Result<Vec<u8>, EngineError> {
-    output::convert(data, &extract_impl(data, password, true)?, target)
+    output::convert(
+        data,
+        &extract_impl(data, password, true, &HashSet::new())?,
+        target,
+    )
 }
 
 const XHTML: &str = "http://www.w3.org/1999/xhtml";
@@ -159,13 +163,14 @@ pub fn is_epub(data: &[u8]) -> Result<bool, EngineError> {
 }
 
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
-    extract_impl(data, password, false)
+    extract_impl(data, password, false, &HashSet::new())
 }
 
 fn extract_impl(
     data: &[u8],
     password: Option<&str>,
     project_equation_css: bool,
+    supplemental: &HashSet<&str>,
 ) -> Result<DocumentPayload, EngineError> {
     if password.is_some() {
         return Err(unsupported("passwords and DRM are not supported"));
@@ -289,6 +294,7 @@ fn extract_impl(
         let doc = parse_xml(&bytes)?;
         overlays.check_chapter(&entry.resolved, &doc)?;
         let root = doc.root_element();
+        reject_hyperlinked_supplemental(root, &entry.resolved, supplemental)?;
         let groups = if navigation.is_some() {
             read_navigation(root, &entry.resolved)?
         } else {
@@ -342,6 +348,7 @@ fn extract_impl(
         let number = pages.len();
         overlays.check_chapter(&entry.resolved, &doc)?;
         let root = doc.root_element();
+        reject_hyperlinked_supplemental(root, &entry.resolved, supplemental)?;
         let mut page = if entry.media == "image/svg+xml" {
             content::svg_page(root, &bytes, number, &entry.resolved, &mut budget)?
         } else {
@@ -442,13 +449,71 @@ fn extract_impl(
         .file_names()
         .filter(|path| {
             let lower = path.to_ascii_lowercase();
-            (lower.ends_with(".xhtml") || lower.ends_with(".html")) && !validated.contains(*path)
+            (supplemental.contains(*path) || lower.ends_with(".xhtml") || lower.ends_with(".html"))
+                && !validated.contains(*path)
         })
         .map(str::to_owned)
         .collect();
+    let mut supplemental_fragments = BTreeMap::<String, HashSet<String>>::new();
     for path in names {
         let bytes = book.read(&path, XML_BYTES)?;
-        overlays.check_chapter(&path, &parse_xml(&bytes)?)?;
+        let xml = parse_xml(&bytes)?;
+        overlays.check_chapter(&path, &xml)?;
+        if supplemental.contains(path.as_str()) {
+            content::chapter(
+                xml.root_element(),
+                &mut content::Context {
+                    source: &bytes,
+                    path: &path,
+                    page: 0,
+                    manifest: &items_by_path,
+                    book: &mut book,
+                    budget: &mut budget,
+                    styles: None,
+                    collect_anchors: false,
+                    equation_styles: None,
+                },
+            )?;
+            for uri in xml
+                .descendants()
+                .filter(Node::is_element)
+                .filter_map(|node| {
+                    content::hyperlink_target(node)
+                        .or_else(|| content::embedded_document_target(node))
+                })
+                .map(str::trim)
+                .filter(|uri| !uri.is_empty() && !external(uri))
+            {
+                let target = resolve(&path, uri)?;
+                let mime = items_by_path
+                    .get(&target)
+                    .filter(|_| book.archive.index_for_name(&target).is_some())
+                    .ok_or_else(|| {
+                        invalid("supplemental XHTML links to a missing packaged resource")
+                    })?;
+                if matches!(
+                    *mime,
+                    "application/xhtml+xml" | "text/html" | "image/svg+xml"
+                ) {
+                    if let Some((_, fragment)) =
+                        uri.split_once('#').filter(|(_, id)| !id.is_empty())
+                    {
+                        supplemental_fragments
+                            .entry(target)
+                            .or_default()
+                            .insert(percent_decode(fragment)?);
+                    }
+                }
+            }
+        }
+    }
+    for (path, ids) in supplemental_fragments {
+        validate_fragment_ids(
+            &mut book,
+            &path,
+            ids.iter().map(String::as_str).collect(),
+            "supplemental XHTML links to a missing fragment",
+        )?;
     }
     overlays.check_remaining(&mut book)?;
     if !overlays.documents.is_empty() {
@@ -463,6 +528,58 @@ fn extract_impl(
         pages,
         ..Default::default()
     })
+}
+
+fn reject_hyperlinked_supplemental(
+    root: Node<'_, '_>,
+    path: &str,
+    supplemental: &HashSet<&str>,
+) -> Result<(), EngineError> {
+    if supplemental.is_empty() {
+        return Ok(());
+    }
+    let ncx = name(root, NCX, "ncx");
+    for uri in root
+        .descendants()
+        .filter(Node::is_element)
+        .filter_map(|node| {
+            if ncx && name(node, NCX, "content") {
+                node.attribute("src")
+            } else {
+                content::hyperlink_target(node)
+            }
+        })
+        .map(str::trim)
+        .filter(|uri| !uri.is_empty() && !external(uri))
+    {
+        if resolve(path, uri).is_ok_and(|target| supplemental.contains(target.as_str())) {
+            return Err(EngineError::InvalidArgument(
+                "hyperlinked EPUB content must be in the spine. Use linear=False for auxiliary chapters".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_fragment_ids(
+    book: &mut Book<'_>,
+    path: &str,
+    mut missing: HashSet<&str>,
+    error: &str,
+) -> Result<(), EngineError> {
+    let source = book.read(path, XML_BYTES)?;
+    let xml = parse_xml(&source)?;
+    for id in xml
+        .descendants()
+        .filter(Node::is_element)
+        .flat_map(element_ids)
+    {
+        missing.remove(id);
+    }
+    if !missing.is_empty() {
+        return Err(invalid(error));
+    }
+    Ok(())
 }
 
 struct Item<'a> {
