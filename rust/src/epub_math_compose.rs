@@ -455,27 +455,26 @@ impl Editable {
                         .and_then(Cell::take)
                         .ok_or_else(|| invalid("missing editable MathML box"))?;
                 if borrow > 0.0 {
+                    let donor = BorrowedSpacing::measure(&result, borrow)?;
+                    let mut keep_caret = false;
                     if let Some((offset, suffix)) = caret.as_mut() {
                         let offset = &mut **offset;
-                        let preceding = result.last().map_or(0, argument_units);
-                        let start = native_end - preceding;
+                        let start = native_end - donor.slots;
                         let end = native_end + 1;
-                        let keep_caret = (start + 1..end).contains(offset);
-                        recompose_borrowed_padding(&mut result, node, borrow, keep_caret)?;
+                        keep_caret = (start + 1..end).contains(offset);
                         if keep_caret {
-                            // The zero-extent phantom preserves each character
-                            // boundary of the original space run.
-                            **suffix = Some(vec![(result.len() - 1, 0), (0, 0)]);
+                            // The zero-extent phantom retains the distinct
+                            // slot at each original space boundary.
+                            **suffix = Some(vec![(donor.first, 0), (0, 0)]);
                             *offset -= start;
                             caret = None;
                         } else if *offset >= end {
-                            *offset -= preceding;
+                            *offset -= donor.slots;
                         }
-                        // The old space run and the padding marker now occupy one box.
+                        // The spaces and the padding marker now occupy one box.
                         native_end = start + 1;
-                    } else {
-                        recompose_borrowed_padding(&mut result, node, borrow, false)?;
                     }
+                    donor.replace(&mut result, node, keep_caret)?;
                 } else {
                     if let Some((offset, _)) = caret.as_mut() {
                         let offset = &mut **offset;
@@ -539,69 +538,111 @@ impl Editable {
     }
 }
 
-fn recompose_borrowed_padding(
-    nodes: &mut Arg,
-    node: MNode,
-    borrow: f32,
-    keep_caret: bool,
-) -> Result<(), EngineError> {
-    let unavailable = || {
-        unsupported(
-        "MathML composed geometry with a negative leading offset requires preceding math space in DOCX export",
-    )
-    };
-    let Some(MNode::Run(space)) = nodes.last() else {
-        return Err(unavailable());
-    };
-    let size = space
-        .size
-        .filter(|_| {
-            !space.nor
-                && !space.lit
-                && space.brk.is_none()
-                && !space.text.is_empty()
-                && space.text.bytes().all(|byte| byte == b' ')
-        })
-        .ok_or_else(unavailable)?;
-    let available = size * space.text.len() as f32 * 0.4;
-    let native_units = (size * 2.0).round() * space.text.len() as f32;
-    let borrowed_units = (borrow * 5.0).round();
-    if borrow > available + 0.0001 || borrowed_units > native_units {
-        return Err(unavailable());
+struct BorrowedSpacing {
+    first: usize,
+    slots: usize,
+    remainder: f32,
+    moved: f32,
+    exact: bool,
+}
+
+impl BorrowedSpacing {
+    fn measure(nodes: &[MNode], borrow: f32) -> Result<Self, EngineError> {
+        const EPSILON: f32 = 0.0001;
+        let moved = (borrow * 5.0).round();
+        let mut advance = 0.0;
+        let mut native_units = 0.0;
+        let mut slots = 0;
+        let mut exact = (borrow - moved / 5.0).abs() <= EPSILON;
+        for (first, node) in nodes.iter().enumerate().rev() {
+            let MNode::Run(space) = node else {
+                break;
+            };
+            let Some(size) = space.size.filter(|_| {
+                !space.nor
+                    && !space.lit
+                    && space.brk.is_none()
+                    && !space.text.is_empty()
+                    && space.text.bytes().all(|byte| byte == b' ')
+            }) else {
+                break;
+            };
+            let count = space.text.len();
+            let available = size * count as f32 * 0.4;
+            let native = (size * 2.0).round() * count as f32;
+            slots += count;
+            advance += available;
+            native_units += native;
+            exact &= (available - native / 5.0).abs() <= EPSILON;
+            if borrow > advance + EPSILON || moved > native_units {
+                continue;
+            }
+            if moved < 2.0 {
+                return Err(unsupported(
+                    "MathML negative padding is below the DOCX spacing resolution",
+                ));
+            }
+            if first + 1 < nodes.len() && !exact {
+                return Err(unsupported(
+                    "MathML padding across adjacent spaces requires exact DOCX spacing",
+                ));
+            }
+            return Ok(Self {
+                first,
+                slots,
+                remainder: (native_units - moved) / 5.0,
+                moved: moved / 5.0,
+                exact,
+            });
+        }
+        Err(unsupported(
+            "MathML composed geometry with a negative leading offset requires preceding math space in DOCX export",
+        ))
     }
-    if borrowed_units < 2.0 {
-        return Err(unsupported(
-            "MathML negative padding is below the DOCX spacing resolution",
-        ));
-    }
-    let mut contents = negative_padding_spaces((native_units - borrowed_units) / 5.0)?;
-    if keep_caret {
-        if (available - native_units / 5.0).abs() > 0.0001
-            || (borrow - borrowed_units / 5.0).abs() > 0.0001
-        {
+
+    fn replace(self, nodes: &mut Arg, node: MNode, keep_caret: bool) -> Result<(), EngineError> {
+        let MNode::Boxed { e } = node else {
+            return Err(invalid("negative padding lost its editable box"));
+        };
+        if keep_caret && !self.exact {
             return Err(unsupported(
                 "MathML alignment caret in borrowed space requires exact DOCX spacing",
             ));
         }
-        let mut donor = space.clone();
-        donor.lit = true;
-        donor.color = Some(math_spacing::NEGATIVE_PADDING_SPACE_COLOR);
-        contents.insert(0, phantom(MNode::Run(donor), false, true, true, true));
+        let mut contents = negative_padding_spaces(self.remainder)?;
+        if keep_caret {
+            let mut donors = nodes.split_off(self.first);
+            for donor in &mut donors {
+                let MNode::Run(space) = donor else {
+                    return Err(invalid("negative padding lost its space run"));
+                };
+                space.lit = true;
+                space.color = Some(math_spacing::NEGATIVE_PADDING_SPACE_COLOR);
+            }
+            contents.insert(
+                0,
+                MNode::Phant {
+                    show: false,
+                    zero_wid: true,
+                    zero_asc: true,
+                    zero_desc: true,
+                    e: donors,
+                },
+            );
+        } else {
+            nodes.truncate(self.first);
+        }
+        contents.extend(e);
+        contents.extend(negative_padding_spaces(self.moved)?);
+        contents.push(MNode::Run(MRun {
+            color: Some(math_spacing::NEGATIVE_PADDING_SPACE_COLOR),
+            size: Some(1.0),
+            lit: true,
+            ..MRun::plain(math_spacing::NEGATIVE_PADDING_MARKER)
+        }));
+        nodes.push(MNode::Boxed { e: contents });
+        Ok(())
     }
-    let MNode::Boxed { e } = node else {
-        return Err(invalid("negative padding lost its editable box"));
-    };
-    contents.extend(e);
-    contents.extend(negative_padding_spaces(borrowed_units / 5.0)?);
-    contents.push(MNode::Run(MRun {
-        color: Some(math_spacing::NEGATIVE_PADDING_SPACE_COLOR),
-        size: Some(1.0),
-        lit: true,
-        ..MRun::plain(math_spacing::NEGATIVE_PADDING_MARKER)
-    }));
-    nodes.pop();
-    nodes.push(MNode::Boxed { e: contents });
-    Ok(())
 }
 
 fn check_editable_bounds(

@@ -149,7 +149,7 @@ fn borrowed_padding_body(node: &MNode) -> Option<Arg> {
                             zero_asc: true,
                             zero_desc: true,
                             e,
-                        } if matches!(e.as_slice(), [space] if tagged(space))
+                        } if !e.is_empty() && e.iter().all(tagged)
                     )
             })
             .cloned()

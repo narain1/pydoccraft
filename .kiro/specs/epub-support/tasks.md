@@ -157,7 +157,8 @@
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
 - [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.
 - [x] Preserve original boundary carets within or at the end of an exactly representable borrowed MathML space run in editable DOCX, including merged equal spaces and native script operands.
-- [ ] Expand editable negative leading offsets beyond a single preceding space run and cover inexact borrowed spacing and remaining MathML visual properties.
+- [x] Borrow exact editable negative leading offsets across separate adjacent space runs and preserve original caret boundaries and native operators.
+- [ ] Extend editable negative offsets beyond the available preceding spaces and cover inexact borrowed spacing and remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Resume media overlays at a decoded navigation fragment that matches a cue or sequence target, including paths that share an overlay.

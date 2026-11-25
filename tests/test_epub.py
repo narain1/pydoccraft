@@ -15254,6 +15254,16 @@ Resume
                 for direct, native in zip(shifted[0][label], shifted[1][label]):
                     self.assertAlmostEqual(direct, native, delta=0.35)
 
+        combined = projection(row("-12pt"), terms, "f")
+        separated = projection(
+            row("-12pt", '<m:mspace width="8pt"/><m:mspace width="10pt"/>'),
+            terms, "f", "Before LeadUpper/LowerTail after.",
+        )
+        for before, after in zip(combined, separated):
+            for term in terms:
+                for expected, actual in zip(before[term], after[term]):
+                    self.assertAlmostEqual(expected, actual, delta=0.05)
+
         def superscript(offset):
             inner = f'<m:mpadded lspace="{offset}"><m:mtext>Nested</m:mtext></m:mpadded>'
             return "<m:msup><m:mi>x</m:mi><m:mrow>" + prefix + gap + inner + tail + "</m:mrow></m:msup>"
@@ -15283,6 +15293,10 @@ Resume
             (row("-6pt", ""), "requires preceding math space"),
             (row("-6pt", '<m:mspace width="4pt"/>'), "requires preceding math space"),
             (row("-3.8pt", '<m:mspace width="4pt"/>'), "spacing resolution"),
+            (row("-6pt", '<m:mspace width="4pt"/><m:mi>x</m:mi><m:mspace width="4pt"/>'),
+             "requires preceding math space"),
+            (row("-6pt", '<m:mspace width="4.1pt"/><m:mspace width="4pt"/>'),
+             "adjacent spaces requires exact DOCX spacing"),
             (rounded, "alignment caret in borrowed space requires exact DOCX spacing"),
             (rounded_merged, "alignment caret in borrowed space requires exact DOCX spacing"),
         ):
@@ -15315,22 +15329,27 @@ Resume
             mark = f'<m:malignmark edge="{edge}"/>'
             first = "".join(gap(width) for width in widths[:boundary])
             last = "".join(gap(width) for width in widths[boundary:])
-            source = prefix + first + mark + last + padded(72, -borrowed) + tail
             advance = sum(widths)
-            wanted = sum(widths[:boundary])
             origin = advance - borrowed
+            if boundary > len(widths):
+                source = prefix + first + padded(75, -borrowed) + mark + tail
+                control = prefix + gap(origin) + padded(75 + borrowed) + mark + tail
+                return control, source, advance + 75
+            source = prefix + first + mark + last + padded(75, -borrowed) + tail
+            wanted = sum(widths[:boundary])
             # Position the same editable fraction and mark independently
             # using nonnegative spacing and an explicit following advance.
             if wanted <= origin:
                 control = (prefix + gap(wanted) + mark + gap(origin - wanted)
-                           + padded(borrowed) + gap(72) + tail)
+                           + padded(borrowed) + gap(75) + tail)
             else:
                 control = (prefix + gap(origin) + padded(wanted - origin) + mark
-                           + gap(advance + 72 - wanted) + tail)
+                           + gap(advance + 75 - wanted) + tail)
             return control, source, wanted
 
         terms = ("Lead", "Upper", "Lower", "Tail", "Guide")
-        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+              "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
         fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 320)])
 
         def boxes(doc: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
@@ -15345,12 +15364,16 @@ Resume
             return template.replace("EXPRESSION", contents)
 
         cases = (
-            ((18,), 6, 1, "right"),
-            ((10, 10, 10), 15, 1, "left"),
-            ((10, 10, 10), 15, 2, "right"),
-            ((10, 10, 10), 15, 3, "right"),
+            ((18,), 6, 1, "right", [(" ", 90)]),
+            ((10, 10, 10), 15, 1, "left", [("   ", 50)]),
+            ((10, 10, 10), 15, 2, "right", [("   ", 50)]),
+            ((10, 10, 10), 15, 3, "right", [("   ", 50)]),
+            ((10, 15, 20), 25, 1, "left", []),
+            ((10, 15, 20), 25, 2, "right", [(" ", 75), (" ", 100)]),
+            ((10, 15, 20), 25, 3, "right", [(" ", 75), (" ", 100)]),
+            ((10, 15, 20), 25, 4, "right", []),
         )
-        for widths, inset, boundary, edge in cases:
+        for widths, inset, boundary, edge, donor_runs in cases:
             independent, borrowed, wanted = inputs(widths, inset, boundary, edge)
             for nested in (False, True):
                 with self.subTest(widths=widths, boundary=boundary, nested=nested):
@@ -15372,12 +15395,19 @@ Resume
                         fraction = ".//m:sSup/m:sup//m:f" if nested else ".//m:f"
                         self.assertIsNotNone(matrix.find(fraction, ns))
                         if authored == borrowed:
-                            donor, = [phantom for phantom in matrix.findall(".//m:phant", ns)
-                                      if any(t.text == " " * len(widths) for t in phantom.findall("m:e/m:r/m:t", ns))
-                                      and phantom.find("m:phantPr/m:zeroWid", ns) is not None
-                                      and phantom.find("m:phantPr/m:zeroAsc", ns) is not None
-                                      and phantom.find("m:phantPr/m:zeroDesc", ns) is not None]
-                            self.assertEqual(donor.find("m:phantPr/m:show", ns).attrib[f"{{{ns['m']}}}val"], "0")
+                            native_runs = []
+                            for phantom in matrix.findall(".//m:phant", ns):
+                                if not all(phantom.find(f"m:phantPr/m:{flag}", ns) is not None
+                                           for flag in ("zeroWid", "zeroAsc", "zeroDesc")):
+                                    continue
+                                for run in phantom.findall("m:e/m:r", ns):
+                                    text = run.findtext("m:t", namespaces=ns)
+                                    if text and not text.strip():
+                                        show = phantom.find("m:phantPr/m:show", ns)
+                                        self.assertEqual(show.get(f"{{{ns['m']}}}val"), "0")
+                                        size = run.find("w:rPr/w:sz", ns)
+                                        native_runs.append((text, int(size.get(f"{{{ns['w']}}}val"))))
+                            self.assertEqual(native_runs, donor_runs)
                         with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
                             text = word[0].get_text()
                             for term in terms:
