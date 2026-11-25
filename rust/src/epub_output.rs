@@ -187,7 +187,7 @@ impl<'a> Output<'a> {
         block: &BlockPayload,
         width: f32,
     ) -> Result<Option<Arc<Block>>, EngineError> {
-        if !has_spanning_table(block) {
+        if !has_table_grid(block) {
             return Ok(None);
         }
         let items = inline_items(block, self.preserve_links)?;
@@ -203,7 +203,7 @@ impl<'a> Output<'a> {
                 match equation {
                     Equation::SpanningTable {
                         mut table, extras, ..
-                    } if extras.is_empty() || self.pdf_math.is_none() => {
+                    } if self.pdf_math.is_none() || extras.is_empty() && !table.has_rules() => {
                         if !extras.is_empty() {
                             table.apply_editable(&extras.editable(&self.document, None)?)?;
                         }
@@ -681,20 +681,22 @@ impl<'a> StyledText<'a> {
     }
 }
 
-pub(super) fn has_spanning_table(block: &BlockPayload) -> bool {
+fn has_table_grid(block: &BlockPayload) -> bool {
     block
         .metadata
         .get("mathml")
         .and_then(serde_json::Value::as_array)
         .is_some_and(|entries| {
-            entries
-                .iter()
-                .any(|entry| entry["spanning_table"].as_bool() == Some(true))
+            entries.iter().any(|entry| {
+                ["spanning_table", "ruled_table"]
+                    .into_iter()
+                    .any(|key| entry[key].as_bool() == Some(true))
+            })
         })
 }
 
 pub(super) fn has_composed_math(block: &BlockPayload) -> bool {
-    has_spanning_table(block)
+    has_table_grid(block)
         || block
             .metadata
             .get("mathml")

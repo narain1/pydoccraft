@@ -5,17 +5,21 @@ use roxmltree::Node;
 use wordcraft_doc::{
     math::{self, Arg, ColJc, MNode, Math},
     para::InlineObject,
-    props::{Align, Borders, CharProps, HeightRule, TextColor},
+    props::{Align, Borders, CharProps, HeightRule, Rgb, TextColor},
     Block, Document, Paragraph, Table as NativeTable,
 };
 use wordcraft_fonts::math::{resolve_math, C};
-use wordcraft_layout::math::MathLayout;
+use wordcraft_layout::math::{MItem, MathLayout};
 
 use super::{
     compose, invalid, limited, size_points, unsupported, Presentation, Projection, MATHML,
     MAX_MATRIX_SIZE,
 };
 use crate::EngineError;
+
+#[path = "epub_math_table_rules.rs"]
+mod rules;
+use rules::{Occupancy, Rules};
 
 const MAX_ROWS: usize = 128;
 const MAX_DIMENSION: f32 = 20_000.0;
@@ -28,6 +32,8 @@ pub(in crate::epub) struct Table {
     column_widths: Vec<Option<f32>>,
     equal_rows: bool,
     equal_columns: bool,
+    rules: Rules,
+    rule_color: Option<Rgb>,
     alignment: Vertical,
     alignment_row: Option<usize>,
     em: f32,
@@ -73,15 +79,16 @@ impl Vertical {
 pub(super) fn has_authored_geometry(table: Node<'_, '_>) -> bool {
     let cell_alignment =
         |node: Node<'_, '_>| node.has_attribute("rowalign") || node.has_attribute("columnalign");
-    [
-        "align",
-        "rowalign",
-        "rowspacing",
-        "columnspacing",
-        "columnwidth",
-    ]
-    .into_iter()
-    .any(|key| table.has_attribute(key))
+    rules::requested(table)
+        || [
+            "align",
+            "rowalign",
+            "rowspacing",
+            "columnspacing",
+            "columnwidth",
+        ]
+        .into_iter()
+        .any(|key| table.has_attribute(key))
         || ["equalrows", "equalcolumns"].into_iter().any(|key| {
             table
                 .attribute(key)
@@ -100,10 +107,20 @@ pub(in crate::epub) fn has_spans(root: Node<'_, '_>) -> bool {
                 node.attribute(key)
                     .is_some_and(|value| value.trim().parse::<usize>() != Ok(1))
             })
-            && !node.ancestors().any(|ancestor| {
-                ancestor.tag_name().namespace() == Some(MATHML)
-                    && matches!(ancestor.tag_name().name(), "annotation" | "annotation-xml")
-            })
+            && is_presentation(node)
+    })
+}
+
+pub(in crate::epub) fn has_rule_requests(root: Node<'_, '_>) -> bool {
+    root.descendants().any(|node| {
+        node.has_tag_name((MATHML, "mtable")) && rules::requested(node) && is_presentation(node)
+    })
+}
+
+fn is_presentation(node: Node<'_, '_>) -> bool {
+    !node.ancestors().any(|ancestor| {
+        ancestor.tag_name().namespace() == Some(MATHML)
+            && matches!(ancestor.tag_name().name(), "annotation" | "annotation-xml")
     })
 }
 
@@ -113,7 +130,7 @@ pub(super) fn project_group<'xml>(
     mut depth: usize,
     mut style: Presentation<'xml>,
 ) -> Result<Option<Table>, EngineError> {
-    if !has_spans(group) {
+    if !has_spans(group) && !has_rule_requests(group) {
         return Ok(None);
     }
     let mut wrappers = Vec::new();
@@ -247,13 +264,18 @@ pub(super) fn project<'xml>(
         .checked_sub(implicit_cells)
         .ok_or_else(|| limited("MathML table cells exceed the layout budget"))?;
     let em = style.font_size();
+    let mut row_gaps = gaps(table, "rowspacing", rows.len(), em, "1ex")?;
+    let mut column_gaps = gaps(table, "columnspacing", column_count, em, "0.8em")?;
+    let rules = Rules::read(table, em, &mut row_gaps, &mut column_gaps)?;
     Ok(Table {
         cells,
-        row_gaps: gaps(table, "rowspacing", rows.len(), em, "1ex")?,
-        column_gaps: gaps(table, "columnspacing", column_count, em, "0.8em")?,
+        row_gaps,
+        column_gaps,
         column_widths: column_widths(table, column_count, em)?,
         equal_rows: boolean(table, "equalrows")?,
         equal_columns: boolean(table, "equalcolumns")?,
+        rules,
+        rule_color: style.ink,
         alignment,
         alignment_row,
         em,
@@ -373,6 +395,9 @@ pub(in crate::epub) struct Layout {
     widths: Vec<f32>,
     heights: Vec<f32>,
     row_positions: Vec<f32>,
+    rules: Vec<MItem>,
+    occupancy: Option<Occupancy>,
+    rule_color: Rgb,
 }
 
 impl Layout {
@@ -381,6 +406,7 @@ impl Layout {
             width: self.width,
             ascent: self.baseline,
             descent: self.height - self.baseline,
+            items: self.rules,
             ..Default::default()
         };
         for (x, y, cell) in self.cells {
@@ -419,6 +445,14 @@ impl CellDrawing {
 }
 
 impl Table {
+    pub(in crate::epub) fn has_rules(&self) -> bool {
+        self.rules.visible()
+            || self
+                .cells
+                .iter()
+                .any(|cell| matches!(&cell.content, CellContent::Table(table) if table.has_rules()))
+    }
+
     pub(in crate::epub) fn apply_editable(
         &mut self,
         editable: &compose::Editable,
@@ -475,6 +509,11 @@ impl Table {
         layout: Layout,
         editor: &compose::EditableLayout<'_>,
     ) -> Result<MNode, EngineError> {
+        if self.rules.visible() {
+            return Err(unsupported(
+                "MathML table rules inside equations in DOCX export",
+            ));
+        }
         let [column_gap, row_pitch] = editor.matrix_spacing()?;
         let (origins, advances) = self.matrix_columns(&layout.widths, column_gap)?;
         let rows = layout.heights.len();
@@ -580,6 +619,16 @@ impl Table {
         format: &CharProps,
         measurements: &compose::Measurements,
     ) -> Result<Layout, EngineError> {
+        self.layout_with_rules(doc, format, measurements, &mut { rules::MAX_RULE_ITEMS })
+    }
+
+    fn layout_with_rules(
+        &self,
+        doc: &Document,
+        format: &CharProps,
+        measurements: &compose::Measurements,
+        rule_budget: &mut usize,
+    ) -> Result<Layout, EngineError> {
         let (face, constants) = resolve_math("Cambria Math");
         let axis_ratio = constants.as_ref().map_or(0.25, |constants| {
             constants.get(C::AxisHeight) / (face.upem as f32).max(1.0)
@@ -605,9 +654,12 @@ impl Table {
             };
             let resolved = doc.styles.resolve_char(None, &chars);
             let measure = match &cell.content {
-                CellContent::Table(table) => {
-                    CellDrawing::Table(table.layout(doc, &chars, measurements)?)
-                }
+                CellContent::Table(table) => CellDrawing::Table(table.layout_with_rules(
+                    doc,
+                    &chars,
+                    measurements,
+                    rule_budget,
+                )?),
                 CellContent::Equation(math) if math.nodes.is_empty() => {
                     CellDrawing::Equation(MathLayout::default())
                 }
@@ -683,8 +735,9 @@ impl Table {
         }
         let x = starts(&widths, &self.column_gaps);
         let y = starts(&heights, &self.row_gaps);
-        let width = x[widths.len()];
-        let height = y[heights.len()];
+        let [left_inset, top_inset] = self.rules.inset();
+        let width = x[widths.len()] + left_inset * 2.0;
+        let height = y[heights.len()] + top_inset * 2.0;
         if ![width, height]
             .into_iter()
             .all(|value| (0.0..=MAX_DIMENSION).contains(&value))
@@ -701,13 +754,15 @@ impl Table {
                     extent(&widths, &self.column_gaps, &cell.columns) - cell_width;
                 let vertical_room =
                     extent(&heights, &self.row_gaps, &cell.rows) - cell_ascent - cell_descent;
-                let left = x[cell.columns.start]
+                let left = left_inset
+                    + x[cell.columns.start]
                     + match cell.horizontal {
                         ColJc::Left => 0.0,
                         ColJc::Center => horizontal_room / 2.0,
                         ColJc::Right => horizontal_room,
                     };
-                let top = y[cell.rows.start]
+                let top = top_inset
+                    + y[cell.rows.start]
                     + match cell.vertical {
                         Vertical::Top => 0.0,
                         Vertical::Bottom => vertical_room,
@@ -721,9 +776,9 @@ impl Table {
             .collect();
         let (top, bottom, row_baseline) = self.alignment_row.map_or((0.0, height, None), |row| {
             (
-                y[row],
-                y[row] + heights[row],
-                row_baselines[row].then_some(y[row] + ascent[row]),
+                top_inset + y[row],
+                top_inset + y[row] + heights[row],
+                row_baselines[row].then_some(top_inset + y[row] + ascent[row]),
             )
         });
         let center = (top + bottom) / 2.0;
@@ -736,6 +791,28 @@ impl Table {
                 + enclosing_axis)
                 .clamp(0.0, height),
         };
+        let rule_color = match format.color {
+            Some(TextColor::Rgb(color)) => self.rule_color.unwrap_or(color),
+            _ => self.rule_color.unwrap_or(Rgb(0, 0, 0)),
+        };
+        let occupancy = self
+            .rules
+            .visible()
+            .then(|| Occupancy::new(&self.cells, heights.len(), widths.len()));
+        let rules = occupancy
+            .as_ref()
+            .map(|map| {
+                self.rules.draw(
+                    [&x, &y],
+                    [&self.column_gaps, &self.row_gaps],
+                    map,
+                    baseline,
+                    rule_color,
+                    rule_budget,
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
         Ok(Layout {
             width,
             height,
@@ -743,7 +820,10 @@ impl Table {
             cells,
             widths,
             heights,
-            row_positions: y,
+            row_positions: y.into_iter().map(|start| start + top_inset).collect(),
+            rules,
+            occupancy,
+            rule_color,
         })
     }
 
@@ -768,10 +848,14 @@ impl Table {
         available_height: f32,
         align: Option<Align>,
     ) -> Result<NativeTable, EngineError> {
-        let widths = margins_for_tracks(&layout.widths, &self.column_gaps);
-        let heights = margins_for_tracks(&layout.heights, &self.row_gaps);
-        let width = widths.iter().sum();
-        if width > available || heights.iter().sum::<f32>() > available_height {
+        let [frame_inline, frame_block] = self.rules.native_margin();
+        let widths = margins_for_tracks(&layout.widths, &self.column_gaps, frame_inline);
+        let heights = margins_for_tracks(&layout.heights, &self.row_gaps, frame_block);
+        let [nrows, ncols] = [heights.len(), widths.len()];
+        let width: f32 = widths.iter().sum();
+        if width.max(layout.width) > available
+            || heights.iter().sum::<f32>().max(layout.height) > available_height
+        {
             return Err(unsupported(
                 "MathML spanning table exceeds the semantic export page",
             ));
@@ -807,13 +891,35 @@ impl Table {
             let cell_width: f32 = native.grid[cell.columns].iter().sum();
             target.props.width = Some(cell_width);
             target.props.no_wrap = true;
-            let margins = [
+            let mut margins = [
                 (top - layout.row_positions[row]).max(0.0)
                     + side_gap(&self.row_gaps, row.checked_sub(1)),
                 side_gap(&self.column_gaps, col.checked_sub(1)),
                 side_gap(&self.row_gaps, Some(last_row)),
                 side_gap(&self.column_gaps, Some(last_col)),
             ];
+            if row == 0 {
+                margins[0] += frame_block;
+            }
+            if col == 0 {
+                margins[1] += frame_inline;
+            }
+            if last_row + 1 == nrows {
+                margins[2] += frame_block;
+            }
+            if last_col + 1 == ncols {
+                margins[3] += frame_inline;
+            }
+            let [top_band, bottom_band] = self.rules.native_vertical_bands(row, last_row + 1);
+            margins[0] -= top_band;
+            margins[2] -= bottom_band;
+            if margins[0] < -WIDTH_EPSILON || margins[2] < -WIDTH_EPSILON {
+                return Err(unsupported(
+                    "MathML table frame or row gap is smaller than native DOCX border clearance",
+                ));
+            }
+            margins[0] = margins[0].max(0.0);
+            margins[2] = margins[2].max(0.0);
             target.props.margins = Some(margins);
             let align = Some(match cell.horizontal {
                 ColJc::Left => Align::Left,
@@ -857,16 +963,26 @@ impl Table {
                 _ => return Err(invalid("MathML table layout does not match its cells")),
             }];
         }
+        if let Some(map) = layout.occupancy {
+            self.rules
+                .set_native_edges(&mut native, &map, layout.rule_color);
+        }
         Ok(native)
     }
 }
 
-fn margins_for_tracks(sizes: &[f32], gaps: &[f32]) -> Vec<f32> {
+fn margins_for_tracks(sizes: &[f32], gaps: &[f32], frame: f32) -> Vec<f32> {
     sizes
         .iter()
         .enumerate()
         .map(|(index, size)| {
-            (size + side_gap(gaps, index.checked_sub(1)) + side_gap(gaps, Some(index))).max(0.1)
+            let before = if index == 0 {
+                frame
+            } else {
+                gaps[index - 1] / 2.0
+            };
+            let after = gaps.get(index).copied().map_or(frame, |gap| gap / 2.0);
+            (size + before + after).max(0.1)
         })
         .collect()
 }

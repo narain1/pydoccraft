@@ -4881,6 +4881,124 @@ first
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.convert("docx")
 
+    def test_mathml_table_rules_and_frame_preserve_spans(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Ruled MathML</title><style>body {{margin:0}}</style></head>
+          <body><p>{}</p></body></html>"""
+        table = """<m:math mathsize="18pt"><m:mtable mathcolor="#a01b70" rowalign="top" columnalign="left"
+            rowlines="solid dashed" columnlines="solid dashed" frame="solid" framespacing="9pt 7pt"
+            columnwidth="65pt 52pt 64pt" columnspacing="13pt" rowspacing="14pt">
+          <m:mtr><m:mtd rowspan="2" mathcolor="#252525"><m:mtext>Across</m:mtext></m:mtd>
+            <m:mtd mathcolor="#bf222d"><m:mtext>Upper</m:mtext></m:mtd>
+            <m:mtd mathcolor="#252525"><m:mtext>Right</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd columnspan="2" mathcolor="#198144"><m:mtext>Middle</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd mathcolor="#252525"><m:mtext>Below</m:mtext></m:mtd>
+            <m:mtd mathcolor="#1644df"><m:mtext>Lower</m:mtext></m:mtd>
+            <m:mtd mathcolor="#252525"><m:mtext>Last</m:mtext></m:mtd></m:mtr>
+          </m:mtable></m:math>"""
+
+        def fixture(body: str) -> bytes:
+            return epub_fixture(chapter_one=template.format(body))
+
+        def rules_in(doc: doc_ex.Document, padding: float = 9.0) -> tuple[int, int]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=192)))
+
+            def colored(ink: str) -> set[tuple[int, int]]:
+                color = bytes.fromhex(ink + "ff")
+                positions = set()
+                start = 0
+                while (index := pixels.find(color, start)) != -1:
+                    if index % 4 == 0:
+                        positions.add(divmod(index // 4, width))
+                    start = index + 1
+                self.assertTrue(positions, ink)
+                return positions
+
+            rules = colored("a01b70")
+            left = min(x for _, x in rules)
+            right = max(x for _, x in rules)
+            top = min(y for y, _ in rules)
+            bottom = max(y for y, _ in rules)
+            upper, middle, lower = [min(y for y, _ in colored(ink))
+                                    for ink in ("bf222d", "198144", "1644df")]
+            # The first horizontal rule stops at the left edge of the second column.
+            first_cut = round((padding + 0.75 + 65 + 13.75 / 2) * 192 / 72)
+            cut = [y for y in range(upper + 12, middle) if (y, left + first_cut + 24) in rules]
+            self.assertTrue(cut)
+            self.assertFalse(any((y, left + first_cut // 2) in rules for y in cut))
+            dashed_row = max(
+                ([(y, x) in rules for x in range(left + first_cut + 24, left + first_cut + 52)]
+                 for y in range(middle + 12, lower)),
+                key=sum,
+            )
+            self.assertIn(True, dashed_row)
+            self.assertIn(False, dashed_row)
+            # The second column boundary is dashed, except inside the spanning middle cell.
+            dashed_x = right - round((padding + 0.75 + 64 + 13.75 / 2) * 192 / 72)
+
+            def dashes(y: int) -> list[bool]:
+                return [any((row, x) in rules for x in range(dashed_x - 3, dashed_x + 4))
+                        for row in range(y, y + 16)]
+
+            for y in (upper, lower):
+                self.assertIn(True, dashes(y))
+                self.assertIn(False, dashes(y))
+            self.assertFalse(any(dashes(middle)))
+            return right - left, bottom - top
+
+        with doc_ex.open(fixture(table)) as book:
+            preview = rules_in(book)
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                placed = rules_in(pdf)
+                for actual, expected in zip(placed, preview):
+                    self.assertAlmostEqual(actual, expected, delta=2)
+                self.assertEqual(pdf[0].get_images(), [])
+            converted = book.convert("docx")
+        with doc_ex.open(converted) as word:
+            rules_in(word)
+            for label in ("Across", "Upper", "Middle", "Lower", "Right", "Below", "Last"):
+                self.assertEqual(word[0].get_text().count(label), 1)
+        with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+            xml = archive.read("word/document.xml")
+        for marker in (b"<w:tblBorders>", b"<w:tcBorders>", b'w:val="dashed"',
+                       b'w:color="A01B70"', b"<w:gridSpan", b"<w:vMerge", b"<m:oMath>"):
+            self.assertIn(marker, xml)
+        with doc_ex.open(fixture(table.replace("9pt 7pt", "17pt 13pt"))) as padded:
+            wider = rules_in(padded, padding=17.0)
+            for actual, expected, addition in zip(wider, preview, (16, 12)):
+                self.assertAlmostEqual(actual - expected, addition * 192 / 72, delta=2)
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 400, 320)])
+        viewport = '<meta name="viewport" content="width=400,height=320"/>'
+        chapter = template.format(table).replace("</head>", viewport + "</head>")
+        with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": chapter})) as book:
+            fixed_preview = rules_in(book)
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=192, searchable=True)) as pdf:
+                self.assertEqual(rules_in(pdf), fixed_preview)
+                self.assertIn("Upper", pdf[0].get_text())
+
+        bare = ('<m:math><m:mtable frame="dashed"><m:mtr><m:mtd><m:mi>x</m:mi></m:mtd>'
+                '</m:mtr></m:mtable></m:math>')
+        with doc_ex.open(fixture(bare)) as book, zipfile.ZipFile(io.BytesIO(book.convert("docx"))) as archive:
+            xml = archive.read("word/document.xml")
+            self.assertIn(b"<w:tblBorders>", xml)
+            self.assertIn(b'w:val="dashed"', xml)
+
+        for body, padding, diagnostic in (
+            ("Before " + table + " after", 9.0, "table rules inside equations"),
+            (table.replace("9pt 7pt", "0 0"), 0.0, "native DOCX border clearance"),
+        ):
+            with self.subTest(diagnostic=diagnostic), doc_ex.open(fixture(body)) as book:
+                rules_in(book, padding)
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, diagnostic):
+                    book.convert("docx")
+
+        huge = ('<m:math><m:mtable columnwidth="15000pt" rowlines="dashed">' +
+                '<m:mtr><m:mtd><m:mi>x</m:mi></m:mtd></m:mtr>' * 7 + '</m:mtable></m:math>')
+        with doc_ex.open(fixture(huge)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "table rules exceed the paint budget"):
+                book.render_page(0)
+
     def test_mathml_custom_fraction_rule_and_alignment_render_and_export(self) -> None:
         def fraction(thickness: str, alignment: str = "center") -> str:
             return f"""<m:math display="block" mathsize="24pt" mathcolor="#1360c8">
