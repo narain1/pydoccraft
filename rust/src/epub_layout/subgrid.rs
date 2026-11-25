@@ -2,10 +2,10 @@
 use std::{collections::BTreeMap, ops::Range};
 
 use taffy::{
-    geometry::Line,
+    geometry::{AbsoluteAxis, Line, Size},
     style::{
         GridPlacement, GridTemplateArea, GridTemplateAreas, GridTemplateComponent,
-        LengthPercentage, TrackSizingFunction,
+        LengthPercentage, Style, TrackSizingFunction,
     },
     style_helpers::line,
     DetailedGridInfo, DetailedGridItemsInfo, DetailedGridTracksInfo,
@@ -43,6 +43,116 @@ pub(super) fn unresolved() -> EngineError {
 
 pub(super) fn implicit(tracks: &DetailedGridTracksInfo<String>) -> bool {
     tracks.negative_implicit_tracks != 0 || tracks.positive_implicit_tracks != 0
+}
+
+pub(super) fn terminal_auto_slot<'a>(
+    style: &Style,
+    inherited: Size<bool>,
+    items: impl Iterator<Item = &'a Style>,
+) -> Option<usize> {
+    let slow = style.grid_auto_flow.primary_axis().other_axis();
+    if !inherited.get_abs(slow) {
+        return None;
+    }
+    let track_count = |tracks: &[GridTemplateComponent<String>], area_count: u16| {
+        (tracks.len() >= usize::from(area_count)
+            && (1..=MAX_TRACKS).contains(&tracks.len())
+            && tracks
+                .iter()
+                .all(|track| matches!(track, GridTemplateComponent::Single(_))))
+        .then_some(tracks.len() as u16)
+    };
+    let areas = style.grid_template_areas.as_ref();
+    let columns = track_count(
+        &style.grid_template_columns,
+        areas.map_or(0, |areas| areas.column_count),
+    )?;
+    let rows = track_count(
+        &style.grid_template_rows,
+        areas.map_or(0, |areas| areas.row_count),
+    )?;
+    let capacity = usize::from(columns) * usize::from(rows);
+    let mut used = 0;
+    let mut terminal = None;
+    for (slot, item) in items.enumerate() {
+        if slot > capacity
+            || [&item.grid_column, &item.grid_row]
+                .into_iter()
+                .any(|placement| {
+                    [&placement.start, &placement.end].into_iter().any(|edge| {
+                        matches!(
+                            edge,
+                            GridPlacement::NamedLine(..) | GridPlacement::NamedSpan(..)
+                        )
+                    })
+                })
+        {
+            return None;
+        }
+        let column = item.grid_column.into_origin_zero_ignoring_named(columns);
+        let row = item.grid_row.into_origin_zero_ignoring_named(rows);
+        match (column.is_definite(), row.is_definite()) {
+            (false, false) if column.indefinite_span() == 1 && row.indefinite_span() == 1 => {
+                terminal = Some(slot);
+                used += 1;
+            }
+            (true, true) => {
+                let x = column.resolve_definite_grid_lines();
+                let y = row.resolve_definite_grid_lines();
+                if x.start.0 < 0
+                    || y.start.0 < 0
+                    || x.end.0 > columns as i16
+                    || y.end.0 > rows as i16
+                {
+                    return None;
+                }
+                used += (x.end.0 - x.start.0) as usize * (y.end.0 - y.start.0) as usize;
+            }
+            _ => return None,
+        }
+    }
+    // Fully automatic unit items walk all available cells. The sum is an
+    // upper bound since independently definite areas can overlap.
+    if used <= capacity {
+        return None;
+    }
+    terminal
+}
+
+pub(super) fn clamp_terminal_auto(
+    details: &DetailedGridInfo,
+    slow: AbsoluteAxis,
+    terminal: usize,
+) -> Option<Vec<DetailedGridItemsInfo>> {
+    let (slow_tracks, fast_tracks) = match slow {
+        AbsoluteAxis::Horizontal => (&details.columns, &details.rows),
+        AbsoluteAxis::Vertical => (&details.rows, &details.columns),
+    };
+    if implicit(fast_tracks)
+        || slow_tracks.negative_implicit_tracks != 0
+        || slow_tracks.positive_implicit_tracks != 1
+    {
+        return None;
+    }
+    let columns = details.columns.explicit_tracks + 1;
+    let rows = details.rows.explicit_tracks + 1;
+    for (slot, item) in details.items.iter().enumerate() {
+        if slot != terminal && (item.column_end > columns || item.row_end > rows) {
+            return None;
+        }
+    }
+    let mut items = details.items.clone();
+    let item = items.get_mut(terminal)?;
+    let (start, end, limit) = match slow {
+        AbsoluteAxis::Horizontal => (&mut item.column_start, &mut item.column_end, columns),
+        AbsoluteAxis::Vertical => (&mut item.row_start, &mut item.row_end, rows),
+    };
+    if *start != limit || *end != limit + 1 {
+        return None;
+    }
+    *start = limit - 1;
+    *end = limit;
+    Some(items)
 }
 
 pub(super) fn inherit_areas(

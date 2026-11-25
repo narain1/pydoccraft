@@ -3686,6 +3686,74 @@ class EpubTests(unittest.TestCase):
                     self.assertTrue(preview(direction, case == "nested", actual) ==
                                     preview(direction, case == "nested", reference))
 
+    def test_css_subgrid_clamps_terminal_automatic_item_to_inherited_edge(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 170, 120)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Terminal placement</title>
+          <meta name="viewport" content="width=170,height=120"/><style>
+          html,body,p{margin:0;font-size:9px}
+          #outer{position:absolute;left:10px;top:10px;width:104px;height:54px;display:grid;
+            grid-template-columns:43px 61px;grid-template-rows:23px 31px}
+          #sub{grid-area:1/1/3/3;display:grid;width:104px;height:54px;align-content:start;justify-content:start}
+          p{width:16px;height:11px}
+          #a{background:#884466}#b{background:#996622}#c{background:#337788}
+          #d{background:#447744}#e{background:#a865b5}
+          RULES</style></head><body><div id="outer"><div id="sub">ITEMS</div></div></body></html>"""
+        items = {
+            label: f'<p id="{label.lower()}">{label}</p>' for label in "ABCD"
+        }
+        items["E"] = '<p id="e"><a href="https://example.org/clamped">E</a></p>'
+        items["F"] = '<p id="f">F</p>'
+
+        def book(rules: str, order: str) -> doc_ex.Document:
+            chapter = source.replace("RULES", rules).replace("ITEMS", "".join(items[label] for label in order))
+            return doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter}))
+
+        def preview(document: doc_ex.Document) -> tuple[tuple[int, bytes], list[object], object]:
+            image = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+            with doc_ex.open(document.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertTrue(image == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                page = pdf[0]
+                boxes = [page.search_for(label) for label in "ABCDE"]
+                self.assertTrue(all(boxes))
+                link, = page.get_links()
+                self.assertEqual(link.uri, "https://example.org/clamped")
+                return image, boxes, link.bbox
+
+        for flow, fast, slow, alignment, coordinates in (
+            ("row", "column", "row", "align-self", ("1/1", "1/2", "2/1", "2/2", "2/1", "3/1")),
+            ("column", "row", "column", "justify-self", ("1/1", "2/1", "1/2", "2/2", "1/2", "1/3")),
+        ):
+            common = f"#sub{{grid-auto-flow:{flow}}}#c{{{alignment}:start}}#e{{{alignment}:end}}"
+            both = "grid-template-columns:subgrid;grid-template-rows:subgrid"
+            sizes = {"column": "43px 61px", "row": "23px 31px"}
+            fixed = "grid-template-columns:43px 61px;grid-template-rows:23px 31px"
+            explicit = "".join(f"#{label}{{grid-area:{area}}}" for label, area in zip("abcd", coordinates))
+            clamped = common + f"#sub{{{fixed}}}" + explicit + f"#e{{grid-area:{coordinates[4]}}}"
+            grown = (common + f"#sub{{{fixed};grid-auto-{slow}s:17px}}" + explicit
+                     + f"#e{{grid-area:{coordinates[5]}}}")
+            intrinsic = "#e{min-width:min-content}"
+            for case, order, actual, expected in (
+                ("both", "ABCDE", common + f"#sub{{{both}}}", clamped),
+                ("measured after clamping", "ABCDE", common + f"#sub{{{both}}}" + intrinsic, clamped + intrinsic),
+                ("definite sibling", "BCDEA", common + f"#sub{{{both}}}#a{{grid-area:1/1}}", clamped),
+                ("inherited slow", "ABCDE",
+                 common + f"#sub{{grid-template-{slow}s:subgrid;grid-template-{fast}s:{sizes[fast]}}}", clamped),
+                ("standalone slow", "ABCDE", common + f"#sub{{grid-template-{fast}s:subgrid;"
+                 f"grid-template-{slow}s:{sizes[slow]};grid-auto-{slow}s:17px}}", grown),
+            ):
+                with (self.subTest(flow=flow, case=case), book(actual, order) as document,
+                      book(expected, order) as reference):
+                    self.assertTrue(preview(document) == preview(reference))
+            for case, order, extra in (
+                ("repeated overflow", "ABCDEF", ""),
+                ("mixed auto phases", "ABCDE", f"#a{{grid-{slow}:1}}"),
+                ("growing the fast axis", "ABCDE", f"#a,#b,#c{{grid-{slow}:1}}"),
+            ):
+                with (self.subTest(flow=flow, case=case),
+                      book(common + f"#sub{{{both}}}" + extra, order) as document):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "implicit tracks on an inherited subgrid axis"):
+                        document.render_page(0, dpi=96)
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}

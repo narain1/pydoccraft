@@ -8,6 +8,7 @@ use taffy::{
         Dimension, Display, ExpandedDimension, ExpandedLengthPercentage, FlexDirection, FlexWrap,
         LengthPercentageAuto, Position, Style,
     },
+    style_helpers::line,
     util::{MaybeResolve, ResolveOrZero},
     BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Layout,
     LayoutBlockContainer, LayoutContainingBlock, LayoutFlexboxContainer, LayoutGridContainer,
@@ -868,9 +869,15 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         let (Some(width), Some(height)) = (geometry.outer.width, geometry.outer.height) else {
             return Ok(());
         };
-        if !self
+        let measure_children = self
             .grid_items(index)
-            .any(|child| self.nodes[child].needs_intrinsic_geometry)
+            .any(|child| self.nodes[child].needs_intrinsic_geometry);
+        let terminal = subgrid::terminal_auto_slot(
+            &node.style,
+            node.bounds.subgrid,
+            self.grid_items(index).map(|child| &self.nodes[child].style),
+        );
+        if (!measure_children && terminal.is_none())
             || !grid_budget::independently_sized(&node.style, geometry.content)
             || self.fit_probes > MAX_FIT_PROBES
             || self.grid_limit
@@ -898,12 +905,39 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             return Ok(());
         }
 
-        // Native placement supplies areas before any target intrinsic bounds
-        // are materialized. The track proof makes child contributions irrelevant.
-        self.fit_probes += 1;
-        self.probing_grid = true;
-        compute_grid_layout(self, NodeId::from(index), input);
-        self.probing_grid = false;
+        self.probe_grid(index, input);
+        if let Some(terminal) = terminal {
+            let node = &self.nodes[index];
+            let DetailedLayoutInfo::Grid(details) = &node.details else {
+                return Err(unproven_grid());
+            };
+            let slow = node.style.grid_auto_flow.primary_axis().other_axis();
+            if let Some(items) = subgrid::clamp_terminal_auto(details, slow, terminal) {
+                let children = self.grid_items(index).collect::<Vec<_>>();
+                if children.len() != items.len() {
+                    return Err(unproven_grid());
+                }
+                // Pin all probed rectangles. Making only the overflow item
+                // definite would claim its edge cell before other auto items.
+                for (child, item) in children.into_iter().zip(items) {
+                    let style = &mut self.nodes[child].style;
+                    style.grid_column = Line {
+                        start: line(item.column_start as i16),
+                        end: line(item.column_end as i16),
+                    };
+                    style.grid_row = Line {
+                        start: line(item.row_start as i16),
+                        end: line(item.row_end as i16),
+                    };
+                }
+                if measure_children {
+                    self.probe_grid(index, input);
+                }
+            }
+        }
+        if !measure_children {
+            return Ok(());
+        }
         let node = &self.nodes[index];
         let DetailedLayoutInfo::Grid(details) = &node.details else {
             return Err(unproven_grid());
@@ -930,6 +964,15 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             });
         }
         Ok(())
+    }
+
+    fn probe_grid(&mut self, index: usize, input: LayoutInput) {
+        // Use native item placement without measuring descendants. Placement
+        // and the independently sized tracks cannot depend on their contents.
+        self.fit_probes += 1;
+        self.probing_grid = true;
+        compute_grid_layout(self, NodeId::from(index), input);
+        self.probing_grid = false;
     }
 
     fn verify_grid_areas(&self) -> Result<(), EngineError> {
