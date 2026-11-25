@@ -3306,6 +3306,116 @@ first
             with self.subTest(fragment=fragment), self.assertRaisesRegex(error, message):
                 doc_ex.open(epub_fixture(chapter_one=chapter))
 
+    def test_ttml_inline_sets_preserve_rational_timing_and_nested_styles(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        ttml = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+          xmlns:tts="http://www.w3.org/ns/ttml#styling" xml:lang="fr"
+          ttp:frameRate="30" ttp:frameRateMultiplier="1000 1001" ttp:tickRate="1000">
+          <body begin="40ms" end="300ms"><set begin="50ms" end="170ms" tts:fontWeight="bold"/>
+          <div begin="10ms" tts:color="#112233"><set begin="90ms" dur="60ms" tts:color="yellow"/>
+          <p xml:id="same" begin="25ms" dur="220ms" tts:fontStyle="italic">
+            <set begin="70t" dur="1f" tts:fontStyle="oblique"/>
+            <set begin="95ms" end="145ms" tts:textDecoration="underline" fill="remove" repeatCount="1"/>
+            <set begin="150ms" dur="10ms" tts:fontStyle="italic"/>
+            <span>Same</span><span tts:color="blue"><set begin="80ms" dur="20ms" tts:color="lime"/> words</span>
+          </p></div></body></tt>'''
+        sequential = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
+          <body><div begin="10ms" timeContainer="seq">
+            <p dur="30ms">First<set begin="5ms" dur="100ms" tts:color="red"/></p>
+            <p dur="10ms">After</p>
+          </div>
+          <p begin="50ms"><set begin="10ms" tts:fontWeight="bold"/>Open</p></body></tt>'''
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Timed styles</title></head>
+          <body><video src="clip.mp4#t=0.12,0.26">
+          <track src="sets.ttml" kind="subtitles" srclang="fr"/>
+          <track src="sequence.ttml" kind="subtitles" srclang="en"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Timed styles", chapter, "OEBPS/sets.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/sets.ttml": doc_ex.EpubResource("application/ttml+xml", ttml),
+                    "OEBPS/sequence.ttml": doc_ex.EpubResource("application/ttml+xml", sequential),
+                },
+            )
+
+        with doc_ex.open(data) as book:
+            cues = book.epub_embedded_text(0, 0, track_index=0)
+            boundaries = [75_000, 90_000, 140_000, 145_000, 155_000, 170_000, 175_000,
+                          178_367, 200_000, 210_000, 220_000, 295_000]
+            self.assertEqual([(c.start_us, c.end_us) for c in cues], list(zip(boundaries, boundaries[1:])))
+            for cue in cues:
+                with self.subTest(start=cue.start_us):
+                    self.assertEqual(cue.text, "Same words")
+                    self.assertEqual(cue, doc_ex.EpubTextCue(cue.start_us, cue.end_us, "Same words", "same"))
+                    left, right = cue.runs
+                    self.assertEqual((left.text, right.text), ("Same", " words"))
+                    self.assertEqual(left.style, doc_ex.EpubTextStyle(
+                        bold=90_000 <= cue.start_us < 210_000,
+                        font_style="oblique" if 145_000 <= cue.start_us < 178_367 else "italic",
+                        underline=170_000 <= cue.start_us < 220_000,
+                        color=(255, 255, 0, 255) if 140_000 <= cue.start_us < 200_000 else (17, 34, 51, 255),
+                        language="fr",
+                    ))
+                    self.assertEqual(right.style.color,
+                                     (0, 255, 0, 255) if 155_000 <= cue.start_us < 175_000 else (0, 0, 255, 255))
+                    self.assertEqual(right.style.font_style, left.style.font_style)
+
+            frames = list(book.epub_embedded_video(0, 0, start_us=169_000, end_us=176_000, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames],
+                             [(169_000, 1_000), (170_000, 5_000), (175_000, 1_000)])
+            self.assertTrue(all(f.rgb is frames[0].rgb for f in frames))
+            self.assertEqual([f.text_cues[0].runs for f in frames], [c.runs for c in cues[4:7]])
+            clipped = book.epub_embedded_text(0, 0, track_index=0, start_us=169_000, end_us=176_000)
+            self.assertEqual([(c.start_us, c.end_us) for c in clipped],
+                             [(169_000, 170_000), (170_000, 175_000), (175_000, 176_000)])
+
+            cues = book.epub_embedded_text(0, 0, track_index=1)
+            self.assertEqual([(c.start_us, c.end_us, c.text) for c in cues], [
+                (10_000, 15_000, "First"), (15_000, 40_000, "First"), (40_000, 50_000, "After"),
+                (50_000, 60_000, "Open"), (60_000, None, "Open"),
+            ])
+            self.assertEqual(cues[1].runs[0].style.color, (255, 0, 0, 255))
+            self.assertIsNone(cues[2].runs[0].style.color)
+            self.assertTrue(cues[-1].runs[0].style.bold)
+
+    def test_ttml_inline_sets_bound_work_and_require_supported_animation(self) -> None:
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Timed styles</title></head>
+          <body><video><track src="sets.ttml" kind="subtitles" srclang="fr"/></video></body></html>'''
+        root = b'<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">'
+        plain = b'<body><p dur="1s">Text</p></body>'
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Timed styles", chapter, "OEBPS/sets.xhtml")],
+                resources={"OEBPS/sets.ttml": doc_ex.EpubResource("application/ttml+xml", root + plain + b'</tt>')},
+            )
+        def inline(sets: bytes, mode: bytes = b"par") -> bytes:
+            return b'<body><p dur="1s" timeContainer="' + mode + b'">' + sets + b'Text</p></body>'
+
+        for payload, error, message in (
+            (inline(b'<set begin="0s" dur="1s" tts:color="red"/><set begin="0.5s" tts:color="blue"/>'),
+             doc_ex.UnsupportedFormatError, "overlapping TTML set"),
+            (inline(b'<set begin="0s" fill="freeze" tts:color="red"/>'),
+             doc_ex.UnsupportedFormatError, "unsupported TTML set attribute"),
+            (inline(b'<set begin="0s" repeatCount="2" tts:color="red"/>'),
+             doc_ex.UnsupportedFormatError, "unsupported TTML set attribute"),
+            (inline(b'<set begin="0s" tts:fontSize="20px"/>'),
+             doc_ex.UnsupportedFormatError, "unsupported TTML set attribute"),
+            (inline(b'<set dur="0s" tts:color="red"/>' * 33),
+             doc_ex.UnsafeArchiveError, "32 inline set elements"),
+            (inline(b'<set dur="1s" tts:color="red"/>', b"seq"),
+             doc_ex.UnsupportedFormatError, "sequential time container"),
+            (b'<head><layout><region xml:id="r"><set dur="1s" tts:color="red"/></region></layout></head>' + plain,
+             doc_ex.UnsupportedFormatError, "requires an inline subtitle content target"),
+            (b'<head><animation><set xml:id="change" dur="1s" tts:color="red"/></animation></head>' + plain,
+             doc_ex.UnsupportedFormatError, "animation references or continuous animation"),
+        ):
+            with self.subTest(message=message):
+                changed = rewrite_epub(data, {"OEBPS/sets.ttml": root + payload + b'</tt>'})
+                with doc_ex.open(changed) as book, self.assertRaisesRegex(error, message):
+                    book.epub_embedded_text(0, 0)
+
     def test_styled_webvtt_and_ttml_runs_reach_clipped_cues_and_video_frames(self) -> None:
         video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
         vtt = '''WEBVTT

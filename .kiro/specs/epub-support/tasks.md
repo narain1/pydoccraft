@@ -82,6 +82,7 @@
 - [x] Decode progressive 8-bit and 10-bit SDR planar AVC in 4:2:0, 4:2:2 and 4:4:4, with explicit HDR errors.
 - [x] Read local WebVTT and media-time TTML tracks and synchronize their overlapping cues and transition times with embedded video.
 - [x] Preserve typed WebVTT inline styling and TTML referenced and inherited typography through standalone cues and synchronized video.
+- [x] Apply bounded inline TTML set animations to supported subtitle styles on the source clock and restore the previous style at the end.
 - [x] Apply local normal-play-time fragments to embedded audio, video and synchronized captions.
 - [x] Crop local video spatial fragments in pixel and percent units, including when combined with timed audio and captions.
 - [x] Resolve repeated named track fragments for WebM and Ogg and keep the selected picture and soundtrack on one presentation clock.
@@ -95,7 +96,7 @@
 - [x] Select a WebM video track explicitly while retaining clipped intervals and synchronized captions.
 - [x] Stream fixed-geometry SDR AV1 pictures from WebM with bounded keyframe seeking and synchronized audio and captions.
 - [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
-- [ ] Extend WebM to additional AV1 profiles, high dynamic range, and alpha. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling to author stylesheets, region layout and animation, and support more media fragment track combinations and ID fragments in other containers.
+- [ ] Extend WebM to additional AV1 profiles, high dynamic range, and alpha. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling to author stylesheets, region layout and additional animation profiles, and support more media fragment track combinations and ID fragments in other containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
