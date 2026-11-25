@@ -1586,6 +1586,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideav-mkv"
+version = "0.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24fb386ce649f86b1c38638d4988d90c5532af468b04f9c5d4574c1a66a578be"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
 name = "oxideav-mp4"
 version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1611,6 +1620,24 @@ name = "oxideav-theora"
 version = "0.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e85c249ddfc259d66e787da96ddfd6086a70e3f6b699f513ee198b478dc00dd"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
+name = "oxideav-vp8"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c449a84e4f468bb88e40868383e297605c6ab4b591ca600b5f78345e40f281e"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
+name = "oxideav-vp9"
+version = "0.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e612718ad22703e536b92053ec5762430a69aa80bc1fc72a23b824cac50aab0"
 dependencies = [
  "oxideav-core",
 ]
@@ -1988,9 +2015,12 @@ dependencies = [
  "oxideav-aac",
  "oxideav-core",
  "oxideav-h264",
+ "oxideav-mkv",
  "oxideav-mp4",
  "oxideav-opus",
  "oxideav-theora",
+ "oxideav-vp8",
+ "oxideav-vp9",
  "parley",
  "pdfcraft-annot",
  "pdfcraft-content",

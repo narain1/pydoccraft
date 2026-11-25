@@ -1,7 +1,8 @@
-//! Index a bounded Ogg Opus track and decode its presentation samples.
+//! Index bounded Opus tracks and decode their presentation samples.
 use std::ops::Range;
 
 use hound::{SampleFormat, WavSpec};
+use oxideav_core::{Demuxer, MediaType};
 use oxideav_opus::{
     framing_self_delim::parse_self_delimited, output_samples_per_channel, MultistreamDecoder,
     OpusHead, OpusPacket, OUTPUT_SAMPLE_RATE_HZ,
@@ -9,7 +10,10 @@ use oxideav_opus::{
 
 use super::{invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES, MAX_FRAMES_PER_CLIP};
 
-use super::super::ogg::{self as ogg_pages, Codec, MAX_PACKETS};
+use super::super::{
+    ogg::{self as ogg_pages, Codec, MAX_PACKETS},
+    webm,
+};
 
 // The decoded family-1 samples are ordered as in RFC 7845 §5.1.1.2.
 // Values are the WAVE_FORMAT_EXTENSIBLE bits for each speaker.
@@ -68,6 +72,7 @@ struct Link {
     bytes: Vec<u8>,
     packets: Vec<Packet>,
     head: OpusHead,
+    pre_skip: usize,
     timeline: Range<usize>,
     playable: usize,
     wave_order: Vec<Option<usize>>,
@@ -91,19 +96,123 @@ impl Track {
         opus_track: Option<usize>,
     ) -> Result<Self, EngineError> {
         let mut links = Vec::new();
-        let mut speakers = 0;
         let mut frames = 0;
         let mut coded_packets_left = MAX_PACKETS;
         for encoded in ogg_pages::groups(file, Codec::Opus, opus_track)? {
             let link = Link::index(encoded.pages, frames, &mut coded_packets_left)?;
-            if link.head.channel_count > 1 {
-                for flag in link.speakers() {
-                    speakers |= flag;
-                }
-            }
             frames = link.timeline.end;
             links.push(link);
         }
+        Ok(Self::from_links(links, frames))
+    }
+
+    pub(super) fn open_webm(file: Vec<u8>) -> Result<Self, EngineError> {
+        let mut reader = webm::Reader::open(file)?;
+        let index = reader.track(MediaType::Audio)?;
+        let stream = &reader.demux.streams()[index as usize];
+        if stream.params.codec_id.as_str() != "opus" {
+            return Err(unsupported("WebM audio requires an Opus track"));
+        }
+        if stream.params.extradata.len() > 1024 {
+            return Err(limited("WebM Opus identification header exceeds 1 KiB"));
+        }
+        let head = OpusHead::parse(&stream.params.extradata).map_err(invalid)?;
+        if head.channel_count > 8 || head.mapping_family > 1 {
+            return Err(unsupported(
+                "WebM Opus playback requires channel mapping family 0 or 1",
+            ));
+        }
+        if stream.params.channels != Some(u16::from(head.channel_count)) {
+            return Err(invalid("WebM Opus channel count disagrees with its header"));
+        }
+        let delay = reader
+            .demux
+            .track_codec_timing(index)
+            .map_or(0, |t| t.codec_delay());
+        let time_of =
+            |frames: usize| (frames as i128 * 1_000_000_000) / i128::from(OUTPUT_SAMPLE_RATE_HZ);
+        if (i128::from(delay) - time_of(usize::from(head.pre_skip))).abs() > 1 {
+            return Err(invalid("WebM Opus codec delay disagrees with its pre-skip"));
+        }
+        let mut bytes = Vec::new();
+        let mut packets = Vec::new();
+        let mut frames = 0usize;
+        let mut origin = None;
+        let mut end_padding = 0;
+        let mut block_start = 0;
+        let mut budget = 0;
+        while let Some(unit) = reader.next()? {
+            if unit.packet.stream_index != index {
+                continue;
+            }
+            if end_padding != 0 || unit.discard_padding < 0 {
+                return Err(unsupported(
+                    "WebM Opus discard padding outside the final block",
+                ));
+            }
+            if unit.index_in_block == 0 {
+                block_start = frames;
+                let time = unit.time()?;
+                let start = *origin.get_or_insert(time);
+                let tick = webm::timestamp(unit.packet.time_base, 1)?;
+                if (time - start - time_of(frames)).abs() > tick + 1 {
+                    return Err(unsupported("discontinuous WebM Opus timestamps"));
+                }
+            }
+            let streams = head.mapping.stream_count;
+            super::super::charge(
+                &mut budget,
+                usize::from(streams),
+                MAX_PACKETS,
+                "WebM Opus exceeds its coded packet count limit",
+            )?;
+            let count = packet_duration(&unit.packet.data, streams)?;
+            packets.push(Packet {
+                bytes: bytes.len()..bytes.len() + unit.packet.data.len(),
+                frames: frames..frames + count,
+            });
+            frames += count;
+            bytes.extend_from_slice(&unit.packet.data);
+            if unit.index_in_block + 1 == unit.block_count {
+                end_padding = webm_audio_frames(unit.discard_padding as u64)?;
+                if end_padding > frames - block_start {
+                    return Err(invalid("WebM Opus discard padding exceeds its final block"));
+                }
+            }
+        }
+        let origin = origin.ok_or_else(|| invalid("WebM Opus has no coded packets"))?;
+        let start = webm_audio_frames(origin.max(0) as u64)?;
+        let pre_skip = usize::from(head.pre_skip)
+            .checked_add(webm_audio_frames((-origin).max(0) as u64)?)
+            .ok_or_else(|| limited("WebM Opus pre-skip exceeds limits"))?;
+        let end_trim = end_padding
+            .checked_add(pre_skip)
+            .ok_or_else(|| limited("WebM Opus trim exceeds limits"))?;
+        let playable = frames
+            .checked_sub(end_trim)
+            .filter(|&n| n != 0)
+            .ok_or_else(|| invalid("WebM Opus has no playable samples"))?;
+        let end = start
+            .checked_add(playable)
+            .ok_or_else(|| limited("WebM Opus presentation exceeds limits"))?;
+        let link = Link {
+            bytes,
+            packets,
+            head,
+            pre_skip,
+            timeline: start..end,
+            playable,
+            wave_order: Vec::new(),
+        };
+        Ok(Self::from_links(vec![link], end))
+    }
+
+    fn from_links(mut links: Vec<Link>, frames: usize) -> Self {
+        let mut speakers = links
+            .iter()
+            .filter(|link| link.head.channel_count > 1)
+            .flat_map(Link::speakers)
+            .fold(0, |mask, &flag| mask | flag);
         if speakers == 0 {
             speakers = FRONT_CENTER;
         }
@@ -123,12 +232,12 @@ impl Track {
                 })
                 .collect();
         }
-        Ok(Self {
+        Self {
             links,
             speakers,
             frames,
             playback: None,
-        })
+        }
     }
 
     pub(in crate::epub) fn link_lengths(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
@@ -180,7 +289,7 @@ impl Track {
 
     pub(super) fn samples(&mut self, start: usize, stop: usize) -> Result<Vec<i16>, EngineError> {
         if start >= stop || stop > self.frames {
-            return Err(invalid("Ogg Opus clip lies outside its presentation"));
+            return Err(invalid("Opus clip lies outside its presentation"));
         }
         let channels = self.speakers.count_ones() as usize;
         if stop - start > MAX_CLIP_SAMPLES / channels {
@@ -194,6 +303,8 @@ impl Track {
             .partition_point(|link| link.timeline.start < stop);
         let mut playback = self.playback.take();
         let mut samples = Vec::with_capacity((stop - start) * channels);
+        let leading = self.links[0].timeline.start.min(stop).saturating_sub(start);
+        samples.resize(leading * channels, 0);
         let mut work = MAX_FRAMES_PER_CLIP;
         for index in first..last {
             let link = &self.links[index];
@@ -291,8 +402,9 @@ impl Link {
             }
             prior_granule = granule;
         };
+        let pre_skip = usize::from(head.pre_skip);
         let duration = end
-            .checked_sub(usize::from(head.pre_skip))
+            .checked_sub(pre_skip)
             .filter(|frames| *frames != 0)
             .ok_or_else(|| invalid("Ogg Opus has no playable samples"))?;
         let end = start
@@ -302,11 +414,22 @@ impl Link {
             bytes,
             packets,
             head,
+            pre_skip,
             timeline: start..end,
             playable: duration,
             wave_order: Vec::new(),
         })
     }
+}
+
+fn webm_audio_frames(nanos: u64) -> Result<usize, EngineError> {
+    if nanos > webm::MAX_TIME_NS {
+        return Err(limited("WebM audio time exceeds its timing budget"));
+    }
+    usize::try_from(
+        (u128::from(nanos) * u128::from(OUTPUT_SAMPLE_RATE_HZ) + 500_000_000) / 1_000_000_000,
+    )
+    .map_err(|_| limited("WebM audio time exceeds its frame budget"))
 }
 
 fn packet_duration(mut bytes: &[u8], streams: u8) -> Result<usize, EngineError> {
@@ -345,7 +468,7 @@ impl Playback {
         samples: &mut Vec<i16>,
     ) -> Result<(), EngineError> {
         let channels = usize::from(link.head.channel_count);
-        let skip = usize::from(link.head.pre_skip);
+        let skip = link.pre_skip;
         let (start, stop) = (clip.start + skip, clip.end + skip);
         let first = link
             .packets

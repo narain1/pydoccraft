@@ -9,6 +9,7 @@ pub(super) enum AudioCodec {
     Mpeg,
     Aac,
     Opus,
+    WebmOpus,
     Wave,
 }
 
@@ -19,6 +20,7 @@ pub(super) fn audio_codec(media: &str) -> Option<AudioCodec> {
         "audio/ogg" | "audio/opus" | "audio/ogg; codecs=opus" | "application/ogg" | "video/ogg" => {
             Some(AudioCodec::Opus)
         }
+        "audio/webm" | "video/webm" => Some(AudioCodec::WebmOpus),
         "audio/wav" | "audio/wave" | "audio/x-wav" | "audio/vnd.wave" => Some(AudioCodec::Wave),
         _ => None,
     }
@@ -41,7 +43,7 @@ fn supported_audio_hint(hint: &str) -> bool {
     };
     let codecs = codec_hint(hint);
     codecs.is_none_or(|name| match codec {
-        AudioCodec::Opus => name.eq_ignore_ascii_case("opus"),
+        AudioCodec::Opus | AudioCodec::WebmOpus => name.eq_ignore_ascii_case("opus"),
         AudioCodec::Mpeg => name.eq_ignore_ascii_case("mp3"),
         AudioCodec::Aac => matches!(name.to_ascii_lowercase().as_str(), "mp4a.40.2" | "mp4a.67"),
         AudioCodec::Wave => name == "1" || name.eq_ignore_ascii_case("pcm"),
@@ -120,18 +122,24 @@ fn source(
         return Err(invalid("embedded EPUB media type differs from its element"));
     }
     let ogg_video = kind == "video" && matches!(media, "video/ogg" | "application/ogg");
+    let webm_video = kind == "video" && media == "video/webm";
     let advertises = |codec: &str| {
         hint.and_then(codec_hint).is_none_or(|list| {
-            list.split(',')
-                .any(|name| name.trim().eq_ignore_ascii_case(codec))
+            list.split(',').any(|name| {
+                name.trim()
+                    .split('.')
+                    .next()
+                    .is_some_and(|id| id.eq_ignore_ascii_case(codec))
+            })
         })
     };
     let playable_audio =
         (kind == "audio" && audio_codec(media).is_some() && hint.is_none_or(supported_audio_hint))
             || (kind == "video" && media == "video/mp4")
-            || (ogg_video && advertises("opus"));
-    let playable_video =
-        kind == "video" && media == "video/mp4" || (ogg_video && advertises("theora"));
+            || ((ogg_video || webm_video) && advertises("opus"));
+    let playable_video = kind == "video" && media == "video/mp4"
+        || (ogg_video && advertises("theora"))
+        || (webm_video && ["vp8", "vp9", "vp09"].into_iter().any(advertises));
     Ok(json!({
         "uri": src, "path": path, "media_type": media, "playable_audio": playable_audio,
         "fragment_start_us": fragment_start_us, "fragment_end_us": fragment_end_us,

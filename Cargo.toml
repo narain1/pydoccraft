@@ -13,7 +13,7 @@ path = "rust/src/lib.rs"
 
 [features]
 default = ["python"]
-python = ["dep:hound", "dep:mp3dec", "dep:ogg", "dep:oxideav-aac", "dep:oxideav-core", "dep:oxideav-h264", "dep:oxideav-mp4", "dep:oxideav-opus", "dep:oxideav-theora", "dep:pyo3"]
+python = ["dep:hound", "dep:mp3dec", "dep:ogg", "dep:oxideav-aac", "dep:oxideav-core", "dep:oxideav-h264", "dep:oxideav-mkv", "dep:oxideav-mp4", "dep:oxideav-opus", "dep:oxideav-theora", "dep:oxideav-vp8", "dep:oxideav-vp9", "dep:pyo3"]
 extension-module = ["python", "pyo3/extension-module"]
 
 [dependencies]
@@ -64,9 +64,12 @@ ogg = { version = "=0.9.2", optional = true }
 oxideav-aac = { version = "=0.1.7", optional = true }
 oxideav-core = { version = "=0.1.43", optional = true }
 oxideav-h264 = { version = "=0.1.12", optional = true }
+oxideav-mkv = { version = "=0.0.12", optional = true }
 oxideav-mp4 = { version = "=0.0.11", optional = true }
 oxideav-opus = { version = "=0.0.15", optional = true }
 oxideav-theora = { version = "=0.0.13", optional = true }
+oxideav-vp8 = { version = "=0.2.9", optional = true }
+oxideav-vp9 = { version = "=0.0.15", optional = true }
 parley = { version = "=0.13.0", default-features = false, features = ["std"] }
 wordcraft-fonts = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de", version = "0.14.0" }
 

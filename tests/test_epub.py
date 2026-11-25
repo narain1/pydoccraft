@@ -1911,6 +1911,96 @@ first
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(book.epub_embedded_video(0, 0))
 
+    def test_embedded_webm_vp8_opus_and_captions_share_the_presentation_clock(self) -> None:
+        resource = (Path(__file__).parent / "fixtures" / "epub-video-vp8-opus.webm").read_bytes()
+        path = "OEBPS/clip.webm"
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>WebM</title></head>
+          <body><video><source src="clip.webm" type="video/webm; codecs=&quot;vp8, opus&quot;"/>
+          <track kind="captions" srclang="en" src="captions.vtt"/>Transcript</video></body></html>"""
+        caption = b"WEBVTT\n\n00:00:00.500 --> 00:00:00.650\nRed frame\n"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("WebM", chapter, "OEBPS/webm.xhtml")],
+                resources={path: doc_ex.EpubResource("video/webm", resource),
+                           "OEBPS/captions.vtt": doc_ex.EpubResource("text/vtt", caption)},
+            )
+
+        def pcm(book: doc_ex.Document, **clip: int) -> bytes:
+            chunks = bytearray()
+            for audio in book.epub_embedded_audio(0, 0, chunk_frames=701, **clip):
+                self.assertEqual((audio.sample_rate, audio.channels), (48_000, 1))
+                with wave.open(io.BytesIO(audio.wave), "rb") as samples:
+                    chunks.extend(samples.readframes(audio.frame_count))
+            return bytes(chunks)
+
+        with doc_ex.open(data) as book:
+            source, = book.epub_embedded_media(0)[0].sources
+            self.assertEqual(source.path, path)
+            self.assertTrue(source.playable_video)
+            self.assertTrue(source.playable_audio)
+            frames = list(book.epub_embedded_video(0, 0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames],
+                             [(i * 125_000, 125_000) for i in range(12)])
+            for index, frame in enumerate(frames):
+                self.assertEqual((frame.width, frame.height, frame.pixel_aspect_ratio), (96, 64, (4, 3)))
+                red, green, blue = frame.rgb[:3]
+                self.assertGreater(red if index < 6 else blue, 246)
+                self.assertLess(green + (blue if index < 6 else red), 10)
+            self.assertEqual(len(full := pcm(book)), 55_200 * 2)
+            self.assertEqual(pcm(book, start_us=480_000, end_us=860_000), full[23_040 * 2:41_280 * 2])
+            clipped = list(book.epub_embedded_video(0, 0, start_us=480_000, end_us=860_000, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us, bool(f.text_cues)) for f in clipped], [
+                (480_000, 20_000, False),
+                (500_000, 125_000, True),
+                (625_000, 25_000, True),
+                (650_000, 100_000, False),
+                (750_000, 110_000, False),
+            ])
+            self.assertEqual([f.rgb for f in clipped], [frames[i].rgb for i in [3, 4, 5, 5, 6]])
+            self.assertEqual(clipped[1].text_cues[0].text, "Red frame")
+            revised = book.edit_epub_chapters({0: chapter.replace("clip.webm", "clip.webm#t=0.48,0.86")})
+        with doc_ex.open(revised) as book:
+            self.assertEqual(book.read_epub_resource(path), resource)
+            self.assertEqual(list(book.epub_embedded_video(0, 0, text_track=0)), clipped)
+            self.assertEqual(pcm(book), full[23_040 * 2:41_280 * 2])
+        with doc_ex.open(rewrite_epub(data, {path: resource[:-1]})) as book:
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "truncated WebM element"):
+                next(book.epub_embedded_video(0, 0))
+
+    def test_embedded_webm_vp9_retains_colour_and_depth(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        for filename, codecs, geometry, fps, count in (
+            ("epub-video-vp9.webm", "vp09.01.10.08", (66, 50), 7, 11),
+            ("epub-video-vp9-10.webm", "vp09.02.10.10", (64, 48), 6, 3),
+        ):
+            with self.subTest(codecs=codecs):
+                chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>WebM</title></head>
+                  <body><video><source src="clip.webm" type="video/webm; codecs={codecs}"/>
+                  </video></body></html>"""
+                with doc_ex.open(epub_fixture()) as original:
+                    data = original.edit_epub_structure(
+                        [doc_ex.EpubChapterSource("WebM", chapter, "OEBPS/webm.xhtml")],
+                        resources={"OEBPS/clip.webm": doc_ex.EpubResource("video/webm", (fixtures / filename).read_bytes())},
+                    )
+                with doc_ex.open(data) as book:
+                    source, = book.epub_embedded_media(0)[0].sources
+                    self.assertTrue(source.playable_video)
+                    self.assertFalse(source.playable_audio)
+                    frames = list(book.epub_embedded_video(0, 0))
+                    self.assertEqual([f.start_us for f in frames],
+                                     [1000 * ((1000 * i + fps // 2) // fps) for i in range(count)])
+                    self.assertTrue(all((f.width, f.height) == geometry for f in frames))
+                    self.assertTrue(all(len(f.rgb) == geometry[0] * geometry[1] * 3 for f in frames))
+                    if fps == 7:
+                        self.assertGreater(frames[0].rgb[0], 240)
+                        bottom = (geometry[1] - 1) * geometry[0] * 3
+                        self.assertGreater(frames[0].rgb[bottom + 2], 240)
+                    else:
+                        for actual, expected in zip(frames[0].rgb[:3], (39, 156, 203)):
+                            self.assertAlmostEqual(actual, expected, delta=6)
+                    seek = list(book.epub_embedded_video(0, 0, start_us=frames[-1].start_us))
+                    self.assertEqual(seek, frames[-1:])
+
     def test_media_overlay_playback_clips_pcm_and_synchronizes_callbacks(self) -> None:
         source, _ = narrated_epub()
         with doc_ex.open(source) as document:

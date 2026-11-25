@@ -24,6 +24,8 @@ use crate::EngineError;
 
 #[path = "epub_theora.rs"]
 mod theora;
+#[path = "epub_webm_video.rs"]
+mod webm;
 
 pub(super) use theora::align_audio;
 
@@ -35,6 +37,7 @@ const MAX_PACKETS_PER_FRAME: usize = 512;
 pub(crate) enum VideoSource {
     Avc(Box<AvcSource>),
     Theora(Box<theora::TheoraSource>),
+    Webm(Box<webm::WebmSource>),
 }
 
 pub(crate) struct AvcSource {
@@ -94,6 +97,11 @@ impl VideoSource {
                     .map_err(|_| invalid("malformed embedded Ogg video"))?
                     .map(|source| Self::Theora(Box::new(source)))
             }
+            "video/webm" => {
+                std::panic::catch_unwind(|| webm::WebmSource::open(bytes, start_us, end_us))
+                    .map_err(|_| invalid("malformed embedded WebM video"))?
+                    .map(|source| Self::Webm(Box::new(source)))
+            }
             _ => Err(unsupported("unsupported EPUB video media type")),
         }
     }
@@ -102,6 +110,7 @@ impl VideoSource {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match self {
             Self::Avc(source) => source.next_image(),
             Self::Theora(source) => source.next_image(),
+            Self::Webm(source) => source.next_image(),
         }))
         .map_err(|_| invalid("malformed embedded video frame"))?
     }
@@ -527,17 +536,37 @@ impl Geometry {
         start_us: u64,
         duration_us: u64,
     ) -> Result<VideoImage, EngineError> {
+        self.image_depth::<SX, SY, 1>(picture, 8, start_us, duration_us)
+    }
+
+    fn image_depth<const SX: usize, const SY: usize, const BYTES: usize>(
+        &self,
+        picture: Yuv<'_>,
+        depth: u8,
+        start_us: u64,
+        duration_us: u64,
+    ) -> Result<VideoImage, EngineError> {
         let (width, height) = (self.width as usize, self.height as usize);
         let mut rgb = Vec::with_capacity(width * height * 3);
+        let unit = f32::from(1u16 << (depth - 8));
+        let neutral = 128.0 * unit;
         let (black, y_scale, uv_scale) = if self.full_range {
-            (0.0, 1.0, 1.0)
+            let full = 255.0 / f32::from((1u16 << depth) - 1);
+            (0.0, full, full)
         } else {
-            (16.0, 255.0 / 219.0, 255.0 / 224.0)
+            (16.0 * unit, 255.0 / (219.0 * unit), 255.0 / (224.0 * unit))
         };
         let kg = 1.0 - self.kr - self.kb;
         let red = 2.0 * (1.0 - self.kr) * uv_scale;
         let blue = 2.0 * (1.0 - self.kb) * uv_scale;
         let byte = |v: f32| v.round().clamp(0.0, 255.0) as u8;
+        let sample = |line: &[u8], col: usize| {
+            if BYTES == 1 {
+                f32::from(line[col])
+            } else {
+                f32::from(u16::from_le_bytes([line[2 * col], line[2 * col + 1]]))
+            }
+        };
         let [y, u, v] = picture.planes;
         let chroma_start = picture.x / SX;
         let chroma_width = (picture.x % SX + width).div_ceil(SX);
@@ -548,14 +577,14 @@ impl Geometry {
                 } else {
                     row
                 };
-            let y_line = y.line(row, picture.x, width)?;
-            let u_line = u.line(row / SY, chroma_start, chroma_width)?;
-            let v_line = v.line(row / SY, chroma_start, chroma_width)?;
-            for (i, &luma) in y_line.iter().enumerate() {
-                let luma = (f32::from(luma) - black) * y_scale;
+            let y_line = y.line(row, picture.x * BYTES, width * BYTES)?;
+            let u_line = u.line(row / SY, chroma_start * BYTES, chroma_width * BYTES)?;
+            let v_line = v.line(row / SY, chroma_start * BYTES, chroma_width * BYTES)?;
+            for i in 0..width {
+                let luma = (sample(y_line, i) - black) * y_scale;
                 let chroma = (picture.x % SX + i) / SX;
-                let r = red * (f32::from(v_line[chroma]) - 128.0);
-                let b = blue * (f32::from(u_line[chroma]) - 128.0);
+                let r = red * (sample(v_line, chroma) - neutral);
+                let b = blue * (sample(u_line, chroma) - neutral);
                 rgb.extend([
                     byte(luma + r),
                     byte(luma - (self.kr * r + self.kb * b) / kg),

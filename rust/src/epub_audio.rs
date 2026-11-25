@@ -87,6 +87,12 @@ impl AudioSource {
                 .map_err(|_| invalid("malformed Ogg Opus audio"))??;
                 Decoder::Opus(Box::new(track))
             }
+            Some(AudioCodec::WebmOpus) => {
+                let bytes = load()?;
+                let track = std::panic::catch_unwind(|| opus::Track::open_webm(bytes))
+                    .map_err(|_| invalid("malformed WebM Opus audio"))??;
+                Decoder::Opus(Box::new(track))
+            }
             Some(AudioCodec::Mpeg) => {
                 let bytes = load()?;
                 let track = std::panic::catch_unwind(|| Mp3::new(bytes))
@@ -242,7 +248,7 @@ impl AudioSource {
             Decoder::Opus(track) => {
                 let end = known_end()?;
                 std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(start, end)))
-                    .map_err(|_| invalid("malformed Ogg Opus audio"))?
+                    .map_err(|_| invalid("malformed Opus audio"))?
             }
             Decoder::Mp3(reader) => {
                 std::panic::catch_unwind(AssertUnwindSafe(|| reader.samples(start, end, allow_eof)))

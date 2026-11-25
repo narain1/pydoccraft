@@ -816,7 +816,7 @@ class Document:
         end_us: int | None = None,
         text_track: int | None = None,
     ) -> Iterator[EpubVideoFrame]:
-        """Read local AVC or Theora frames with optional synchronized text cues."""
+        """Read local AVC, Theora or WebM frames with optional synchronized text cues."""
         from . import _core, _native
         from .errors import UnsupportedFormatError
 
@@ -846,7 +846,7 @@ class Document:
         else:
             if unsupported_source is not None:
                 raise unsupported_source
-            raise UnsupportedFormatError("embedded video requires a supported local MP4 or Ogg source")
+            raise UnsupportedFormatError("embedded video requires a supported local MP4, Ogg or WebM source")
 
         timeline = None if track is None else _EpubTextTimeline(self._read_epub_text(track, start, end))
         while True:

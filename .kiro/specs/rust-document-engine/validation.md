@@ -2891,3 +2891,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 705 installed tests, including 110
 ## 2026-11-24 CSS font-face ranges and defaults
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 706 installed tests, including 111 EPUB tests. It measured 23,951,308 bytes with a 55,669,144-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-font-face-ranges-and-defaults) covers fractional weight and width matching, per-face defaults across fallback, and reopened fixed-layout PDF geometry.
+
+## 2026-11-24 Embedded WebM VP8, VP9 and Opus
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 708 installed tests, including 113 EPUB tests. It measured 24,452,023 bytes with a 56,871,048-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-webm-vp8-vp9-and-opus) covers shared video, audio and caption timing, laced Opus, higher-depth VP9 and the public MP4 regression.

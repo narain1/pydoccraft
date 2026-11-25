@@ -1,0 +1,483 @@
+//! Decode bounded VP8 and VP9 pictures using WebM presentation timestamps.
+use std::{ops::Range, sync::Mutex};
+
+use oxideav_core::{
+    CodecId, Decoder, Demuxer, Error, Frame, MediaType, Packet, PixelFormat, VideoFrame,
+};
+use oxideav_mkv::demux::{
+    AlphaMode, ColourRange, FlagInterlaced, MatrixCoefficients, TransferCharacteristics,
+};
+use oxideav_vp8::{parse_header, Vp8Decoder};
+use oxideav_vp9::{
+    parse_uncompressed_header_with_refs, split_superframe, ColorConfig, ColorSpace, FrameType,
+    RefFrameState, Vp9Decoder,
+};
+
+use super::{
+    invalid, limited, unsupported, EngineError, Geometry, Plane, VideoImage, Yuv,
+    MAX_PACKETS_PER_FRAME, MAX_PIXELS,
+};
+use crate::epub::webm;
+
+enum Codec {
+    Vp8,
+    Vp9(Option<ColorConfig>),
+}
+
+struct Picture {
+    packet: Packet,
+    keyframe: bool,
+    display: Option<Range<u64>>,
+}
+
+pub(crate) struct WebmSource {
+    pictures: Vec<Picture>,
+    next: usize,
+    decoder: Mutex<Box<dyn Decoder>>,
+    clip: Range<u64>,
+    geometry: Geometry,
+    coded: (u32, u32),
+    crop: (usize, usize),
+}
+
+impl WebmSource {
+    pub(super) fn open(bytes: Vec<u8>, start: u64, end: Option<u64>) -> Result<Self, EngineError> {
+        let mut reader = webm::Reader::open(bytes)?;
+        let index = reader.track(MediaType::Video)?;
+        let stream = &reader.demux.streams()[index as usize];
+        let mut codec = match stream.params.codec_id.as_str() {
+            "vp8" => Codec::Vp8,
+            "vp9" => Codec::Vp9(None),
+            _ => return Err(unsupported("WebM video requires a VP8 or VP9 track")),
+        };
+        let coded = stream
+            .params
+            .width
+            .zip(stream.params.height)
+            .ok_or_else(|| invalid("missing WebM video dimensions"))?;
+        check_size(coded)?;
+        let timing = reader.demux.track_timing(index);
+        let nominal = timing
+            .and_then(|timing| timing.default_duration())
+            .filter(|&n| n != 0);
+        let duration = stream
+            .duration
+            .map(|ticks| webm::timestamp(stream.time_base, ticks))
+            .transpose()?
+            .map(u64::try_from)
+            .transpose()
+            .map_err(invalid)?;
+        let (mut geometry, crop) = geometry(&reader, index, coded)?;
+        let mut pictures = Vec::new();
+        let mut shown = Vec::new();
+        while let Some(unit) = reader.next()? {
+            if unit.packet.stream_index != index {
+                continue;
+            }
+            if unit.block_count != 1 || unit.discard_padding != 0 {
+                return Err(unsupported("laced or padded WebM video blocks"));
+            }
+            let time = unit.time()?;
+            let (keyframe, visible) = codec.inspect(&unit.packet.data, coded)?;
+            if pictures.is_empty() && !keyframe {
+                return Err(invalid("WebM video starts without a keyframe"));
+            }
+            if visible {
+                let time = u64::try_from(time).map_err(invalid)?;
+                if shown
+                    .last()
+                    .is_some_and(|&(_, previous, _, _)| previous >= time)
+                {
+                    return Err(invalid("WebM picture timestamps are out of order"));
+                }
+                let explicit = unit
+                    .packet
+                    .duration
+                    .map(|duration| webm::timestamp(unit.packet.time_base, duration))
+                    .transpose()?
+                    .map(u64::try_from)
+                    .transpose()
+                    .map_err(invalid)?;
+                let tick =
+                    u64::try_from(webm::timestamp(unit.packet.time_base, 1)?).map_err(invalid)?;
+                shown.push((pictures.len(), time, explicit, tick));
+            }
+            pictures.push(Picture {
+                packet: unit.packet,
+                keyframe,
+                display: None,
+            });
+        }
+        if shown.is_empty() {
+            return Err(invalid("WebM has no displayed pictures"));
+        }
+        let bitstream_colour = match codec {
+            Codec::Vp8 => None,
+            Codec::Vp9(colour) => colour,
+        };
+        let (kr, kb, full) = colour(&reader, index, bitstream_colour)?;
+        (geometry.kr, geometry.kb, geometry.full_range) = (kr, kb, full);
+        let mut last_end = 0;
+        for (i, &(packet, begin, explicit, tick)) in shown.iter().enumerate() {
+            let following = shown.get(i + 1).map(|&(_, begin, _, _)| begin);
+            let end = picture_end(begin, following, explicit, nominal, tick, duration)?;
+            let interval = begin / 1000..end / 1000;
+            if interval.is_empty() {
+                return Err(invalid("WebM picture has no presentation duration"));
+            }
+            last_end = interval.end;
+            pictures[packet].display = Some(interval);
+        }
+        let length = duration.map_or(last_end, |ns| last_end.max(ns / 1000));
+        let clip = start..end.unwrap_or(length).min(length);
+        if clip.is_empty() {
+            return Err(invalid("WebM video clip lies outside its presentation"));
+        }
+        let first = shown.partition_point(|&(packet, _, _, _)| {
+            pictures[packet]
+                .display
+                .as_ref()
+                .is_some_and(|time| time.end <= start)
+        });
+        let next = if let Some(&(packet, _, _, _)) = shown.get(first) {
+            let key = pictures[..=packet]
+                .iter()
+                .rposition(|frame| frame.keyframe)
+                .ok_or_else(|| invalid("WebM seek has no earlier keyframe"))?;
+            if packet - key >= MAX_PACKETS_PER_FRAME {
+                return Err(limited("WebM seek exceeds its keyframe preroll budget"));
+            }
+            key
+        } else {
+            pictures.len()
+        };
+        let decoder: Box<dyn Decoder> = match codec {
+            Codec::Vp8 => Box::new(Vp8Decoder::new(CodecId::new("vp8"))),
+            Codec::Vp9(_) => Box::new(Vp9Decoder::new()),
+        };
+        Ok(Self {
+            pictures,
+            next,
+            decoder: Mutex::new(decoder),
+            clip,
+            geometry,
+            coded,
+            crop,
+        })
+    }
+
+    pub(super) fn next_image(&mut self) -> Result<Option<VideoImage>, EngineError> {
+        for _ in 0..MAX_PACKETS_PER_FRAME {
+            let Some(picture) = self.pictures.get(self.next) else {
+                return Ok(None);
+            };
+            if picture
+                .display
+                .as_ref()
+                .is_some_and(|time| time.start >= self.clip.end)
+            {
+                return Ok(None);
+            }
+            self.next += 1;
+            let decoder = self.decoder.get_mut().map_err(invalid)?;
+            decoder.send_packet(&picture.packet).map_err(invalid)?;
+            let frame = match decoder.receive_frame() {
+                Ok(Frame::StreamParams(..)) => decoder.receive_frame(),
+                frame => frame,
+            };
+            match (frame, &picture.display) {
+                (Err(Error::NeedMore), None) => continue,
+                (Ok(Frame::Video(frame)), Some(time)) => {
+                    let params = decoder
+                        .output_params()
+                        .ok_or_else(|| invalid("missing WebM picture format"))?;
+                    if params.width.zip(params.height) != Some(self.coded)
+                        || frame.pts != picture.packet.pts
+                    {
+                        return Err(invalid(
+                            "WebM decoder returned unexpected picture dimensions or timestamp",
+                        ));
+                    }
+                    if time.end <= self.clip.start {
+                        continue;
+                    }
+                    let start = time.start.max(self.clip.start);
+                    let stop = time.end.min(self.clip.end);
+                    return self
+                        .image(&frame, params.pixel_format, start, stop - start)
+                        .map(Some);
+                }
+                (Err(error), _) => return Err(invalid(error)),
+                _ => return Err(invalid("WebM decoder disagrees with the picture timeline")),
+            }
+        }
+        Err(limited(
+            "WebM video exceeds its per-picture decoding budget",
+        ))
+    }
+
+    fn image(
+        &self,
+        frame: &VideoFrame,
+        format: Option<PixelFormat>,
+        start: u64,
+        duration: u64,
+    ) -> Result<VideoImage, EngineError> {
+        let [y, u, v] = frame.planes.as_slice() else {
+            return Err(invalid("WebM decoder returned unexpected picture planes"));
+        };
+        let picture = Yuv {
+            planes: [y, u, v].map(|plane| Plane {
+                bytes: &plane.data,
+                stride: plane.stride,
+            }),
+            x: self.crop.0,
+            y: self.crop.1,
+            bottom_up: false,
+        };
+        match format {
+            Some(PixelFormat::Yuv420P) => self.geometry.image::<2, 2>(picture, start, duration),
+            Some(PixelFormat::Yuv422P) => self.geometry.image::<2, 1>(picture, start, duration),
+            Some(PixelFormat::Yuv444P) => self.geometry.image::<1, 1>(picture, start, duration),
+            Some(PixelFormat::Yuv440P) => self.geometry.image::<1, 2>(picture, start, duration),
+            Some(PixelFormat::Yuv420P10Le) => self
+                .geometry
+                .image_depth::<2, 2, 2>(picture, 10, start, duration),
+            Some(PixelFormat::Yuv422P10Le) => self
+                .geometry
+                .image_depth::<2, 1, 2>(picture, 10, start, duration),
+            Some(PixelFormat::Yuv444P10Le) => self
+                .geometry
+                .image_depth::<1, 1, 2>(picture, 10, start, duration),
+            Some(PixelFormat::Yuv440P10Le) => self
+                .geometry
+                .image_depth::<1, 2, 2>(picture, 10, start, duration),
+            Some(PixelFormat::Yuv420P12Le) => self
+                .geometry
+                .image_depth::<2, 2, 2>(picture, 12, start, duration),
+            Some(PixelFormat::Yuv422P12Le) => self
+                .geometry
+                .image_depth::<2, 1, 2>(picture, 12, start, duration),
+            Some(PixelFormat::Yuv444P12Le) => self
+                .geometry
+                .image_depth::<1, 1, 2>(picture, 12, start, duration),
+            Some(PixelFormat::Yuv440P12Le) => self
+                .geometry
+                .image_depth::<1, 2, 2>(picture, 12, start, duration),
+            _ => Err(unsupported("WebM video requires planar YUV pictures")),
+        }
+    }
+}
+
+impl Codec {
+    fn inspect(&mut self, bytes: &[u8], coded: (u32, u32)) -> Result<(bool, bool), EngineError> {
+        match self {
+            Self::Vp8 => {
+                let header = parse_header(bytes).map_err(invalid)?;
+                if let Some(key) = header.keyframe {
+                    let size = (u32::from(key.width), u32::from(key.height));
+                    check_size(size)?;
+                    if size != coded {
+                        return Err(unsupported("WebM VP8 changes coded picture dimensions"));
+                    }
+                }
+                Ok((header.keyframe.is_some(), header.tag.show_frame))
+            }
+            Self::Vp9(colour) => {
+                let dimensions = [coded; 8];
+                let mut keyframe = false;
+                let mut shown = 0;
+                for (index, bytes) in split_superframe(bytes).into_iter().enumerate() {
+                    let references = colour.map(|color_config| RefFrameState {
+                        ref_dims: &dimensions,
+                        color_config,
+                    });
+                    let header =
+                        parse_uncompressed_header_with_refs(bytes, references).map_err(invalid)?;
+                    if !header.show_existing_frame {
+                        let size = (header.frame_width, header.frame_height);
+                        check_size(size)?;
+                        if size != coded {
+                            return Err(unsupported("WebM VP9 changes coded picture dimensions"));
+                        }
+                        let signal = header.color_config;
+                        if signal.color_space == ColorSpace::Rgb
+                            || signal.color_space == ColorSpace::Reserved
+                        {
+                            return Err(unsupported("WebM VP9 RGB or reserved colour space"));
+                        }
+                        if *colour.get_or_insert(signal) != signal {
+                            return Err(unsupported("WebM VP9 changes its colour configuration"));
+                        }
+                        keyframe |= index == 0 && header.frame_type == FrameType::KeyFrame;
+                    }
+                    shown += usize::from(header.show_frame || header.show_existing_frame);
+                }
+                if shown > 1 {
+                    return Err(unsupported(
+                        "multiple WebM VP9 pictures at one block timestamp",
+                    ));
+                }
+                Ok((keyframe, shown == 1))
+            }
+        }
+    }
+}
+
+fn check_size((width, height): (u32, u32)) -> Result<(), EngineError> {
+    if width == 0
+        || height == 0
+        || width > 4096
+        || height > 4096
+        || width
+            .checked_mul(height)
+            .is_none_or(|area| area > MAX_PIXELS)
+    {
+        return Err(limited("WebM coded picture geometry exceeds limits"));
+    }
+    Ok(())
+}
+
+fn picture_end(
+    begin: u64,
+    following: Option<u64>,
+    duration: Option<u64>,
+    nominal: Option<u64>,
+    tick: u64,
+    total: Option<u64>,
+) -> Result<u64, EngineError> {
+    let known = duration
+        .or(nominal)
+        .and_then(|span| begin.checked_add(span));
+    let end = match (following, known) {
+        (Some(next), Some(known)) if duration.is_some() || known.saturating_add(tick) < next => {
+            known.min(next)
+        }
+        (Some(next), _) => next,
+        (None, Some(known)) => known,
+        (None, None) => total.ok_or_else(|| unsupported("WebM has no final picture duration"))?,
+    };
+    if end <= begin || end > webm::MAX_TIME_NS {
+        return Err(invalid("invalid WebM picture duration"));
+    }
+    Ok(end)
+}
+
+fn geometry(
+    reader: &webm::Reader,
+    index: u32,
+    coded: (u32, u32),
+) -> Result<(Geometry, (usize, usize)), EngineError> {
+    let demux = &reader.demux;
+    if demux
+        .video_alpha_mode(index)
+        .is_some_and(|mode| mode != AlphaMode::None)
+        || demux.video_projection(index).is_some()
+        || demux.video_interlacing(index).is_some_and(|format| {
+            !matches!(
+                format.flag(),
+                FlagInterlaced::Undetermined | FlagInterlaced::Progressive
+            )
+        })
+    {
+        return Err(unsupported("WebM alpha, projection or interlaced video"));
+    }
+    let (mut width, mut height) = coded;
+    let mut crop = (0, 0);
+    let mut aspect = (1, 1);
+    if let Some(value) = demux.video_geometry(index) {
+        let [left, right, top, bottom] = [
+            value.pixel_crop_left(),
+            value.pixel_crop_right(),
+            value.pixel_crop_top(),
+            value.pixel_crop_bottom(),
+        ];
+        let cropped = |pixels: u32, front: u64, back: u64| {
+            u64::from(pixels)
+                .checked_sub(front)?
+                .checked_sub(back)
+                .filter(|&n| n != 0)
+        };
+        width = cropped(width, left, right)
+            .ok_or_else(|| invalid("invalid WebM horizontal crop"))? as u32;
+        height = cropped(height, top, bottom)
+            .ok_or_else(|| invalid("invalid WebM vertical crop"))? as u32;
+        crop = (left as usize, top as usize);
+        let w = value.display_width().unwrap_or(u64::from(width));
+        let h = value.display_height().unwrap_or(u64::from(height));
+        let x = w
+            .checked_mul(u64::from(height))
+            .filter(|&n| n != 0)
+            .ok_or_else(|| invalid("invalid WebM display width"))?;
+        let y = h
+            .checked_mul(u64::from(width))
+            .filter(|&n| n != 0)
+            .ok_or_else(|| invalid("invalid WebM display height"))?;
+        let (mut a, mut b) = (x, y);
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        aspect = (
+            u32::try_from(x / a).map_err(invalid)?,
+            u32::try_from(y / a).map_err(invalid)?,
+        );
+    }
+    Ok((
+        Geometry {
+            width,
+            height,
+            aspect,
+            full_range: false,
+            kr: 0.299,
+            kb: 0.114,
+        },
+        crop,
+    ))
+}
+
+fn colour(
+    reader: &webm::Reader,
+    index: u32,
+    signal: Option<ColorConfig>,
+) -> Result<(f32, f32, bool), EngineError> {
+    let declared = reader.demux.video_colour(index);
+    if declared.is_some_and(|colour| {
+        (colour.bits_per_channel() != 0
+            && colour.bits_per_channel() != signal.map_or(8, |c| u64::from(c.bit_depth)))
+            || matches!(
+                colour.transfer_characteristics(),
+                TransferCharacteristics::BT2100Pq | TransferCharacteristics::AribStdB67Hlg
+            )
+    }) {
+        return Err(unsupported("WebM HDR colour or inconsistent sample depth"));
+    }
+    let default = signal.map_or(MatrixCoefficients::Unspecified, |colour| {
+        match colour.color_space {
+            ColorSpace::Bt709 => MatrixCoefficients::BT709,
+            ColorSpace::Smpte240 => MatrixCoefficients::Smpte240M,
+            ColorSpace::Bt2020 => MatrixCoefficients::BT2020NonConstantLuminance,
+            _ => MatrixCoefficients::Unspecified,
+        }
+    });
+    let matrix = declared
+        .map(|colour| colour.matrix_coefficients())
+        .filter(|&matrix| matrix != MatrixCoefficients::Unspecified)
+        .unwrap_or(default);
+    let (kr, kb) = match matrix {
+        MatrixCoefficients::Unspecified
+        | MatrixCoefficients::BT470Bg
+        | MatrixCoefficients::Smpte170M => (0.299, 0.114),
+        MatrixCoefficients::BT709 => (0.2126, 0.0722),
+        MatrixCoefficients::Smpte240M => (0.212, 0.087),
+        MatrixCoefficients::BT2020NonConstantLuminance => (0.2627, 0.0593),
+        MatrixCoefficients::UsFcc73682 => (0.30, 0.11),
+        _ => return Err(unsupported("WebM colour matrix")),
+    };
+    let full = match declared.map_or(ColourRange::Unspecified, |colour| colour.range()) {
+        ColourRange::Unspecified => signal.is_some_and(|colour| colour.color_range_full),
+        ColourRange::Broadcast => false,
+        ColourRange::Full => true,
+        _ => return Err(unsupported("WebM colour range")),
+    };
+    Ok((kr, kb, full))
+}
