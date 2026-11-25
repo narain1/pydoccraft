@@ -10467,6 +10467,122 @@ Trailing
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML table rules inside equations"):
                 book.convert("docx")
 
+    def test_mathml_interior_overlap_labels_use_unruled_gaps(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Interior label bands</title><meta name="viewport" content="width=500,height=360"/>
+          <style>body {margin:0}</style></head><body><p style="text-align:center"><m:math mathsize="12pt">
+            <m:mtable width="320pt" side="SIDEoverlap" columnwidth="170pt 120pt" columnspacing="12pt"
+              rowspacing="14pt" rowlines="solid none dashed" mathcolor="#a01b70" minlabelspacing="18pt">
+              <m:mtr><m:mtd rowspan="2" mathcolor="#252525"><m:mtext>Across</m:mtext></m:mtd>
+                <m:mtd mathcolor="#bf222d"><m:mtext>First</m:mtext></m:mtd></m:mtr>
+              <m:mlabeledtr><m:mtd columnalign="SIDE" mathcolor="#e04b00"><m:mtext>BelowOne</m:mtext></m:mtd>
+                <m:mtd mathcolor="#198144"><m:mtext>Second</m:mtext></m:mtd></m:mlabeledtr>
+              <m:mlabeledtr rowalign="top"><m:mtd columnalign="SIDE" mathcolor="#8343cd"><m:mtext>AboveTwo</m:mtext></m:mtd>
+                <m:mtd mathcolor="#252525"><m:mtext>ThirdLeft</m:mtext></m:mtd>
+                <m:mtd mathcolor="#1644df"><m:mtext>Third</m:mtext></m:mtd></m:mlabeledtr>
+              <m:mtr><m:mtd mathcolor="#252525"><m:mtext>EndLeft</m:mtext></m:mtd>
+                <m:mtd mathcolor="#006380"><m:mtext>Final</m:mtext></m:mtd></m:mtr>
+            </m:mtable></m:math></p></body></html>"""
+        labels = ("BelowOne", "AboveTwo")
+        terms = ("Across", "First", "Second", *labels, "ThirdLeft", "Final", "EndLeft")
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+              "m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        attr = "{" + ns["w"] + "}"
+
+        def positions(pdf: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            result = {}
+            for term in terms:
+                result[term], = pdf[0].search_for(term)
+            order = ("First", "Second", *labels, "ThirdLeft", "Final")
+            self.assertTrue(all(result[b][1] > result[a][1] + 5 for a, b in zip(order, order[1:])), result)
+            return result
+
+        def rules(pdf: doc_ex.Document) -> None:
+            width, pixels = rgba_pixels(png_chunks(pdf.render_page(0, dpi=192)))
+
+            def points(value: str) -> set[tuple[int, int]]:
+                ink, result, index = bytes.fromhex(value + "ff"), set(), 0
+                while (index := pixels.find(ink, index)) >= 0:
+                    if index % 4 == 0:
+                        result.add(divmod(index // 4, width))
+                    index += 1
+                self.assertTrue(result, value)
+                return result
+
+            strokes = points("a01b70")
+            left, right = min(x for _, x in strokes), max(x for _, x in strokes)
+            first, second, third, final = [min(y for y, _ in points(color))
+                                           for color in ("bf222d", "198144", "1644df", "006380")]
+            upper = [x for y, x in strokes if first < y < second]
+            self.assertTrue(upper)
+            self.assertGreater(min(upper), (left + right) / 2)
+            self.assertFalse(any(second < y < third for y, _ in strokes))
+            lower = max(([(y, x) in strokes for x in range(left, right + 1)]
+                         for y in range(third, final)), key=sum)
+            self.assertIn(True, lower)
+            self.assertIn(False, lower)
+
+        for side in ("left", "right"):
+            chapter = template.replace("SIDE", side)
+            with self.subTest(side=side), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                rules(book)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    rules(pdf)
+                    reference = positions(pdf)
+                    self.assertFalse(pdf[0].get_images())
+                exported = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            table = xml.find(".//w:body/w:tbl", ns)
+            rows = table.findall("./w:tr", ns)
+            self.assertEqual(len(rows), 6)
+            self.assertEqual(len(table.findall(".//w:vMerge", ns)), 2)
+            for index, label, margin in zip((2, 3), labels, ("bottom", "top")):
+                band, = rows[index].findall("./w:tc", ns)
+                self.assertEqual(band.find("./w:tcPr/w:gridSpan", ns).get(attr + "val"), "4")
+                self.assertEqual(band.findtext(".//m:oMath/m:r/m:t", namespaces=ns), label)
+                self.assertFalse(band.findall(".//w:tcBorders/*", ns))
+                self.assertEqual(band.find("./w:tcPr/w:tcMar/w:" + margin, ns).get(attr + "w"), "140")
+            self.assertTrue(any(edge.get(attr + "val") == "single" for edge in rows[0].findall(".//w:tcBorders/*", ns)))
+            self.assertTrue(any(edge.get(attr + "val") == "dashed" for edge in rows[4].findall(".//w:tcBorders/*", ns)))
+            with doc_ex.open(exported) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                rules(word)
+                actual = positions(pdf)
+                text = word[0].get_text()
+                for term in terms:
+                    self.assertEqual(text.count(term), 1)
+                    self.assertAlmostEqual(actual[term][0] - actual["Across"][0],
+                                           reference[term][0] - reference["Across"][0], delta=1)
+
+        wider = chapter.replace('rowspacing="14pt"', 'rowspacing="14pt 24pt 14pt"')
+        with doc_ex.open(epub_fixture(chapter_one=wider)) as book, doc_ex.open(book.convert("docx")) as word:
+            for document, original in ((book, reference), (word, actual)):
+                with doc_ex.open(document.convert("pdf")) as pdf:
+                    shifted = positions(pdf)
+                old_gap = original["AboveTwo"][1] - original["BelowOne"][1]
+                new_gap = shifted["AboveTwo"][1] - shifted["BelowOne"][1]
+                self.assertAlmostEqual(new_gap - old_gap, 10.0, delta=0.1)
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 360)])
+        with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": chapter})) as book:
+            image = rgba_pixels(png_chunks(book.render_page(0, dpi=192)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=192, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=192))), image)
+                rules(pdf)
+                positions(pdf)
+
+        for authored, message in (
+            (chapter.replace('rowlines="solid none dashed"', 'rowlines="solid solid dashed"'), "inside ruled data rows"),
+            (chapter.replace('<m:mtable width=', '<m:mtable frame="solid" width='), "inside ruled data rows"),
+            (chapter.replace('<m:mtable width=', '<m:mtable columnlines="solid" width='), "inside ruled data rows"),
+            (chapter.replace('rowspan="2"', 'rowspan="3"').replace(
+                '<m:mtd mathcolor="#252525"><m:mtext>ThirdLeft</m:mtext></m:mtd>', ''), "crosses a data row span"),
+        ):
+            with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=authored)) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        operation()
+
     def test_mathml_ruled_labeled_rows_keep_native_borders_inside_the_data_grid(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Ruled labeled MathML</title><style>body {{margin:0}}</style></head><body>

@@ -106,7 +106,8 @@
 - [x] Keep editable Word borders, merged data spans and borderless label tracks for standalone ruled MathML labeled grids at auto and definite widths.
 - [x] Resolve conditional left and right MathML row-label overlap at definite widths in previews, searchable PDF and editable unruled Word matrices.
 - [x] Preserve row-label overflow at boundaries outside vertical merges and outside the first and last data rows of a ruled grid. Keep searchable PDF geometry and editable standalone Word labels, borders and merges.
-- [ ] Support label overflow through a vertical merge or inside a ruled grid, and support ruled labeled grids inside larger DOCX equations.
+- [x] Keep editable interior label bands at unruled gaps in horizontally ruled grids, with native data-row spacing, merge boundaries, and searchable PDF.
+- [ ] Support label overflow through a vertical merge, frame or rule, and support ruled labeled grids inside larger DOCX equations.
 - [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
 - [x] Preserve explicit MathML alignment marks on the group baseline and inside its tokens in searchable PDF and editable DOCX.
 - [x] Align the first baseline number in supported compound expressions, including native operators and trailing units, in searchable PDF and editable DOCX.

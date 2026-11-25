@@ -746,7 +746,7 @@ pub(in crate::epub) struct Layout {
     label_width: f32,
     label_inset: f32,
     overlapping_labels: bool,
-    edge_label_heights: [f32; 2],
+    label_bands: Vec<[f32; 2]>,
     rules: Vec<MItem>,
     occupancy: Option<Occupancy>,
     rule_color: Rgb,
@@ -1183,7 +1183,7 @@ impl Table {
             if crossed[cut] {
                 return Err(unsupported("MathML overlap label crosses a data row span"));
             }
-            if self.rules.visible() && cut != 0 && cut != row_count {
+            if cut != 0 && cut != row_count && self.rules.blocks_label_band(cut - 1) {
                 return Err(unsupported("MathML overlap label inside ruled data rows"));
             }
         }
@@ -1544,16 +1544,14 @@ impl Table {
             heights.fill(common_height);
         }
         let x = starts(&widths, &self.column_gaps);
-        let rule_y = starts(&heights, &self.row_gaps);
-        let mut y = rule_y.clone();
+        let mut y = starts(&heights, &self.row_gaps);
         let [left_inset, top_inset] = self.rules.inset();
-        let edge_label_heights = [label_bands[0][0], label_bands[row_count - 1][1]];
         let mut label_positions = vec![0.0; row_count];
         if overlapping_labels {
             // Reserve an adjacent band for each displaced label. Two labels
             // sharing a row boundary receive consecutive, separate bands.
             let mut added = 0.0;
-            for (row, [before, after]) in label_bands.into_iter().enumerate() {
+            for (row, &[before, after]) in label_bands.iter().enumerate() {
                 y[row] += added + before;
                 label_positions[row] = if before > 0.0 {
                     y[row] - before
@@ -1661,11 +1659,16 @@ impl Table {
         let mut rules = occupancy
             .as_ref()
             .map(|map| {
+                // Keep exterior labels beyond the rules. An interior band
+                // can shift later horizontal rules but never intersects one.
+                let before = label_bands[0][0];
+                let mut rule_y: Vec<_> = y.iter().map(|position| position - before).collect();
+                rule_y[row_count] -= label_bands[row_count - 1][1];
                 self.rules.draw(
                     [&x, &rule_y],
                     [&self.column_gaps, &self.row_gaps],
                     map,
-                    baseline - edge_label_heights[0],
+                    baseline - before,
                     rule_color,
                     rule_budget,
                 )
@@ -1689,7 +1692,7 @@ impl Table {
             label_width,
             label_inset,
             overlapping_labels,
-            edge_label_heights,
+            label_bands,
             rules,
             occupancy,
             rule_color,
@@ -1717,25 +1720,6 @@ impl Table {
         available_height: f32,
         align: Option<Align>,
     ) -> Result<NativeTable, EngineError> {
-        let mut edge_rows = [false; 2];
-        if layout.overlapping_labels {
-            for label in self.cells.iter().filter(|cell| cell.columns.is_empty()) {
-                let edge = usize::from(!label.label_above);
-                if (edge == 0 && label.rows.start != 0)
-                    || (edge == 1 && label.rows.end != layout.heights.len())
-                {
-                    return Err(unsupported(
-                        "MathML overlap label inside a native Word table",
-                    ));
-                }
-                if layout.edge_label_heights[edge] <= 0.0 {
-                    return Err(unsupported(
-                        "empty MathML overlap label in a native Word table",
-                    ));
-                }
-                edge_rows[edge] = true;
-            }
-        }
         let [frame_inline, frame_block] = self.rules.native_margin();
         let mut widths = margins_for_tracks(&layout.widths, &self.column_gaps, frame_inline);
         let heights = margins_for_tracks(&layout.heights, &self.row_gaps, frame_block);
@@ -1757,9 +1741,22 @@ impl Table {
                 "MathML spanning table exceeds the semantic export page",
             ));
         }
-        let first_data_row = usize::from(edge_rows[0]);
-        let data_rows = first_data_row..first_data_row + nrows;
-        let native_rows = data_rows.end + usize::from(edge_rows[1]);
+        let mut data_rows = Vec::with_capacity(nrows);
+        let mut label_rows = Vec::with_capacity(nrows);
+        let mut native_rows = 0;
+        for &[before, after] in &layout.label_bands {
+            let top = (before > 0.0).then(|| {
+                native_rows += 1;
+                native_rows - 1
+            });
+            data_rows.push(native_rows);
+            native_rows += 1;
+            let bottom = (after > 0.0).then(|| {
+                native_rows += 1;
+                native_rows - 1
+            });
+            label_rows.push([top, bottom]);
+        }
         if native_rows > MAX_ROWS {
             return Err(limited(
                 "MathML table exceeds 128 native rows with displaced labels",
@@ -1794,28 +1791,20 @@ impl Table {
                 }
             }
             for (row, [before, after]) in row_margins.iter_mut().enumerate() {
+                let [above, below] = self.native_data_gaps(&layout, row..row + 1);
                 if !before.is_finite() {
-                    *before = side_gap(&self.row_gaps, row.checked_sub(1));
+                    *before = above;
                 }
                 *after = if row + 1 == nrows {
                     let [_, band] = self.rules.native_vertical_bands(row, row + 1);
                     (frame_block - band).max(0.0)
                 } else {
-                    side_gap(&self.row_gaps, Some(row))
+                    below
                 };
             }
         }
-        for (edge, row) in [0, data_rows.end].into_iter().enumerate() {
-            if edge_rows[edge] {
-                native.rows[row].props.height_rule = HeightRule::AtLeast;
-                native.rows[row].props.height = Some(layout.edge_label_heights[edge]);
-            }
-        }
-        for (index, (row, height)) in native.rows[data_rows.clone()]
-            .iter_mut()
-            .zip(heights)
-            .enumerate()
-        {
+        for (index, (&physical, height)) in data_rows.iter().zip(heights).enumerate() {
+            let row = &mut native.rows[physical];
             row.props.height_rule = HeightRule::AtLeast;
             row.props.height = Some(if self.labels.is_some() {
                 layout.heights[index]
@@ -1838,13 +1827,22 @@ impl Table {
             let label = self.labels.as_ref().filter(|_| cell.columns.is_empty());
             let displaced = layout.overlapping_labels && label.is_some();
             let (row, last_row) = if displaced {
-                let band = if cell.label_above { 0 } else { data_rows.end };
+                let side = usize::from(!cell.label_above);
+                let band = label_rows[logical_row][side].ok_or_else(|| {
+                    unsupported("empty MathML overlap label in a native Word table")
+                })?;
+                // Leave the label beside its own data row and transfer the
+                // half-gap on the far side to the borderless label row.
+                if cell.label_above {
+                    before = side_gap(&self.row_gaps, logical_row.checked_sub(1));
+                } else {
+                    after = side_gap(&self.row_gaps, Some(logical_row));
+                }
+                native.rows[band].props.height_rule = HeightRule::AtLeast;
+                native.rows[band].props.height = Some(layout.label_bands[logical_row][side]);
                 (band, band)
             } else {
-                (
-                    first_data_row + logical_row,
-                    first_data_row + cell.rows.end - 1,
-                )
+                (data_rows[logical_row], data_rows[cell.rows.end - 1])
             };
             let columns = if displaced {
                 0..native.grid.len()
@@ -1953,10 +1951,24 @@ impl Table {
                 &map,
                 layout.rule_color,
                 data_start,
-                data_rows,
+                &data_rows,
             );
         }
         Ok(native)
+    }
+
+    fn native_data_gaps(&self, layout: &Layout, rows: Range<usize>) -> [f32; 2] {
+        let before = if layout.label_bands[rows.start][0] > 0.0 {
+            0.0
+        } else {
+            side_gap(&self.row_gaps, rows.start.checked_sub(1))
+        };
+        let after = if layout.label_bands[rows.end - 1][1] > 0.0 {
+            0.0
+        } else {
+            side_gap(&self.row_gaps, Some(rows.end - 1))
+        };
+        [before, after]
     }
 
     fn native_vertical_margins(
@@ -1968,9 +1980,8 @@ impl Table {
     ) -> Result<[f32; 2], EngineError> {
         let start = cell.rows.start;
         let end = cell.rows.end;
-        let mut before = (top - layout.row_positions[start]).max(0.0)
-            + side_gap(&self.row_gaps, start.checked_sub(1));
-        let mut after = side_gap(&self.row_gaps, Some(end - 1));
+        let [mut before, mut after] = self.native_data_gaps(layout, cell.rows.clone());
+        before += (top - layout.row_positions[start]).max(0.0);
         if start == 0 {
             before += frame_block;
         }
