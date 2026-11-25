@@ -18488,6 +18488,10 @@ Resume
         in_place_transfer = rgb.replace('in="translated"', 'result="toned"') + transfer.replace(
             'in="translated"', 'in="toned"',
         )
+        flood = ('<feFlood x="0" y="-8" width="129" height="64" flood-color="#505050" '
+                 'flood-opacity=".72" result="wash"/>')
+        flood_tint = flood + '<feComposite operator="in" in="wash" in2="SourceAlpha"/>'
+        flood_mask = flood + '<feComposite operator="in" in="SourceGraphic" in2="wash"/>'
         cases = (
             ("sheared", shared, independent),
             ("scaled", axis(shared), axis(independent)),
@@ -18498,6 +18502,8 @@ Resume
              in_place(independent, in_place_matrix)),
             ("in-place scaled transfer", in_place(axis(shared), in_place_transfer),
              in_place(axis(independent), in_place_transfer)),
+            ("in-place affine flood tint", in_place(shared, flood_tint), in_place(independent, flood_tint)),
+            ("in-place affine flood mask", in_place(shared, flood_mask), in_place(independent, flood_mask)),
         )
         for mode, markup, control in cases:
             for inline in (False, True):
@@ -18546,7 +18552,8 @@ Resume
         ))
         in_place_painted_clear = in_place(shared, in_place_transfer).replace('tableValues="0 0 .6 .8"', 'tableValues=".1 0 .6 .8"')
         for markup in (touching, overlap, mixed, split, painted_clear,
-                       in_place(overlap, in_place_matrix), in_place_mixed, in_place_painted_clear):
+                       in_place(overlap, in_place_matrix), in_place_mixed, in_place_painted_clear,
+                       in_place(overlap, flood_tint), in_place(shared, flood_tint.replace('operator="in"', 'operator="out"'))):
             with self.subTest(markup=markup), book(markup, False) as source:
                 self.assertTrue(source.render_page(0, dpi=96).startswith(b"\x89PNG"))
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):

@@ -48,7 +48,7 @@ pub(super) fn pointwise_layer(group: &usvg::Group, offsets: bool) -> bool {
     let [filter] = group.filters() else {
         return false;
     };
-    if lighting::flat_alpha_mask(filter.primitives()) {
+    if lighting::flat_alpha_mask(filter.primitives()) || masked_flood(filter.primitives()) {
         return true;
     }
     // A translated pixel can only carry the source it already belonged to.
@@ -70,6 +70,27 @@ pub(super) fn pointwise_layer(group: &usvg::Group, offsets: bool) -> bool {
             }
             _ => false,
         })
+}
+
+fn masked_flood(primitives: &[usvg::filter::Primitive]) -> bool {
+    use usvg::filter::{CompositeOperator, Input, Kind};
+
+    let [flood, output] = primitives else {
+        return false;
+    };
+    let (Kind::Flood(_), Kind::Composite(composite)) = (flood.kind(), output.kind()) else {
+        return false;
+    };
+    if !matches!(composite.operator(), CompositeOperator::In) {
+        return false;
+    }
+    let is_flood =
+        |input: &Input| matches!(input, Input::Reference(name) if name == flood.result());
+    let is_source = |input: &Input| matches!(input, Input::SourceGraphic | Input::SourceAlpha);
+    let (first, second) = (composite.input1(), composite.input2());
+    // Either input order masks the shared layer to pixels from the original
+    // source, while the flood contributes only local color, alpha, and clipping.
+    (is_flood(first) && is_source(second)) || (is_source(first) && is_flood(second))
 }
 
 fn source(mut node: &usvg::Node) -> Option<&usvg::Node> {
