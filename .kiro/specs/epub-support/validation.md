@@ -1003,3 +1003,13 @@ The installed regression checks nested spans that contain inline timestamps, str
 The installed bounds regression rejects excess timed nodes, candidate boundaries, repeated markup projection and repeated expansion of inherited labels.
 
 All 198 EPUB tests passed against the installed Linux x86-64 CPython 3.11 release wheel. The wheel measured 25,620,523 bytes with a 59,670,120-byte native extension. Its SHA-256 is `5eaf92e23f6c3dfa39290c99b20c87531a8e6800155281a13daac65f1aaa08cc`. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, strict public typing and the roadmap check passed. The lockfiles match the base revision, and the three packaged attribution files match their source copies.
+
+## 2026-11-24 Integrated EPUB automatic direction, MathML labels, SVG spacing and timed captions
+
+The combined regressions verify automatic XHTML direction and retained PDF link geometry, MathML equation labels with editable native cells, mixed-font SVG textLength spacing with stable glyphs, and dynamic WebVTT author styles with exact timed cue and video boundaries.
+
+The installed Linux x86-64 CPython 3.11.15 release wheel from `b4eb357d06` passed 796 tests, including 201 EPUB tests, with zero failures, errors or skips. It measured 25,632,872 bytes with a 59,684,424-byte native extension. Its SHA-256 is `36d994ab8a20303620ea60d75dc98c3b8ff435e4d01dd579051c6a7368ca7dd7`. This checkpoint used the host Linux wheel. The macOS and Windows release matrix remains open.
+
+Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. An independently authored fixed-layout EPUB using automatic HTML direction and logical CSS passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
+
+Both lockfiles directly declare the already resolved unicode-bidi version 0.3.18. Runtime package identities, upstream revisions and license expressions match the preceding checkpoint. The regenerated audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. Temporary Cargo output, wheels, test environments, downloaded books, generated site and the Node addon were pruned.
