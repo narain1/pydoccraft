@@ -10992,6 +10992,30 @@ Trailing
                                              edit.to_bytes(object_streams=False))
                         self.assertAlmostEqual(float(target[1]), 66)
 
+        edge_colors = {"duplicate": (255, 0, 0, 255), "wrap": (0, 0, 255, 255), "none": (255, 255, 255, 255)}
+        for mode, expected in edge_colors.items():
+            boundary = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 98">
+              <defs><filter id="edge" filterUnits="userSpaceOnUse" x="4" y="4" width="12" height="8"
+                            color-interpolation-filters="sRGB">
+                <feConvolveMatrix order="2 1" targetX="1" divisor="-1" kernelMatrix="0 -1" edgeMode="{mode}"/>
+              </filter></defs>
+              <g filter="url(#edge)">
+                <rect x="4" y="4" width="6" height="8" fill="red"/>
+                <rect x="10" y="4" width="6" height="8" fill="blue"/>
+              </g>
+            </svg>"""
+            with self.subTest(mode=mode), open_book(boundary, False) as book:
+                width, pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                start = 4 * (width * 7 + 4)
+                self.assertEqual(tuple(pixels[start:start + 4]), expected)
+
+        for divisor in ("", ' divisor="0"'):
+            tiny = svg.replace('kernelMatrix="-1, 2, 0"', f'kernelMatrix="-4e-7, 8e-7, 0"{divisor}')
+            with (self.subTest(divisor=divisor), open_book(tiny, False) as book,
+                  open_book(svg, False) as standard):
+                self.assertEqual(book.render_page(0, dpi=96), standard.render_page(0, dpi=96))
+                self.assertEqual(book.read_epub_resource("OEBPS/s0.svg"), tiny.encode())
+
         ambiguous = svg.replace('kernelMatrix="1 -1" divisor="1"', 'kernelMatrix="1 1" divisor="2"')
         with open_book(ambiguous, False) as book:
             self.assertNotEqual(book.render_page(0, dpi=96), b"")
@@ -11014,8 +11038,7 @@ Trailing
             ('order="1" kernelMatrix="2000"', doc_ex.UnsafeArchiveError, "convolution coefficient"),
             ('order="1" kernelMatrix="1" targetY="1"', doc_ex.MalformedDocumentError, "convolution target"),
             ('order="1" kernelMatrix="1" bias="NaN"', doc_ex.MalformedDocumentError, "convolution bias"),
-            ('order="1" kernelMatrix="1" divisor="0"', doc_ex.UnsupportedFormatError, "convolution divisor"),
-            ('order="1" kernelMatrix="1" divisor="1e-9"', doc_ex.UnsupportedFormatError, "convolution divisor"),
+            ('order="1" kernelMatrix="1" divisor="1e-12"', doc_ex.UnsupportedFormatError, "convolution divisor"),
             ('order="1" kernelMatrix="1" preserveAlpha="True"', doc_ex.MalformedDocumentError, "preserveAlpha"),
             ('order="1" kernelMatrix="1" edgeMode="bad"', doc_ex.UnsupportedFormatError, "convolution edge mode"),
             ('order="1" kernelMatrix="1" kernelUnitLength="2 3"', doc_ex.UnsupportedFormatError, "kernelUnitLength"),
@@ -11028,13 +11051,18 @@ Trailing
                     original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Kernel", markup), 0])
             coefficients = " ".join(["1"] * 81)
             primitive = f'<feConvolveMatrix order="9" kernelMatrix="{coefficients}"/>'
-            rendered = [original.edit_epub_structure([
-                doc_ex.EpubSvgChapterSource("Kernel", svg(primitive, transform=transform)), 0,
-            ]) for transform in ("", 'transform="scale(2)"')]
+            cases = (
+                svg(primitive),
+                svg(primitive, transform='transform="scale(2)"'),
+                svg(primitive.replace('/>', ' edgeMode="wrap" targetX="8" targetY="8"/>')),
+            )
+            rendered = [original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Kernel", source), 0])
+                        for source in cases]
         with doc_ex.open(rendered[0]) as book:
             self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
-        with doc_ex.open(rendered[1]) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "filter work exceeds"):
-            book.render_page(0, dpi=96)
+        for data in rendered[1:]:
+            with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "filter work exceeds"):
+                book.render_page(0, dpi=96)
 
     def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
         def svg(primitives: str, attrs: str = "", rect: str = "") -> str:

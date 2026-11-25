@@ -587,6 +587,14 @@ fn parse(
     } else {
         styled
     };
+    let styled = if root
+        .descendants()
+        .any(|node| node.has_tag_name((NS, "feConvolveMatrix")))
+    {
+        effects::normalize_convolution(styled)?
+    } else {
+        styled
+    };
     let fonts = if has_text {
         Some(svg_fonts::Resolver::install(
             &mut options,

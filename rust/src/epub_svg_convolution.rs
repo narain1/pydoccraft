@@ -4,14 +4,18 @@ use roxmltree::Node;
 
 use super::{finite_number, number_pair, MAX_COLOR_COEFFICIENT};
 use crate::{
-    epub::{invalid, limited, unsupported},
+    epub::{invalid, limited, parse_xml, structure::apply_edits, svg, unsupported, XML_BYTES},
     EngineError,
 };
 
 const MAX_ORDER: f32 = 9.0;
-const MIN_DIVISOR: f32 = 1e-6;
+const MIN_DIVISOR: f32 = 1e-9;
 
 pub(super) fn validate(node: Node<'_, '_>) -> Result<(), EngineError> {
+    replacement_divisor(node).map(|_| ())
+}
+
+fn replacement_divisor(node: Node<'_, '_>) -> Result<Option<f32>, EngineError> {
     if node.has_attribute("kernelUnitLength") {
         return Err(unsupported(
             "SVG convolution kernelUnitLength is unsupported",
@@ -58,6 +62,7 @@ pub(super) fn validate(node: Node<'_, '_>) -> Result<(), EngineError> {
         return Err(invalid(message));
     }
     let mut count = 0;
+    let mut sum = 0.0_f64;
     for segment in raw.split(',') {
         if segment.trim_ascii().is_empty() {
             return Err(invalid(message));
@@ -67,26 +72,60 @@ pub(super) fn validate(node: Node<'_, '_>) -> Result<(), EngineError> {
             if count > expected {
                 return Err(invalid(message));
             }
-            coefficient(value, message)?;
+            sum += f64::from(coefficient(value, message)?);
         }
     }
     if count != expected {
         return Err(invalid(message));
     }
-    if let Some(raw) = node.attribute("divisor") {
-        let divisor = coefficient(raw, "invalid SVG convolution divisor")?;
-        // The locked parser drops the primitive for zero instead of using
-        // the default sum, which can be requested by omitting the attribute.
-        if divisor.abs() < MIN_DIVISOR {
-            return Err(unsupported(
-                "SVG convolution divisor is zero or below 0.000001",
-            ));
-        }
-    }
     if let Some(raw) = node.attribute("bias") {
         coefficient(raw, "invalid SVG convolution bias")?;
     }
-    Ok(())
+    let authored = node
+        .attribute("divisor")
+        .map(|raw| coefficient(raw, "invalid SVG convolution divisor"))
+        .transpose()?
+        .unwrap_or(0.0);
+    let replace = authored == 0.0;
+    let divisor = if !replace {
+        authored
+    } else if sum == 0.0 {
+        1.0
+    } else {
+        sum as f32
+    };
+    if divisor.abs() < MIN_DIVISOR {
+        return Err(unsupported(
+            "SVG convolution divisor magnitude is below 0.000000001",
+        ));
+    }
+    Ok(replace.then_some(divisor))
+}
+
+pub(in crate::epub::svg) fn normalize(source: Vec<u8>) -> Result<Vec<u8>, EngineError> {
+    let xml = parse_xml(&source)?;
+    let mut edits = Vec::new();
+    for node in xml
+        .descendants()
+        .filter(|node| node.has_tag_name((svg::NS, "feConvolveMatrix")))
+    {
+        if let Some(divisor) = replacement_divisor(node)? {
+            // The native default rounds small sums and drops authored zero.
+            // Supply the SVG default without rewriting the packaged SVG.
+            let edit = if let Some(attribute) = node.attribute_node("divisor") {
+                (attribute.range_value(), format!("{divisor:e}"))
+            } else {
+                let range = svg::style_insertion(&source, node)?;
+                (range, format!(r#" divisor="{divisor:e}""#))
+            };
+            edits.push(edit);
+        }
+    }
+    if edits.is_empty() {
+        return Ok(source);
+    }
+    let source = std::str::from_utf8(&source).map_err(invalid)?;
+    Ok(apply_edits(source, edits, XML_BYTES)?.into_bytes())
 }
 
 fn coefficient(raw: &str, message: &'static str) -> Result<f32, EngineError> {

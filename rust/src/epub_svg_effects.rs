@@ -12,6 +12,7 @@ use crate::{
 
 #[path = "epub_svg_convolution.rs"]
 mod convolution;
+pub(super) use convolution::normalize as normalize_convolution;
 
 #[path = "epub_svg_morphology.rs"]
 mod morphology;
