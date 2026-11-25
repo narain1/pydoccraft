@@ -694,26 +694,23 @@ pub(super) fn padding(
 }
 
 fn check_padding_caret(lengths: &[Option<Length>; 5], body: &[MNode]) -> Result<(), EngineError> {
-    let [width, height, depth, left, shift] = *lengths;
+    let [width, _, _, left, _] = *lengths;
     let unsupported_padding = || unsupported("MathML alignment caret inside composed padding");
-    let width = width
-        .filter(|length| length.basis.is_none() && length.value > 0.0)
-        .ok_or_else(unsupported_padding)?;
-    let inset = left.map_or(0.0, |length| length.value);
-    let trailing = if width.relative {
-        width.value - inset
-    } else {
-        width.value
+    let (advance, additive) = match width {
+        _ if zeroed(width, 0) == Some(false) => (0.0, true),
+        Some(length) if length.basis.is_none() && length.value > 0.0 => {
+            (length.value, length.relative)
+        }
+        _ => return Err(unsupported_padding()),
     };
+    let inset = left.map_or(0.0, |length| length.value);
     if body.is_empty()
-        || height.is_some()
-        || depth.is_some()
-        || shift.is_some_and(|length| length.value != 0.0)
         || left.is_some_and(|length| length.value != 0.0 && length.basis.is_some())
-        || !(0.0..=width.value).contains(&inset)
+        || !(0.0..=advance).contains(&inset)
     {
         return Err(unsupported_padding());
     }
+    let trailing = if additive { advance - inset } else { advance };
     for gap in [inset, trailing] {
         if gap != 0.0 && (gap < 0.4 || (gap * 5.0 - (gap * 5.0).round()).abs() > 0.0001) {
             return Err(unsupported(
@@ -909,6 +906,10 @@ impl Padding {
             contents.extend(body);
             if shift != 0.0 {
                 contents = vec![layout.shift(contents, shift)?];
+                if let Some(caret) = &mut caret {
+                    // The visible operand is inside the first phantom of the array row.
+                    caret.path.splice(..0, [(0, 0), (0, 0)]);
+                }
                 for (extent, original) in vertical.iter_mut().zip(&original[1..]) {
                     *extent = extent.or(Some(*original));
                 }

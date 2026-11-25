@@ -164,6 +164,7 @@
 - [x] Preserve MathML baseline decimal alignment within tensor bases and explicit marks within the base or individual pre- and postscript operands across repeated editable script pairs.
 - [x] Preserve decimals and explicit marks in MathML padding with unchanged or zeroed native dimensions and zero offsets, including editable nested padding and script operands.
 - [x] Preserve both sides of an operator-edge mark and implicit decimals inside exactly representable positive horizontal MathML padding, including editable nested padding and script operands.
+- [x] Preserve decimal and explicit alignment carets through composed height and depth and signed vertical shifts in previews, searchable PDF and editable DOCX, including nested padding.
 - [ ] Extend MathML alignment through other operator spacing and nontransparent wrappers and operands, right-to-left groups and cross-table scopes.
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
 - [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.
