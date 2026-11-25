@@ -98,7 +98,7 @@
 - [x] Stage explicit replacements of EPUB 2 and EPUB 3 compatibility NCX with chapter and XHTML navigation edits.
 - [x] Renumber NCX play order across the map and auxiliary lists using the final spine and fragment positions.
 - [x] Stage supplemental XHTML resources outside the spine and insert hyperlinked auxiliary chapters with a non-linear spine entry.
-- [ ] Read and render local XHTML embedded through supported iframe and object references.
+- [x] Read and render archive-local static XHTML through iframe and XHTML object references, including nested viewport clipping and fixed PDF text and links.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
 - [x] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata.
 - [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.

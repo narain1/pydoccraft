@@ -1,5 +1,5 @@
 //! Project the supported EPUB semantics into the existing WordCraft model.
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc};
 
 use base64::Engine;
 use wordcraft_doc::para::InlineObject;
@@ -94,6 +94,8 @@ pub(super) fn convert(
 
 pub(super) struct Output<'a> {
     data: &'a [u8],
+    book: &'a DocumentPayload,
+    pub frames: Rc<super::frame::Work>,
     archive: Option<super::Book<'a>>,
     pub document: Document,
     preserve_links: bool,
@@ -133,7 +135,7 @@ pub(super) enum Inline<'a> {
 impl<'a> Output<'a> {
     pub(super) fn new(
         data: &'a [u8],
-        book: &DocumentPayload,
+        book: &'a DocumentPayload,
         preserve_links: bool,
         raster_dpi: f64,
     ) -> Self {
@@ -147,6 +149,8 @@ impl<'a> Output<'a> {
         }
         Self {
             data,
+            book,
+            frames: Rc::default(),
             archive: None,
             document,
             preserve_links,
@@ -422,6 +426,15 @@ impl<'a> Output<'a> {
         {
             return Err(unsupported("linked images"));
         }
+        if image.media_type == super::frame::MEDIA_TYPE {
+            let [width, height] = super::frame::size(image)?;
+            let media = self.rasterize_frame(image, [width * 0.75, height * 0.75])?;
+            return Ok(RasterImage {
+                media,
+                width,
+                height,
+            });
+        }
         let bytes = image_bytes(image)?;
         if image.media_type == "image/svg+xml" {
             let base = super::svg::image_base(image)?;
@@ -432,6 +445,7 @@ impl<'a> Output<'a> {
                 .archive
                 .as_mut()
                 .ok_or_else(|| conversion("missing EPUB archive"))?;
+            archive.frame_work = Some(Rc::clone(&self.frames));
             let interactive =
                 self.svg_images.is_some() && image.metadata.contains_key("epub_svg_inline");
             let (tree, geometry) =
@@ -467,6 +481,76 @@ impl<'a> Output<'a> {
             width: width as f32,
             height: height as f32,
         })
+    }
+
+    pub(super) fn rasterize_frame(
+        &mut self,
+        image: &ImagePayload,
+        viewport: [f32; 2],
+    ) -> Result<String, EngineError> {
+        use super::rendition::{text::TextLayer, Capture, LinkAreas, Region};
+
+        let region = Region::Viewport(None);
+        let dpi = self.raster_dpi;
+        let raster = region.for_page(viewport.map(f64::from), dpi, true)?;
+        self.charge_image(raster.width, raster.height)?;
+        let work = Rc::clone(&self.frames);
+        let _scope = work.enter(
+            &image.name,
+            u64::from(raster.width) * u64::from(raster.height),
+        )?;
+        let source = image_bytes(image)?;
+        work.charge_read(source.len())?;
+        let surface = super::layout::Surface {
+            data: self.data,
+            book: self.book,
+            dpi,
+            region,
+            transparent: true,
+            frames: Rc::clone(&work),
+        };
+        let mut links = LinkAreas::default();
+        let mut text = self
+            .svg_images
+            .as_ref()
+            .filter(|images| images.searchable())
+            .map(|_| {
+                let mut layer = TextLayer::default();
+                layer.begin_page();
+                layer
+            });
+        let navigation = (self.svg_images.is_some() || self.preserve_links).then_some(Capture {
+            anchors: None,
+            links: &mut links,
+            text: text.as_mut(),
+        });
+        let rendered =
+            super::layout::render_frame(surface, &source, &image.name, viewport, navigation)?;
+        if self.preserve_links && !links.entries.is_empty() {
+            return Err(unsupported(
+                "semantic export of links inside embedded XHTML",
+            ));
+        }
+        let png = rendering::encode_png(rendered.width, rendered.height, &rendered.pixels, dpi)?;
+        let media = self.add_preview_media(png, "png");
+        if let Some(images) = self.svg_images.as_mut() {
+            let parent = image.metadata["frame_parent"]
+                .as_str()
+                .ok_or_else(|| super::invalid("missing parent for embedded EPUB XHTML"))?;
+            for (_, _, href) in &mut links.entries {
+                if !super::external(href) {
+                    let resolved = super::resolve(&image.name, href)?;
+                    let mut relative = super::structure::relative_url(parent, &resolved);
+                    if let Some((_, fragment)) = href.split_once('#') {
+                        relative.push('#');
+                        relative.push_str(fragment);
+                    }
+                    *href = Arc::from(relative);
+                }
+            }
+            images.record_frame(&media, viewport, text, links)?;
+        }
+        Ok(media)
     }
 
     pub(super) fn rasterize_svg(

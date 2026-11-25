@@ -930,7 +930,7 @@ fn editable_resource(media: &str) -> bool {
         })
 }
 
-fn relative_url(base: &str, path: &str) -> String {
+pub(super) fn relative_url(base: &str, path: &str) -> String {
     let mut folders: Vec<_> = base.split('/').collect();
     folders.pop();
     let target: Vec<_> = path.split('/').collect();

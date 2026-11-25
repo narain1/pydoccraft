@@ -26,6 +26,7 @@ pub(super) struct TextCluster {
 
 pub(in crate::epub) struct SvgImages {
     images: HashMap<String, SvgImage>,
+    frames: HashMap<String, FrameImage>,
     searchable: bool,
     geometry_bytes: usize,
     clusters: usize,
@@ -39,10 +40,17 @@ struct SvgImage {
     tree_size: [f32; 2],
 }
 
+struct FrameImage {
+    size: [f32; 2],
+    text: Vec<TextCluster>,
+    links: super::LinkAreas,
+}
+
 impl SvgImages {
     pub(in crate::epub) fn new(searchable: bool) -> Self {
         Self {
             images: HashMap::new(),
+            frames: HashMap::new(),
             searchable,
             geometry_bytes: 0,
             clusters: 0,
@@ -52,6 +60,47 @@ impl SvgImages {
 
     pub(in crate::epub) fn searchable(&self) -> bool {
         self.searchable
+    }
+
+    pub(in crate::epub) fn record_frame(
+        &mut self,
+        media: &str,
+        size: [f32; 2],
+        text: Option<TextLayer>,
+        links: super::LinkAreas,
+    ) -> Result<(), EngineError> {
+        let mut text = text.unwrap_or_default();
+        super::super::charge(
+            &mut self.geometry_bytes,
+            links
+                .entries
+                .iter()
+                .map(|(_, _, href)| href.len() + 64)
+                .sum(),
+            super::super::XML_BYTES,
+            "EPUB image annotations exceed 8 MiB",
+        )?;
+        super::super::charge(
+            &mut self.clusters,
+            text.clusters,
+            MAX_CLUSTERS,
+            "EPUB image text has too many clusters",
+        )?;
+        super::super::charge(
+            &mut self.bytes,
+            text.bytes,
+            MAX_TEXT_BYTES,
+            "EPUB image text exceeds 4 MiB",
+        )?;
+        self.frames.insert(
+            media.to_owned(),
+            FrameImage {
+                size,
+                text: text.pages.pop().unwrap_or_default(),
+                links,
+            },
+        );
+        Ok(())
     }
 
     pub(in crate::epub) fn record(
@@ -114,7 +163,7 @@ impl SvgImages {
 }
 
 impl TextLayer {
-    pub(super) fn begin_page(&mut self) {
+    pub(in crate::epub) fn begin_page(&mut self) {
         self.pages.push(Vec::new());
     }
 
@@ -180,6 +229,24 @@ pub(in crate::epub) fn draw_image(
     clip: Rect,
     capture: &mut Capture<'_, '_>,
 ) -> Result<(), EngineError> {
+    if let Some(frame) = images.and_then(|images| images.frames.get(media)) {
+        let matrix = transform
+            * Affine::translate((f64::from(rect.x), f64::from(rect.y)))
+            * Affine::scale_non_uniform(
+                f64::from(rect.w / frame.size[0]),
+                f64::from(rect.h / frame.size[1]),
+            );
+        for (_, region, href) in &frame.links.entries {
+            capture
+                .links
+                .add(transformed(*region, matrix), clip, href.clone())?;
+        }
+        if let Some(text) = capture.text.as_deref_mut() {
+            for cluster in &frame.text {
+                text.add(&cluster.text, transformed(cluster.rect, matrix), clip)?;
+            }
+        }
+    }
     if let Some(image) = images.and_then(|images| images.images.get(media)) {
         let position = transform * Affine::translate((f64::from(rect.x), f64::from(rect.y)));
         if let Some(geometry) = &image.geometry {

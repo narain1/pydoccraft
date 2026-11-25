@@ -846,6 +846,114 @@ class EpubTests(unittest.TestCase):
                 self.assertRegex(readable_pdf, rb'/XYZ\s+12(?:\.0+)?\s+51(?:\.0+)?\s+null')
                 self.assertRegex(readable_pdf, rb'/XYZ\s+18(?:\.0+)?\s+63(?:\.0+)?\s+null')
 
+    def test_fixed_layout_embedded_xhtml_preserves_frame_pixels_text_and_links(self) -> None:
+        source = fixed_spread_fixture([("", "white", 220, 154)])
+        host = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Host</title>
+          <meta name="viewport" content="width=220,height=154"/>
+          <style>html,body {margin:0} body {background:#c22020}
+            h1 {position:absolute;left:32px;top:8px;font-size:12px;margin:0}
+            iframe {display:block;position:absolute;left:20px;top:32px;width:160px;height:100px}
+          </style></head><body>
+            <h1 id="home">Host</h1><iframe src="Frames/card.xhtml" title="Card" width="110" height="60"/>
+          </body></html>"""
+        card = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Card</title>
+          <style>body {margin:0}
+            .banner {background:#0044bb;height:18px}
+            @media (min-width:140px) {.banner {background:#2357c6}}
+            object {display:block;position:absolute;top:24px;left:5px;width:120px;height:52px}
+          </style></head><body><div class="banner">Embedded</div>
+            <object type="application/xhtml+xml" data="Nested/notice.xhtml" title="Notice"/>
+          </body></html>"""
+        notice = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Notice</title>
+          <style>body {margin:0;background:#309858}
+            p {margin:0} .outside {position:absolute;left:0;top:58px;width:120px;height:18px;background:#e150ba}
+          </style></head><body><p><a href="../../s0.xhtml#home">NESTEDTEXT</a></p>
+            <div class="outside">Clipped text</div>
+          </body></html>"""
+        with doc_ex.open(source) as initial:
+            edited = initial.edit_epub_structure(
+                replacements={0: host},
+                resources={
+                    "OEBPS/Frames/card.xhtml": doc_ex.EpubResource("application/xhtml+xml", card.encode()),
+                    "OEBPS/Frames/Nested/notice.xhtml": doc_ex.EpubResource("application/xhtml+xml", notice.encode()),
+                },
+            )
+        with doc_ex.open(edited) as book:
+            frame, = book[0].get_images()
+            self.assertEqual((frame.alt, frame.media_type, frame.data), ("Card", "application/xhtml+xml", card.encode()))
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            fixed = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+        width, pixels = preview
+
+        def rgb(x: int, y: int) -> bytes:
+            start = (y * width + x) * 4
+            return pixels[start:start + 3]
+
+        self.assertEqual(rgb(172, 36), bytes.fromhex("2357c6"))
+        self.assertEqual(rgb(130, 94), bytes.fromhex("309858"))
+        self.assertEqual(rgb(171, 107), bytes.fromhex("c22020"))
+        self.assertEqual(rgb(130, 115), bytes.fromhex("c22020"))
+        with doc_ex.open(fixed) as pdf, pdf.edit() as editor:
+            self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+            self.assertEqual(len(pdf[0].search_for("NESTEDTEXT")), 1)
+            self.assertFalse(pdf[0].search_for("Clipped text"))
+            link, = pdf[0].get_links()
+            self.assertEqual(link.metadata["target_page"], 0)
+            self.assertGreaterEqual(link.bbox[0], 18.75)
+            self.assertGreaterEqual(link.bbox[1], 42)
+            self.assertLessEqual(link.bbox[2], 108.75)
+            self.assertLessEqual(link.bbox[3], 81)
+            self.assertRegex(editor.to_bytes(object_streams=False), rb"/XYZ\s+24(?:\.0+)?\s+109\.5\s+null")
+
+    def test_embedded_xhtml_rasterizes_in_semantic_exports_and_checks_bounds(self) -> None:
+        html = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Frame</title></head><body>{}</body></html>'
+        resource = "application/xhtml+xml"
+        source = epub_fixture()
+        with doc_ex.open(source) as initial:
+            documents = {
+                "OEBPS/card.xhtml": doc_ex.EpubResource(resource, html.format(
+                    '<div style="width:60px;height:36px;background:#2b59aa"/>'
+                ).encode()),
+            }
+            output = initial.edit_epub_structure(
+                replacements={0: html.format('<p>Before <iframe src="card.xhtml" title="Inset" width="60" height="36"/> after</p>')},
+                resources=documents,
+            )
+            for markup, message in (
+                ('<iframe src="https://example.org/"/>', "remote embedded EPUB XHTML"),
+                ('<iframe src="card.xhtml" srcdoc="No"/>', "iframe srcdoc"),
+                ('<iframe src="card.xhtml#section"/>', "fragment scrolling"),
+                ('<iframe src="image.png"/>', "local XHTML manifest resource"),
+            ):
+                with self.subTest(message=message), self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                    initial.edit_epub_structure(replacements={0: html.format(markup)}, resources=documents)
+            loops = {
+                "OEBPS/card.xhtml": doc_ex.EpubResource(resource, html.format('<iframe src="child.xhtml"/>').encode()),
+                "OEBPS/child.xhtml": doc_ex.EpubResource(resource, html.format('<iframe src="card.xhtml"/>').encode()),
+            }
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "cyclic embedded EPUB XHTML"):
+                initial.edit_epub_structure(replacements={0: html.format('<iframe src="card.xhtml"/>')}, resources=loops)
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "frame count"):
+                initial.edit_epub_structure(
+                    replacements={0: html.format('<iframe src="card.xhtml"/>' * 33)}, resources=documents,
+                )
+            oversized = initial.edit_epub_structure(
+                replacements={0: html.format('<iframe src="card.xhtml" width="6000" height="4800"/>')},
+                resources=documents,
+            )
+        with doc_ex.open(oversized) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "image pixel budget"):
+                book.render_page(0, dpi=96, clip=(0, 0, 100, 100))
+        with doc_ex.open(output) as book:
+            _, raw = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            self.assertIn(bytes.fromhex("2b59aaff"), raw)
+            for target in ("docx", "pdf"):
+                with self.subTest(target=target), doc_ex.open(book.convert(target)) as exported:
+                    self.assertIn("Before", exported[0].get_text())
+                    self.assertIn("after", exported[0].get_text())
+                    image, = exported[0].get_images()
+                    self.assertEqual(image.media_type, "image/png")
+
     def test_fixed_layout_pdf_links_follow_wrapped_text_images_and_destinations(self) -> None:
         source = fixed_spread_fixture([("", "white", 200, 180)] * 3)
         font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()

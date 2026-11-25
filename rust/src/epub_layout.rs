@@ -1,5 +1,5 @@
 //! Lay out styled XHTML in its viewport, then paint with the existing native renderer.
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 #[path = "epub_layout/link_geometry.rs"]
 mod link_geometry;
@@ -80,22 +80,104 @@ pub(super) fn render_with_navigation(
         )
         .map(Some);
     }
-    let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
     let viewport = if fixed {
-        dimensions(root).ok_or_else(|| {
+        Some(dimensions(root).ok_or_else(|| {
             unsupported("fixed-layout XHTML requires numeric viewport width and height")
-        })?
+        })?)
     } else {
-        [REFLOW_WIDTH, 792.0]
+        None
     };
-    let mut cascade = Cascade::load(root, path, &mut archive, viewport)?;
+    let surface = Surface {
+        data,
+        book,
+        dpi,
+        region,
+        transparent: false,
+        frames: Rc::default(),
+    };
+    let markup = Markup {
+        root,
+        source: &source,
+        path,
+        page: page.number,
+        viewport,
+    };
+    paint_xhtml(surface, markup, &mut archive, navigation)
+}
+
+pub(super) struct Surface<'a> {
+    pub data: &'a [u8],
+    pub book: &'a DocumentPayload,
+    pub dpi: f64,
+    pub region: Region,
+    pub transparent: bool,
+    pub frames: Rc<super::frame::Work>,
+}
+
+struct Markup<'a, 'input> {
+    root: Node<'a, 'input>,
+    source: &'input [u8],
+    path: &'a str,
+    page: usize,
+    viewport: Option<[f32; 2]>,
+}
+
+pub(super) fn render_frame(
+    surface: Surface<'_>,
+    source: &[u8],
+    path: &str,
+    viewport: [f32; 2],
+    navigation: Option<Capture<'_, '_>>,
+) -> Result<wordcraft_render::Rendered, EngineError> {
+    let xml = parse_xml(source)?;
+    let markup = Markup {
+        root: xml.root_element(),
+        source,
+        path,
+        page: 0,
+        viewport: Some(viewport),
+    };
+    let mut archive = Book::open(surface.data)?;
+    paint_xhtml(surface, markup, &mut archive, navigation)?
+        .ok_or_else(|| invalid("embedded EPUB XHTML viewport was not rendered"))
+}
+
+fn paint_xhtml(
+    surface: Surface<'_>,
+    markup: Markup<'_, '_>,
+    archive: &mut Book<'_>,
+    navigation: Option<Capture<'_, '_>>,
+) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
+    let Surface {
+        data,
+        book,
+        dpi,
+        region,
+        transparent,
+        frames,
+    } = surface;
+    let Markup {
+        root,
+        source,
+        path,
+        page,
+        viewport,
+    } = markup;
+    let fixed = viewport.is_some();
+    let viewport = viewport.unwrap_or([REFLOW_WIDTH, 792.0]);
+    let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
+    let has_frames = body.descendants().any(super::frame::is_frame);
+    if transparent || has_frames {
+        archive.frame_work = Some(Rc::clone(&frames));
+    }
+    let mut cascade = Cascade::load(root, path, archive, viewport)?;
     let composed_math =
         super::math::table::has_spans(body) || super::math::compose::needs_layout(body);
-    if !fixed && !cascade.needed(root) && !composed_math {
+    if !fixed && !cascade.needed(root) && !composed_math && !has_frames {
         return Ok(None);
     }
     let styles = ChapterStyles::compute(root, &mut cascade, viewport)?;
-    let mut fonts = Fonts::load(&cascade.fonts, &styles.boxes, &mut archive)?;
+    let mut fonts = Fonts::load(&cascade.fonts, &styles.boxes, archive)?;
     if composed_math {
         fonts.get_or_insert_with(Fonts::bundled);
     }
@@ -113,11 +195,11 @@ pub(super) fn render_with_navigation(
         .collect::<HashMap<_, _>>();
     let mut budget = content::Budget::default();
     let mut context = content::Context {
-        source: &source,
+        source,
         path,
-        page: page.number,
+        page,
         manifest: &manifest,
-        book: &mut archive,
+        book: archive,
         budget: &mut budget,
         styles: Some(&styles.boxes),
         collect_anchors: navigation
@@ -126,6 +208,7 @@ pub(super) fn render_with_navigation(
         equation_styles: Some((&styles, viewport)),
     };
     let mut output = Output::new(data, book, false, dpi);
+    output.frames = frames;
     if let Some(capture) = &navigation {
         output.svg_images = Some(super::rendition::text::SvgImages::new(
             capture.text.is_some(),
@@ -154,7 +237,9 @@ pub(super) fn render_with_navigation(
     let paper = html_color.or(styles.boxes[&body.id()].background);
     let viewport = Rect::new(0.0, 0.0, dimension[0], dimension[1]);
     let mut drawing = Vec::new();
-    fill(&mut drawing, viewport, Some((Rgb::WHITE, 1.0)));
+    if !transparent {
+        fill(&mut drawing, viewport, Some((Rgb::WHITE, 1.0)));
+    }
     fill(&mut drawing, viewport, paper);
     // The HTML canvas background is propagated from the root, or from body when the root has none.
     // Suppress its box fill so translucent page colors are composited once.
@@ -318,6 +403,7 @@ enum Contents {
 
 enum Picture {
     Raster(RasterImage),
+    Frame(crate::model::ImagePayload, [f32; 2]),
     Svg {
         tree: Box<resvg::usvg::Tree>,
         geometry: Option<Arc<super::svg::LinkGeometry>>,
@@ -328,6 +414,7 @@ impl Picture {
     fn size(&self) -> [f32; 2] {
         match self {
             Self::Raster(image) => [image.width, image.height],
+            Self::Frame(_, size) => *size,
             Self::Svg { tree, .. } => [tree.size().width(), tree.size().height()],
         }
     }
@@ -335,6 +422,7 @@ impl Picture {
     fn media(&self, output: &mut Output<'_>, rect: Rect) -> Result<String, EngineError> {
         match self {
             Self::Raster(image) => Ok(image.media.clone()),
+            Self::Frame(source, _) => output.rasterize_frame(source, [rect.w, rect.h]),
             Self::Svg { tree, geometry } => {
                 output.rasterize_svg(tree, rect.w, rect.h, geometry.clone())
             }
@@ -375,7 +463,10 @@ impl<'book> Layout<'book> {
         let mut children = Vec::new();
         let mut local = None;
         if !styled.hidden {
-            let image = if is_svg(node) {
+            let frame = super::frame::is_frame(node);
+            let image = if frame {
+                Some(super::frame::payload(node, context)?)
+            } else if is_svg(node) {
                 Some(content::inline_svg(node, context)?)
             } else if name(node, XHTML, "img") && node.has_attribute("src") {
                 Some(content::image(
@@ -388,7 +479,11 @@ impl<'book> Layout<'book> {
                 content::media_poster(node, context)?
             };
             if let Some(source) = image {
-                let picture = if source.media_type == "image/svg+xml" {
+                let alt = source.alt.clone();
+                let picture = if frame {
+                    let size = super::frame::size(&source)?;
+                    Picture::Frame(source, size)
+                } else if source.media_type == "image/svg+xml" {
                     let base = super::svg::image_base(&source)?;
                     let interactive = self.output.svg_images.is_some()
                         && source.metadata.contains_key("epub_svg_inline");
@@ -407,21 +502,27 @@ impl<'book> Layout<'book> {
                 };
                 let [width, height] = picture.size();
                 style.item_is_replaced = true;
-                style.aspect_ratio.get_or_insert(width / height);
-                for (dim, value) in [
-                    (&mut style.size.width, node.attribute("width")),
-                    (&mut style.size.height, node.attribute("height")),
+                if !frame {
+                    style.aspect_ratio.get_or_insert(width / height);
+                }
+                for (dim, attribute, natural) in [
+                    (&mut style.size.width, "width", width),
+                    (&mut style.size.height, "height", height),
                 ] {
                     if dim.is_auto() {
-                        if let Some(n) = value
-                            .and_then(|n| n.parse::<f32>().ok())
-                            .filter(|n| *n > 0.0 && *n <= MAX_GEOMETRY)
-                        {
+                        let value = if frame {
+                            Some(natural)
+                        } else {
+                            node.attribute(attribute)
+                                .and_then(|n| n.parse::<f32>().ok())
+                                .filter(|n| *n > 0.0 && *n <= MAX_GEOMETRY)
+                        };
+                        if let Some(n) = value {
                             *dim = Dimension::length(n * 0.75);
                         }
                     }
                 }
-                local = Some(Contents::Image(picture, source.alt));
+                local = Some(Contents::Image(picture, alt));
             } else if name(node, XHTML, "table") {
                 let blocks = content::layout_piece(node, &[], context)?;
                 if self.uses_shaped_text(&blocks)? {
@@ -442,10 +543,9 @@ impl<'book> Layout<'book> {
                 let mut significant = visible.clone().filter(|child| {
                     child.is_element() || child.text().is_some_and(|text| !text.trim().is_empty())
                 });
-                let only_image = significant
-                    .next()
-                    .is_some_and(|child| name(child, XHTML, "img") || is_svg(child))
-                    && significant.next().is_none();
+                let only_image = significant.next().is_some_and(|child| {
+                    name(child, XHTML, "img") || is_svg(child) || super::frame::is_frame(child)
+                }) && significant.next().is_none();
                 for child in visible {
                     let layout_child = child.is_element()
                         && context.styles.is_some_and(|styles| {

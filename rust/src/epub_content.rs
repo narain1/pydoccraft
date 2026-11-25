@@ -27,9 +27,14 @@ pub(super) struct Budget {
     bytes: usize,
     objects: usize,
     grid: usize,
+    frames: usize,
 }
 
 impl Budget {
+    pub(super) fn frame(&mut self) -> Result<(), EngineError> {
+        super::frame::charge_count(&mut self.frames)
+    }
+
     pub(super) fn bytes(&mut self, bytes: usize) -> Result<(), EngineError> {
         charge(
             &mut self.bytes,
@@ -345,7 +350,10 @@ fn flow_children<'a, 'input>(
             && styled(n, cx).map_or_else(|| block(child_tag.name()), |style| !style.inline)
         {
             run.flush(out, level, kind, cx)?;
-            if child_tag.name() == "table" {
+            if super::frame::is_frame(n) {
+                inline(n, &mut run, cx)?;
+                run.flush(out, level, kind, cx)?;
+            } else if child_tag.name() == "table" {
                 table(n, out, table_depth, cx)?;
             } else {
                 flow(n, out, table_depth, cx)?;
@@ -544,6 +552,32 @@ fn inline(
             }
             return Ok(());
         }
+        "iframe" | "object" if super::frame::is_frame(node) => {
+            let mut image = super::frame::payload(node, cx)?;
+            if let Some(style) = styled(node, cx) {
+                let mut size = super::frame::size(&image)?;
+                for (value, dimension) in size
+                    .iter_mut()
+                    .zip([style.box_style.size.width, style.box_style.size.height])
+                {
+                    if !dimension.is_auto() {
+                        *value = dimension
+                            .into_option()
+                            .filter(|size| *size > 0.0)
+                            .ok_or_else(|| {
+                                unsupported("indefinite inline embedded EPUB XHTML size")
+                            })?
+                            / 0.75;
+                    }
+                }
+                image.metadata.insert("frame_viewport".into(), json!(size));
+            }
+            image
+                .metadata
+                .insert("inline_offset".into(), json!(run.characters));
+            run.images.push(image);
+            return Ok(());
+        }
         "object" => {
             let mime = node
                 .attribute("type")
@@ -567,7 +601,7 @@ fn inline(
             }
             return Ok(());
         }
-        "iframe" | "embed" | "canvas" | "picture" => {
+        "embed" | "canvas" | "picture" => {
             return Err(unsupported(
                 "embedded XHTML media or alternate image sources",
             ));
@@ -730,7 +764,7 @@ pub(super) fn image(
     encoded_image(&bytes, cx.page, src, mime, alt, cx.budget)
 }
 
-fn encoded_image(
+pub(super) fn encoded_image(
     bytes: &[u8],
     page: usize,
     path: &str,

@@ -96,13 +96,10 @@ impl<'a> Navigation<'a> {
                 navigation.request_anchor(target, fragment);
             }
             for image in &page.images {
-                for target in image
-                    .metadata
-                    .get("epub_svg_targets")
-                    .map(items)
-                    .unwrap_or_default()
-                {
-                    navigation.request_anchor(target[0].as_str(), target[1].as_str());
+                for field in ["epub_svg_targets", "epub_frame_targets"] {
+                    for target in image.metadata.get(field).map(items).unwrap_or_default() {
+                        navigation.request_anchor(target[0].as_str(), target[1].as_str());
+                    }
                 }
             }
         }

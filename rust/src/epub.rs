@@ -2,6 +2,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     io::{Cursor, Read},
+    rc::Rc,
 };
 
 use roxmltree::{Document, Node, ParsingOptions};
@@ -24,6 +25,8 @@ mod css;
 mod editor;
 #[path = "epub_fonts.rs"]
 mod fonts;
+#[path = "epub_frame.rs"]
+mod frame;
 #[path = "epub_layout.rs"]
 mod layout;
 #[path = "epub_math.rs"]
@@ -594,6 +597,7 @@ struct Item<'a> {
 struct Book<'a> {
     archive: Archive<'a>,
     read_bytes: usize,
+    frame_work: Option<Rc<frame::Work>>,
     obfuscated_fonts: Option<obfuscation::FontObfuscation>,
 }
 
@@ -612,6 +616,7 @@ impl<'a> Book<'a> {
         let mut book = Self {
             archive,
             read_bytes: 0,
+            frame_work: None,
             obfuscated_fonts: None,
         };
         if let Some(path) = encryption {
@@ -667,6 +672,9 @@ impl<'a> Book<'a> {
             128 * 1024 * 1024,
             "aggregate read budget",
         )?;
+        if let Some(work) = &self.frame_work {
+            work.charge_read(size)?;
+        }
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(size + 1)
