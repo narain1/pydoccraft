@@ -457,7 +457,7 @@ impl<'n> Reader<'_, 'n> {
         if node
             .ancestors()
             .chain(node.descendants())
-            .any(|element| element.has_attribute("condition"))
+            .any(|element| self.regions.excluded.contains(&element.id()))
         {
             return Err(unsupported("conditional TTML mixed-region content"));
         }

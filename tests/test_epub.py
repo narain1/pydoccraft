@@ -7873,9 +7873,10 @@ overlay
         body = b'<body><div tts:textDecoration="underline">'
         footer = b'</div></body></tt>'
         mixed = (
-            header + body + b'<p xml:id="shared" begin="168t" end="191t">'
-            b'  <span><span region="lower" begin="4t" dur="17t">' + lower + b'</span></span>  '
-            b'  <span region="upper" begin="1t" dur="18t">' + upper + b'</span>  '
+            header + body + b'<p xml:id="shared" condition="true" begin="168t" end="191t">'
+            b'  <span><span region="lower" begin="4t" dur="17t">'
+            + lower.replace(b'<set ', b'<set condition="true" ', 1) + b'</span></span>  '
+            b'  <span region="upper" condition="true" begin="1t" dur="18t">' + upper + b'</span>  '
             b'</p>' + footer
         )
         control = (
@@ -7979,7 +7980,8 @@ overlay
             (b'<p dur="1s" xml:space="preserve"> ' + low + high, "preserved whitespace"),
             (b'<p dur="1s">' + low + b' ' + low + high, "returns to an earlier region"),
             (b'<p dur="1s">' + low + high + low, "returns to an earlier region"),
-            (b'<p dur="1s" condition="true">' + low + high, "conditional TTML mixed-region content"),
+            (b'<p dur="1s">' + low + high + b'<span dur="1s" condition="false">Excluded</span>',
+             "conditional TTML mixed-region content"),
         ):
             with self.subTest(paragraph=paragraph):
                 changed = rewrite_epub(data, {"OEBPS/mixed.ttml": head + paragraph + b'</p></body></tt>'})

@@ -165,6 +165,8 @@ TTML pieces retain their selected region and stay in source order through paragr
 
 The shared TTML resource validator evaluates bounded boolean conditions for ordinary subtitle playback. The parser uses the TTML logical precedence rules and the deterministic false binding for `forced`. It records excluded timed content and one-shot `set` elements. The presentation sweep skips excluded content runs and layout changes while preserving their authored end or duration on the rational caption clock. Excluded sets still contribute to their owner's duration or the region's sequential cursor. Only included sets enter the style or layout sweep. Staged Python edits with conditional sets run the same bounded cue projection as playback, including checks for overlapping active sets. A condition beneath excluded content cannot change its visibility. Conditional layout elements, style definitions and expressions that require unbound context values return explicit errors. [TTML conditions](https://www.w3.org/TR/ttml2/#content-attribute-condition)
 
+Mixed-region TTML accepts active conditions on a paragraph, its ancestors and its inline content. The adapter checks whether evaluation excluded any node before projecting contiguous region groups into native timed cues.
+
 The Python video iterator sweeps start and end events across decoded frame intervals. At each cue transition it emits a new presentation interval over the same decoded RGB buffer, keeping overlap order stable. Seeking clips captions and frames using the same effective window. Audio clients can query the cue intervals on the source timeline. [WebVTT](https://www.w3.org/TR/webvtt1/), [TTML timing](https://www.w3.org/TR/ttml2/#timing)
 
 ## Media overlay playback

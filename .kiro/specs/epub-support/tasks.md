@@ -227,6 +227,7 @@
 - [x] Apply bounded WebVTT region selectors and carry typed region paint and cue styles into standalone captions and synchronized video.
 - [x] Apply TTML initial and inherited region styles to typed runs, including bounded paragraph and division inline regions, content overrides and time-based restores.
 - [x] Evaluate conditions on supported TTML timed text and region sets while preserving their owner clocks, sequential region placement and synchronized style restores.
+- [x] Keep conditional TTML mixed-region paragraphs on the ordinary cue timeline when all scoped elements are active.
 - [ ] Support WebVTT region scrolling, additional TTML condition contexts and conditional layout, interleaved or ambiguous region ownership, and advanced TTML animation, additional TTML typography and subtitle painting.
 - [ ] Support more media fragment track combinations and ID fragments in additional containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources. Use staged explicit XHTML titles in generated fallback navigation labels.
