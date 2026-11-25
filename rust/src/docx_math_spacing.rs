@@ -13,10 +13,12 @@ pub(crate) const GUIDE_COLOR: Rgb = Rgb(1, 2, 3);
 pub(crate) const SHIFT_GUIDE_COLOR: Rgb = Rgb(1, 2, 4);
 pub(crate) const GRID_GUIDE_COLOR: Rgb = Rgb(1, 2, 5);
 pub(crate) const GROUP_SPACE_COLOR: Rgb = Rgb(1, 2, 6);
+pub(crate) const NEGATIVE_PADDING_SPACE_COLOR: Rgb = Rgb(1, 2, 7);
+pub(crate) const NEGATIVE_PADDING_MARKER: &str = "⁢";
 
 pub(super) fn visible_text(object: &InlineObject) -> Cow<'_, str> {
     if let InlineObject::Equation { linear, math, .. } = object {
-        if linear.contains("⟡H") || linear.contains("⟡g") {
+        if linear.contains('□') || linear.contains("⟡H") || linear.contains("⟡g") {
             let removed = Cell::new(false);
             let nodes = remove_guides(math.nodes.clone(), &removed);
             if removed.get() {
@@ -33,6 +35,9 @@ fn remove_guides(nodes: Arg, removed: &Cell<bool>) -> Arg {
         if let Some(body) = shifted_body(&node) {
             removed.set(true);
             result.extend(remove_guides(body.to_vec(), removed));
+        } else if let Some(body) = borrowed_padding_body(&node) {
+            removed.set(true);
+            result.extend(remove_guides(body, removed));
         } else if let Some(matrix) = grid_body(&node) {
             removed.set(true);
             result.push(map_args(matrix, &|arg| remove_guides(arg, removed)));
@@ -118,6 +123,34 @@ fn is_grid_gap(node: &MNode) -> bool {
     matches!(e.as_slice(), [_, marker] if is_grid_marker(marker))
 }
 
+fn borrowed_padding_body(node: &MNode) -> Option<Arg> {
+    let MNode::Boxed { e } = node else {
+        return None;
+    };
+    let (marker, contents) = e.split_last()?;
+    let tagged = |node: &MNode| is_math_space(node, NEGATIVE_PADDING_SPACE_COLOR);
+    if !matches!(marker, MNode::Run(run) if run.text == NEGATIVE_PADDING_MARKER
+        && run.lit && !run.nor && run.size == Some(1.0)
+        && run.color == Some(NEGATIVE_PADDING_SPACE_COLOR))
+        || !contents.last().is_some_and(tagged)
+    {
+        return None;
+    }
+    Some(
+        contents
+            .iter()
+            .filter(|node| !tagged(node))
+            .cloned()
+            .collect(),
+    )
+}
+
+fn is_math_space(node: &MNode, color: Rgb) -> bool {
+    matches!(node, MNode::Run(run) if run.color == Some(color)
+        && run.lit && !run.nor && run.size.is_some()
+        && !run.text.is_empty() && run.text.bytes().all(|byte| byte == b' '))
+}
+
 fn shifted_body(node: &MNode) -> Option<&[MNode]> {
     let MNode::Phant {
         show: true,
@@ -148,10 +181,10 @@ fn shifted_body(node: &MNode) -> Option<&[MNode]> {
     if guide_flags(marker, SHIFT_GUIDE_COLOR) != Some(("H", true, true)) {
         return None;
     }
-    let spaces = e.iter().take_while(|node| {
-        matches!(node, MNode::Run(run) if run.color == Some(GROUP_SPACE_COLOR)
-            && run.lit && !run.nor && run.size.is_some() && run.text.bytes().all(|byte| byte == b' '))
-    }).count();
+    let spaces = e
+        .iter()
+        .take_while(|node| is_math_space(node, GROUP_SPACE_COLOR))
+        .count();
     Some(&e[spaces..])
 }
 

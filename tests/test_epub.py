@@ -8982,6 +8982,88 @@ Trailing
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.convert("docx")
 
+    def test_mathml_negative_padding_reuses_preceding_editable_space(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Editable negative padding</title><style>body {{margin:0}}</style></head>
+          <body><p>Before <m:math mathsize="12pt">{}</m:math> after.</p></body></html>"""
+        prefix = "<m:mtext>Lead</m:mtext>"
+        tail = "<m:mtext>Tail</m:mtext>"
+        gap = '<m:mspace width="18pt"/>'
+        fraction = "<m:mfrac><m:mtext>Upper</m:mtext><m:mtext>Lower</m:mtext></m:mfrac>"
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def boxes(document, terms):
+            with doc_ex.open(document.convert("pdf")) as pdf:
+                result = {}
+                for term in terms:
+                    result[term], = pdf[0].search_for(term)
+                return result
+
+        def projection(body, terms, operator, expected_text=None):
+            with doc_ex.open(epub_fixture(chapter_one=template.format(body))) as book:
+                direct = boxes(book, terms)
+                exported = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                equation, = xml.findall(".//m:oMath", ns)
+                self.assertIsNotNone(equation.find(".//m:" + operator, ns))
+                with doc_ex.open(exported) as word:
+                    text = word[0].get_text()
+                    for term in ("Before", *terms, "after."):
+                        self.assertEqual(text.count(term), 1, text)
+                    self.assertNotIn("⟡H", text)
+                    self.assertNotIn("⟡g", text)
+                    self.assertNotIn("⁢", text)
+                    self.assertNotIn("epub-math-box-", text)
+                    if expected_text is not None:
+                        self.assertEqual(text, expected_text)
+                    return (direct, boxes(word, terms))
+
+        def row(offset, space=gap):
+            return prefix + space + f'<m:mpadded width="72pt" lspace="{offset}" voffset="4pt">' + fraction + "</m:mpadded>" + tail
+
+        terms = ("Lead", "Upper", "Lower", "Tail")
+        control = projection(row("0pt"), terms, "f")
+        for offset in (6.0, 18.0):
+            shifted = projection(row(f"-{offset:g}pt"), terms, "f", "Before LeadUpper/LowerTail after.")
+            for before, after in zip(control, shifted):
+                for label in terms:
+                    expected_shift = -offset if label in ("Upper", "Lower") else 0.0
+                    self.assertAlmostEqual(after[label][0] - before[label][0], expected_shift, delta=0.25)
+                    self.assertAlmostEqual(after[label][1], before[label][1], delta=0.25)
+            for label in terms:
+                for direct, native in zip(shifted[0][label], shifted[1][label]):
+                    self.assertAlmostEqual(direct, native, delta=0.35)
+
+        def superscript(offset):
+            inner = f'<m:mpadded lspace="{offset}"><m:mtext>Nested</m:mtext></m:mpadded>'
+            return "<m:msup><m:mi>x</m:mi><m:mrow>" + prefix + gap + inner + tail + "</m:mrow></m:msup>"
+
+        terms = ("Lead", "Nested", "Tail")
+        regular = projection(superscript("0pt"), terms, "sSup")
+        shifted = projection(superscript("-25%width"), terms, "sSup")
+        for before, after in zip(regular, shifted):
+            nested = before["Nested"]
+            self.assertAlmostEqual(after["Nested"][0] - nested[0], -0.25 * (nested[2] - nested[0]), delta=0.3)
+            for label in ("Lead", "Tail"):
+                for original, actual in zip(before[label], after[label]):
+                    self.assertAlmostEqual(original, actual, delta=0.25)
+
+        aligned = (
+            '<m:mtable groupalign="{left}"><m:mtr><m:mtd><m:maligngroup/>'
+            "<m:mn>1<m:malignmark/>2</m:mn>" + row("-6pt") + "</m:mtd></m:mtr></m:mtable>"
+        )
+        for body, message in (
+            (row("-6pt", ""), "requires preceding math space"),
+            (row("-6pt", '<m:mspace width="4pt"/>'), "requires preceding math space"),
+            (row("-3.8pt", '<m:mspace width="4pt"/>'), "spacing resolution"),
+            (aligned, "alignment carets across negative padding"),
+        ):
+            with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=template.format(body))) as book:
+                self.assertIn("Tail", boxes(book, ("Tail",)))
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                    book.convert("docx")
+
     def test_mathml_signed_vertical_and_overhanging_horizontal_shifts_stay_editable(self) -> None:
         red = '<m:mtext mathcolor="#cf222e">Red</m:mtext>'
         blue = '<m:mtext mathcolor="#1644df">Blue</m:mtext>'

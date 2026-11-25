@@ -30,6 +30,13 @@ pub(super) fn is_box_marker(node: &MNode) -> bool {
     matches!(node, MNode::Run(run) if run.font.as_deref().is_some_and(|font| font.starts_with(BOX_PREFIX)))
 }
 
+fn box_index(node: &MNode) -> Option<usize> {
+    let MNode::Run(run) = node else {
+        return None;
+    };
+    run.font.as_deref()?.strip_prefix(BOX_PREFIX)?.parse().ok()
+}
+
 #[derive(Default)]
 pub(in crate::epub) struct Extras {
     nodes: Vec<Extra>,
@@ -38,7 +45,12 @@ pub(in crate::epub) struct Extras {
 
 #[derive(Default)]
 pub(in crate::epub) struct Editable {
-    boxes: Vec<Cell<Option<MNode>>>,
+    boxes: Vec<Cell<Option<EditableBox>>>,
+}
+
+struct EditableBox {
+    node: MNode,
+    borrow: f32,
 }
 
 pub(super) struct EditableLayout<'a> {
@@ -156,26 +168,30 @@ impl Extras {
             matrix_spacing: OnceCell::new(),
         };
         for extra in self.nodes {
-            let node = match extra {
+            let replacement = match extra {
                 Extra::Table(grid) => {
                     let (mut table, format) = *grid;
                     table.apply_editable(&editable)?;
                     let measured = table.layout_editable(document, &format, &layout.carrier)?;
-                    table.editable_matrix(measured, &layout)?
+                    EditableBox {
+                        node: table.editable_matrix(measured, &layout)?,
+                        borrow: 0.0,
+                    }
                 }
                 Extra::Padded(padding) => padding.editable(&editable, &layout)?,
                 Extra::Space([width, ascent, descent]) => {
                     let mut nodes: Arg = editable_gap(width)?.into_iter().collect();
                     layout.add_extents(&mut nodes, [Some(ascent), Some(descent)])?;
-                    if nodes.is_empty() {
+                    let node = if nodes.is_empty() {
                         MNode::Run(MRun::plain(""))
                     } else {
                         MNode::Boxed { e: nodes }
-                    }
+                    };
+                    EditableBox { node, borrow: 0.0 }
                 }
                 _ => return Err(unsupported("MathML composed geometry in DOCX export")),
             };
-            editable.boxes.push(Cell::new(Some(node)));
+            editable.boxes.push(Cell::new(Some(replacement)));
         }
         Ok(editable)
     }
@@ -258,7 +274,15 @@ impl Extras {
 
 impl Editable {
     pub(in crate::epub) fn apply(&self, math: &mut Math) -> Result<(), EngineError> {
-        let nodes = self.substitute(std::mem::take(&mut math.nodes))?;
+        self.apply_with_carets(math, false)
+    }
+
+    pub(super) fn apply_with_carets(
+        &self,
+        math: &mut Math,
+        preserve_carets: bool,
+    ) -> Result<(), EngineError> {
+        let nodes = self.substitute(std::mem::take(&mut math.nodes), preserve_carets)?;
         let too_deep = Cell::new(false);
         let node_count = Cell::new(0);
         math.nodes = check_editable_bounds(nodes, 0, &too_deep, &node_count);
@@ -275,18 +299,94 @@ impl Editable {
         Ok(())
     }
 
-    fn substitute(&self, body: Arg) -> Result<Arg, EngineError> {
-        let missing = Cell::new(false);
-        let nodes = replace_boxes(body, &|index| {
-            let node = self.boxes.get(index).and_then(Cell::take);
-            missing.set(missing.get() || node.is_none());
-            node
-        });
-        if missing.get() {
-            return Err(invalid("missing editable MathML box"));
+    fn substitute(&self, body: Arg, preserve_carets: bool) -> Result<Arg, EngineError> {
+        let mut result = Vec::with_capacity(body.len());
+        for node in body {
+            if let Some(index) = box_index(&node) {
+                let EditableBox { node, borrow } = self
+                    .boxes
+                    .get(index)
+                    .and_then(Cell::take)
+                    .ok_or_else(|| invalid("missing editable MathML box"))?;
+                if borrow > 0.0 {
+                    if preserve_carets {
+                        return Err(unsupported(
+                            "MathML alignment carets across negative padding in DOCX export",
+                        ));
+                    }
+                    recompose_borrowed_padding(&mut result, node, borrow)?;
+                } else {
+                    result.push(node);
+                }
+                continue;
+            }
+            let error = Cell::new(None);
+            let node = map_args(node, &|arg| match self.substitute(arg, preserve_carets) {
+                Ok(arg) => arg,
+                Err(found) => {
+                    let first = error.take().unwrap_or(found);
+                    error.set(Some(first));
+                    Arg::new()
+                }
+            });
+            if let Some(error) = error.into_inner() {
+                return Err(error);
+            }
+            result.push(node);
         }
-        Ok(nodes)
+        Ok(result)
     }
+}
+
+fn recompose_borrowed_padding(
+    nodes: &mut Arg,
+    node: MNode,
+    borrow: f32,
+) -> Result<(), EngineError> {
+    let unavailable = || {
+        unsupported(
+        "MathML composed geometry with a negative leading offset requires preceding math space in DOCX export",
+    )
+    };
+    let Some(MNode::Run(space)) = nodes.last() else {
+        return Err(unavailable());
+    };
+    let size = space
+        .size
+        .filter(|_| {
+            !space.nor
+                && !space.lit
+                && space.brk.is_none()
+                && !space.text.is_empty()
+                && space.text.bytes().all(|byte| byte == b' ')
+        })
+        .ok_or_else(unavailable)?;
+    let available = size * space.text.len() as f32 * 0.4;
+    let native_units = (size * 2.0).round() * space.text.len() as f32;
+    let borrowed_units = (borrow * 5.0).round();
+    if borrow > available + 0.0001 || borrowed_units > native_units {
+        return Err(unavailable());
+    }
+    if borrowed_units < 2.0 {
+        return Err(unsupported(
+            "MathML negative padding is below the DOCX spacing resolution",
+        ));
+    }
+    let mut contents = negative_padding_spaces((native_units - borrowed_units) / 5.0)?;
+    let MNode::Boxed { e } = node else {
+        return Err(invalid("negative padding lost its editable box"));
+    };
+    contents.extend(e);
+    contents.extend(negative_padding_spaces(borrowed_units / 5.0)?);
+    contents.push(MNode::Run(MRun {
+        color: Some(math_spacing::NEGATIVE_PADDING_SPACE_COLOR),
+        size: Some(1.0),
+        lit: true,
+        ..MRun::plain(math_spacing::NEGATIVE_PADDING_MARKER)
+    }));
+    nodes.pop();
+    nodes.push(MNode::Boxed { e: contents });
+    Ok(())
 }
 
 fn check_editable_bounds(
@@ -426,13 +526,12 @@ impl Padding {
         self,
         editable: &Editable,
         layout: &EditableLayout<'_>,
-    ) -> Result<MNode, EngineError> {
+    ) -> Result<EditableBox, EngineError> {
         let [width, height, depth, left, shift] = self.lengths;
-        let unsupported_padding = || unsupported("MathML composed geometry in DOCX export");
         // Keep native width when adding a fixed horizontal gap. Other dimensions
         // may use any measured extent of the original operand as their basis.
         let additive_width = width.filter(|l| l.basis.is_none() && l.relative && l.value >= 0.0);
-        let body = editable.substitute(self.body)?;
+        let body = editable.substitute(self.body, false)?;
         let need_shift = shift.is_some_and(|length| length.value != 0.0);
         let need_overhang_width = (additive_width.is_some() || zeroed(width, 0) == Some(false))
             && left.is_some_and(|length| {
@@ -474,9 +573,6 @@ impl Padding {
             (None, _) => (false, 0.0),
         };
         let left = left.map_or(0.0, |length| length.resolve(3, original));
-        if left < 0.0 {
-            return Err(unsupported_padding());
-        }
         if !absolute_width && left > advance {
             // Reserve the original advance separately when the leading offset
             // overhangs the width added to the operand.
@@ -484,7 +580,7 @@ impl Padding {
             advance += original[0];
         }
         let shift = shift.map_or(0.0, |length| length.resolve(4, original));
-        if ![left, advance, shift.abs()]
+        if ![left.abs(), advance, shift.abs()]
             .into_iter()
             .all(|value| value <= MAX_GEOMETRY)
         {
@@ -498,10 +594,18 @@ impl Padding {
         });
         if body.is_empty() && vertical.iter().all(|v| v.unwrap_or_default() == 0.0) {
             // An empty visible phantom exposes WordCraft's argument placeholder.
-            return Ok(editable_gap(advance)?.unwrap_or_else(|| MNode::Run(MRun::plain(""))));
+            return Ok(EditableBox {
+                node: editable_gap(advance)?.unwrap_or_else(|| MNode::Run(MRun::plain(""))),
+                borrow: 0.0,
+            });
         }
         let mut contents = Vec::new();
-        let leading = if body.is_empty() { 0.0 } else { left };
+        let borrow = if body.is_empty() {
+            0.0
+        } else {
+            (-left).max(0.0)
+        };
+        let leading = if body.is_empty() { 0.0 } else { left.max(0.0) };
         if !body.is_empty() {
             contents.extend(editable_gap(leading)?);
             contents.extend(body);
@@ -521,13 +625,21 @@ impl Padding {
                 }];
             }
         }
-        contents.extend(editable_gap(if absolute_width {
+        let trailing = if absolute_width {
             advance
         } else {
             advance - leading
-        })?);
+        };
+        if borrow > 0.0 {
+            contents.extend(negative_padding_spaces(trailing)?);
+        } else {
+            contents.extend(editable_gap(trailing)?);
+        }
         layout.add_extents(&mut contents, vertical)?;
-        Ok(MNode::Boxed { e: contents })
+        Ok(EditableBox {
+            node: MNode::Boxed { e: contents },
+            borrow,
+        })
     }
 
     fn layout(
@@ -740,10 +852,18 @@ pub(super) fn group_leading_space(width: f32) -> Result<Arg, EngineError> {
     }
     // Native spaces contribute an advance without becoming an operator's
     // neighbor. Keep the run recognizable inside our generated shift.
-    Ok(editable_gap_runs(width.max(0.4))?
+    tagged_math_spaces(width.max(0.4), math_spacing::GROUP_SPACE_COLOR)
+}
+
+fn negative_padding_spaces(width: f32) -> Result<Arg, EngineError> {
+    tagged_math_spaces(width, math_spacing::NEGATIVE_PADDING_SPACE_COLOR)
+}
+
+fn tagged_math_spaces(width: f32, color: Rgb) -> Result<Arg, EngineError> {
+    Ok(editable_gap_runs(width)?
         .into_iter()
         .map(|mut run| {
-            run.color = Some(math_spacing::GROUP_SPACE_COLOR);
+            run.color = Some(color);
             run.lit = true;
             MNode::Run(run)
         })
@@ -1014,15 +1134,12 @@ impl Measurements {
 fn replace_boxes(nodes: Arg, replacement: &dyn Fn(usize) -> Option<MNode>) -> Arg {
     nodes
         .into_iter()
-        .map(|node| match node {
-            MNode::Run(ref run) => run
-                .font
-                .as_deref()
-                .and_then(|font| font.strip_prefix(BOX_PREFIX))
-                .and_then(|index| index.parse::<usize>().ok())
-                .and_then(replacement)
-                .unwrap_or(node),
-            _ => map_args(node, &|arg| replace_boxes(arg, replacement)),
+        .map(|node| {
+            if let Some(index) = box_index(&node) {
+                replacement(index).unwrap_or(node)
+            } else {
+                map_args(node, &|arg| replace_boxes(arg, replacement))
+            }
         })
         .collect()
 }

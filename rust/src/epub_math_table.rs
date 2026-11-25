@@ -757,7 +757,10 @@ impl Table {
     ) -> Result<(), EngineError> {
         for cell in &mut self.cells {
             match &mut cell.content {
-                CellContent::Equation(math) => editable.apply(math)?,
+                CellContent::Equation(math) => editable.apply_with_carets(
+                    math,
+                    matches!(cell.anchor, Some(Anchor::Marked(..) | Anchor::Decimal(..))),
+                )?,
                 CellContent::Table(table) => table.apply_editable(editable)?,
             }
         }

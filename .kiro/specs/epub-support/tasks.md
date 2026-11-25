@@ -97,7 +97,8 @@
 - [x] Preserve explicit MathML alignment marks on the group baseline and inside its tokens in searchable PDF and editable DOCX.
 - [x] Align the first baseline number in supported compound expressions, including native operators and trailing units, in searchable PDF and editable DOCX.
 - [ ] Extend MathML alignment to multiple groups per cell, marks and decimal points inside nontransparent operands, decimal alignment after composed geometry, right-to-left groups and cross-table scopes.
-- [ ] Extend editable DOCX export to negative leading offsets and expand the remaining MathML visual properties.
+- [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
+- [ ] Expand editable negative leading offsets beyond preceding space and inside caret-aligned groups, and cover remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.
