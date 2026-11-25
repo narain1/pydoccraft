@@ -260,6 +260,7 @@ struct PaintedNode<'tree> {
     sample_geometry: bool,
     shifted_descendants: bool,
     uses_moved_layer: bool,
+    stacked_root: bool,
     // The original subtree renderer already performs its own filter.
     raster_shift: [f32; 2],
     geometry_shift: [f32; 2],
@@ -272,7 +273,18 @@ impl PaintedNode<'_> {
                 .node
                 .abs_layer_bounding_box()
                 .map(|bounds| bounds.to_rect())
-                .map(links::actual_rect);
+                .map(links::actual_rect)
+                .map(|rect| {
+                    // The isolated layer rectangle already describes the
+                    // group's native output, before any enclosing movement.
+                    shifted(
+                        rect,
+                        [
+                            self.raster_shift[0] - self.geometry_shift[0],
+                            self.raster_shift[1] - self.geometry_shift[1],
+                        ],
+                    )
+                });
         }
         let bounds = if stroke {
             self.node.abs_stroke_bounding_box()
@@ -294,6 +306,8 @@ struct PaintFrame<'tree> {
     effects: usize,
     unproven: bool,
     shift: [f32; 2],
+    inside_stack: bool,
+    blocked_stack: bool,
 }
 
 fn visit_painted_svg<'tree>(
@@ -316,6 +330,8 @@ fn visit_painted_svg<'tree>(
         effects: 0,
         unproven: false,
         shift: [0.0; 2],
+        inside_stack: false,
+        blocked_stack: false,
     }];
     while let Some(frame) = stack.last_mut() {
         let Some(node) = frame.children.next() else {
@@ -327,13 +343,15 @@ fn visit_painted_svg<'tree>(
             .map(|capture| capture.status(node))
             .unwrap_or_default();
         let mut unproven = frame.unproven || status.filter == FilterGeometry::Unproven;
+        let mut blocked_stack = frame.blocked_stack;
         let mut paint = PaintedNode {
             node,
             device_parent: frame.device,
             unproven_geometry: false,
             sample_geometry: status.sample_subtree,
-            shifted_descendants: status.moved_subtree && status.filter != FilterGeometry::Moved,
+            shifted_descendants: status.moved_children,
             uses_moved_layer: status.moved_subtree,
+            stacked_root: false,
             raster_shift: frame.shift,
             geometry_shift: frame.shift,
         };
@@ -342,6 +360,15 @@ fn visit_painted_svg<'tree>(
             if group.opacity().get() == 0.0 {
                 continue;
             }
+            // An enclosing isolated layer can also change the translated
+            // source's native crop. Include it in the stack replay when the
+            // output still belongs to only one source.
+            if status.stacked_subtree && group.should_isolate() && !frame.inside_stack {
+                blocked_stack |= !status.one_stack_source;
+                paint.stacked_root = !blocked_stack;
+            }
+            unproven |=
+                blocked_stack && status.moved_children && status.filter == FilterGeometry::Moved;
             let device = frame.device.pre_concat(group.transform());
             if status.filter == FilterGeometry::Moved && !unproven {
                 if let Some([dx, dy]) = geometry.and_then(|geometry| geometry.shift(group, device))
@@ -351,12 +378,14 @@ fn visit_painted_svg<'tree>(
                     unproven = true;
                 }
             }
-            if group.clip_path().is_some()
-                || group.mask().is_some()
-                || matches!(
-                    status.filter,
-                    FilterGeometry::Sample | FilterGeometry::Moved
-                )
+            if !frame.inside_stack
+                && (paint.stacked_root
+                    || group.clip_path().is_some()
+                    || group.mask().is_some()
+                    || matches!(
+                        status.filter,
+                        FilterGeometry::Sample | FilterGeometry::Moved
+                    ))
             {
                 let Some(bounds) = group.abs_layer_bounding_box() else {
                     continue;
@@ -367,6 +396,7 @@ fn visit_painted_svg<'tree>(
                 );
                 effects.push(paint);
             }
+            let inside_stack = frame.inside_stack || paint.stacked_root;
             stack.push(PaintFrame {
                 children: group.children().iter(),
                 clip,
@@ -374,9 +404,12 @@ fn visit_painted_svg<'tree>(
                 effects: effects.len(),
                 unproven,
                 shift: paint.geometry_shift,
+                inside_stack,
+                blocked_stack,
             });
         }
-        paint.unproven_geometry = unproven || status.unproven_subtree;
+        paint.unproven_geometry =
+            unproven || status.unproven_subtree || blocked_stack && status.stacked_subtree;
         visit(paint, clip, &effects)?;
     }
     Ok(())

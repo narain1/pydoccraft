@@ -721,7 +721,11 @@ pub(super) struct GeometryStatus {
     pub(super) unproven_subtree: bool,
     pub(super) sample_subtree: bool,
     pub(super) moved_subtree: bool,
+    pub(super) moved_children: bool,
+    pub(super) stacked_subtree: bool,
+    pub(super) one_stack_source: bool,
     filters_subtree: bool,
+    incompatible_stack: bool,
 }
 
 #[derive(Default)]
@@ -751,17 +755,24 @@ impl CaptureGeometry {
             let (child, additive) = self.analyze(child);
             status.unproven_subtree |= child.unproven_subtree;
             status.sample_subtree |= child.sample_subtree;
-            status.moved_subtree |= child.moved_subtree;
+            status.moved_children |= child.moved_subtree;
+            status.stacked_subtree |= child.stacked_subtree;
             status.filters_subtree |= child.filters_subtree;
+            status.incompatible_stack |= child.incompatible_stack;
             additive_input |= additive;
         }
         let (mut filter, additive) = filter_geometry(group, additive_input);
         let key = std::ptr::from_ref(group);
         if !group.filters().is_empty() {
-            if status.moved_subtree {
-                // Each native filtering layer can use a different raster grid.
+            let axis_aligned = positive_axes(group.abs_transform());
+            let can_stack = status.moved_children
+                && !status.incompatible_stack
+                && axis_aligned
+                && at_most_one_leaf(group, &mut false);
+            if status.moved_children {
                 filter = FilterGeometry::Unproven;
-            } else if filter == FilterGeometry::Unproven && !status.filters_subtree {
+            }
+            if filter == FilterGeometry::Unproven && (!status.filters_subtree || can_stack) {
                 if let [native] = group.filters() {
                     if let Some((offsets, preserves_alpha)) = offset_chain(native) {
                         if preserves_alpha || at_most_one_leaf(group, &mut false) {
@@ -771,12 +782,19 @@ impl CaptureGeometry {
                     }
                 }
             }
+            // Positive axis-aligned layers rebase their children by whole
+            // device pixels. Other layers can remove a rotation/shear from
+            // the next layer's raster grid and cannot compose this way.
+            status.incompatible_stack |= filter != FilterGeometry::Moved || !axis_aligned;
             status.filters_subtree = true;
         }
         status.filter = filter;
         status.unproven_subtree |= filter == FilterGeometry::Unproven;
         status.sample_subtree |= matches!(filter, FilterGeometry::Sample | FilterGeometry::Moved);
-        status.moved_subtree |= filter == FilterGeometry::Moved;
+        status.moved_subtree = status.moved_children || filter == FilterGeometry::Moved;
+        status.stacked_subtree |= status.moved_children && filter == FilterGeometry::Moved;
+        status.one_stack_source =
+            status.stacked_subtree && group.should_isolate() && at_most_one_leaf(group, &mut false);
         if status.unproven_subtree || status.sample_subtree {
             self.groups.insert(key, status);
         }
@@ -838,6 +856,15 @@ impl CaptureGeometry {
             _ => GeometryStatus::default(),
         }
     }
+}
+
+fn positive_axes(transform: Transform) -> bool {
+    transform.kx == 0.0
+        && transform.ky == 0.0
+        && transform.sx.is_finite()
+        && transform.sx > 0.0
+        && transform.sy.is_finite()
+        && transform.sy > 0.0
 }
 
 pub(super) fn geometry_error() -> EngineError {

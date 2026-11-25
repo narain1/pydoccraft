@@ -190,10 +190,23 @@ impl<'tree> Coverage<'tree> {
         let Some(bounds) = Bounds::from_rect(footprint, self.density) else {
             return Ok(None);
         };
-        let leaf = self.ensure_tile(paint)?;
+        // A verified stack has one source. Its top layer already contains
+        // all inner masks, clips and raster crops in their original domain.
+        // Replaying a translated intermediate layer on its own can lose
+        // inputs outside the shifted layer's native viewport bound.
+        let owner = if paint.uses_moved_layer {
+            effects
+                .iter()
+                .find(|effect| effect.stacked_root)
+                .copied()
+                .unwrap_or(paint)
+        } else {
+            paint
+        };
+        let leaf = self.ensure_tile(owner)?;
         let mut ancestors = Vec::new();
         for effect in effects {
-            if std::ptr::eq(effect.node, paint.node) {
+            if std::ptr::eq(effect.node, owner.node) {
                 continue;
             }
             let key = self.ensure_tile(*effect)?;

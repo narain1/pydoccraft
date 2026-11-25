@@ -9068,13 +9068,197 @@ overlay
                             self.assertAlmostEqual(float(x), (153 - dy) * .75, delta=0.25)
                             self.assertAlmostEqual(float(y), (81 - dx) * .75, delta=0.25)
 
-        stacked = svg.replace('<g transform="translate(5 18) scale(2 1)">',
-                              '<g transform="translate(5 18) scale(2 1)" filter="url(#move)">')
+        stacked = svg.replace(
+            '<g transform="translate(5 18) scale(2 1)">',
+            '<g transform="translate(5 18) scale(2 1)" filter="url(#move)">'
+            '<rect x="30" y="8" width="6" height="8" fill="red"/>',
+        )
         with (
             doc_ex.open(publication(stacked, False)) as book,
             self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"),
         ):
             book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+    def test_svg_stacked_axis_offsets_preserve_text_masked_links_and_destinations(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 190 110">
+          <defs>
+            <filter id="outer" filterUnits="userSpaceOnUse" x="-25" y="-30" width="220" height="150">
+              <feOffset dx="7.75" dy="3.75"/>
+            </filter>
+            <filter id="inner" filterUnits="userSpaceOnUse" x="-20" y="-20" width="115" height="100">
+              <feOffset dx="-3.75" dy="6.75" result="shifted"/>
+              <feComponentTransfer><feFuncA type="linear" slope=".8"/></feComponentTransfer>
+            </filter>
+            <clipPath id="text-window"><rect x="3" y="11" width="112" height="52"/></clipPath>
+            <mask id="window" maskUnits="userSpaceOnUse" x="14" y="2" width="35" height="22">
+              <path d="M19 1h20v19H19z" fill="white"/>
+            </mask>
+          </defs>
+          <g clip-path="url(#text-window)">
+            <g transform="translate(10 8)" filter="url(#outer)">
+              <g transform="translate(3 4) scale(2 1)" filter="url(#inner)">
+                <text x="11" y="29" font-size="16">
+                  <a href="https://example.org/word">Café</a>
+                  <tspan x="75">Hidden</tspan>
+                </text>
+              </g>
+            </g>
+          </g>
+          <a href="https://example.org/masked">
+            <g transform="translate(115 74)" id="target" filter="url(#outer)">
+              <g transform="scale(1.5 1)" filter="url(#inner)" mask="url(#window)">
+                <rect x="17" y="0" width="28" height="11" fill="#2458ac"/>
+              </g>
+            </g>
+          </a>
+          <a href="#target"><rect x="144" y="8" width="12" height="10" fill="orange"/></a>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 190, 110)])
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'</manifest>',
+                b'<item id="toc" href="toc.xhtml" properties="nav" media-type="application/xhtml+xml"/></manifest>',
+            )
+        standalone = package.replace(
+            b'href="s0.xhtml" media-type="application/xhtml+xml"',
+            b'href="s0.svg" media-type="image/svg+xml"',
+        )
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Nested</title>
+          <meta name="viewport" content="width=190,height=110"/></head><body style="margin:0">{}</body></html>"""
+        toc = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+          <head><title>Contents</title></head><body><nav epub:type="toc"><ol>
+            <li><a href="{}#target">Masked target</a></li>
+          </ol></nav></body></html>"""
+
+        def publication(markup: str, inline: bool) -> doc_ex.Document:
+            resource = "s0.xhtml" if inline else "s0.svg"
+            return doc_ex.open(rewrite_epub(fixture, {
+                "OEBPS/content.opf": package if inline else standalone,
+                "OEBPS/toc.xhtml": toc.format(resource),
+                "OEBPS/" + resource: template.format(markup) if inline else markup,
+            }))
+
+        def rgba(document: doc_ex.Document, dpi: int) -> tuple[int, bytes]:
+            return rgba_pixels(png_chunks(document.render_page(0, dpi=dpi)))
+
+        for inline in (False, True):
+            for dpi in (96, 144):
+                with self.subTest(inline=inline, dpi=dpi):
+                    density = dpi / 96
+                    outer_x = int(7.75 * density) / density
+                    outer_y = int(3.75 * density) / density
+                    # Keep the inner native filter and its mask in the control.
+                    # Replace only the outer integral device movement.
+                    reference = svg.replace(
+                        ' filter="url(#outer)"', '',
+                    ).replace(
+                        'transform="translate(10 8)"', f'transform="translate({10 + outer_x} {8 + outer_y})"',
+                    ).replace(
+                        'transform="translate(115 74)"', f'transform="translate({115 + outer_x} {74 + outer_y})"',
+                    )
+                    with publication(svg, inline) as book, publication(reference, inline) as expected:
+                        preview = rgba(book, dpi)
+                        self.assertEqual(preview, rgba(expected, dpi))
+                        output = book.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                        control = expected.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                    with doc_ex.open(output) as pdf, doc_ex.open(control) as plain, pdf.edit() as editor:
+                        self.assertEqual(rgba(pdf, dpi), preview)
+                        self.assertEqual(pdf[0].get_text(), "Café")
+                        text, = pdf[0].search_for("Café")
+                        expected_text, = plain[0].search_for("Café")
+                        for actual, expected in zip(text, expected_text):
+                            self.assertAlmostEqual(actual, expected, delta=0.01)
+                        external = {link.uri: link.bbox for link in pdf[0].get_links() if (link.uri or "").startswith("https:")}
+                        expected_external = {link.uri: link.bbox for link in plain[0].get_links() if (link.uri or "").startswith("https:")}
+                        self.assertEqual(set(external), {"https://example.org/word", "https://example.org/masked"})
+                        self.assertEqual(set(external), set(expected_external))
+                        for uri, bbox in external.items():
+                            for actual, expected in zip(bbox, expected_external[uri]):
+                                self.assertAlmostEqual(actual, expected, delta=0.01)
+                        masked = external["https://example.org/masked"]
+                        local, = [link for link in pdf[0].get_links() if link.metadata.get("target_page") is not None]
+                        self.assertEqual(local.metadata["target_page"], 0)
+                        self.assertEqual([(entry.title, entry.page) for entry in editor.bookmarks], [("Masked target", 0)])
+                        destinations = re.findall(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
+                                                  editor.to_bytes(object_streams=False))
+                        self.assertEqual(len(destinations), 2)
+                        for x, y in destinations:
+                            self.assertAlmostEqual(float(x), masked[0], delta=0.01)
+                            self.assertAlmostEqual(float(y), 82.5 - masked[1], delta=0.01)
+
+        rotated = svg.replace('translate(3 4) scale(2 1)', 'translate(3 4) rotate(10) scale(2 1)')
+        uncertain = svg.replace('<feOffset dx="7.75" dy="3.75"/>',
+                                '<feOffset dx="7.75" dy="3.75"/><feGaussianBlur stdDeviation="1"/>')
+        for markup in (rotated, uncertain):
+            with (
+                self.subTest(markup=markup),
+                publication(markup, False) as book,
+                self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"),
+            ):
+                book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+    def test_svg_stacked_offsets_keep_source_outside_standalone_layer_limits(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+          <defs>
+            <filter id="inner" filterUnits="userSpaceOnUse" x="-195" y="0" width="305" height="50">
+              <feOffset dx="230"/>
+            </filter>
+            <filter id="outer" filterUnits="userSpaceOnUse" x="-195" y="0" width="305" height="50">
+              <feOffset dx="-40"/>
+            </filter>
+          </defs>
+          <g filter="url(#outer)"><g filter="url(#inner)" id="moved">
+            <text x="-170" y="36" font-size="16"><a href="https://example.org/moved">Café</a></text>
+          </g></g>
+          <a href="#moved"><rect x="78" y="6" width="10" height="8" fill="blue"/></a>
+        </svg>"""
+
+        def publication(markup: str) -> doc_ex.Document:
+            source = doc_ex.EpubSvgChapterSource("Shifted", markup, "OEBPS/Art/shifted.svg")
+            with doc_ex.open(epub_fixture()) as original:
+                return doc_ex.open(original.edit_epub_structure([source, 0]))
+
+        control = svg.replace('filter="url(#outer)"', '').replace('filter="url(#inner)"', '')
+        control = control.replace('x="-170"', 'x="20"')
+        with publication(svg) as book, publication(control) as reference:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            self.assertEqual(preview, rgba_pixels(png_chunks(reference.render_page(0, dpi=96))))
+            output = book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+        with doc_ex.open(output) as pdf, pdf.edit() as editor:
+            self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+            self.assertEqual(pdf[0].get_text(), "Café")
+            selected, = pdf[0].search_for("Café")
+            self.assertLess(selected[0], 17)
+            external, = [link for link in pdf[0].get_links() if link.uri == "https://example.org/moved"]
+            self.assertLess(external.bbox[0], 17)
+            local, = [link for link in pdf[0].get_links() if link.metadata.get("target_page") is not None]
+            self.assertEqual(local.metadata["target_page"], 0)
+            destination, = re.findall(rb"/XYZ\s+([1-9][0-9.]*)\s+([0-9.]+)\s+null",
+                                      editor.to_bytes(object_streams=False))
+            self.assertLess(float(destination[0]), 17)
+
+        # The enclosing opacity changes the renderer's native cropping domain.
+        # The standalone inner replay would still see ink that is absent here.
+        hidden = svg.replace('x="-195" y="0" width="305"', 'x="-250" y="0" width="365"')
+        hidden = hidden.replace('dx="230"', 'dx="303"').replace('dx="-40"', 'dx="-38"')
+        hidden = hidden.replace('x="-170"', 'x="-245"').replace(
+            '<g filter="url(#outer)">', '<g opacity=".8"><g filter="url(#outer)">',
+        ).replace('</g></g>', '</g></g></g>')
+        with publication(hidden) as book:
+            width, pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            self.assertEqual(width, 100)
+            self.assertTrue(all(min(pixels[i:i + 3]) > 240 or pixels[i + 3] == 0
+                                for i in range(4 * width * 19, len(pixels), 4)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)) as pdf:
+                self.assertEqual(pdf[0].get_text(), "")
+                self.assertFalse(pdf[0].get_links())
+
+        ambiguous = hidden.replace('<g opacity=".8">', '<g opacity=".8"><rect width="8" height="8"/>')
+        with (
+            publication(ambiguous) as book,
+            self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"),
+        ):
+            book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
 
     def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
         def svg(primitives: str, attrs: str = "", rect: str = "") -> str:
