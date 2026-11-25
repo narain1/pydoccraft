@@ -10,6 +10,10 @@ use crate::{
     EngineError,
 };
 
+#[path = "epub_svg_morphology.rs"]
+mod morphology;
+pub(super) use morphology::normalize as normalize_morphology;
+
 #[path = "epub_svg_transfer.rs"]
 mod transfer;
 pub(in crate::epub) use transfer::is_channel as is_transfer_channel;
@@ -40,6 +44,7 @@ pub(in crate::epub) fn is_filter_primitive(tag: &str) -> bool {
             | "feMerge"
             | "feBlend"
             | "feComponentTransfer"
+            | "feMorphology"
     )
 }
 
@@ -290,6 +295,7 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
         "feColorMatrix" => return validate_color_matrix(node),
         "feComposite" => return validate_composite(node),
         "feComponentTransfer" => return transfer::validate_channels(node),
+        "feMorphology" => return morphology::validate(node),
         "feBlend" => {
             if !matches!(
                 node.attribute("mode").unwrap_or("normal"),
@@ -596,6 +602,16 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                     within_source: input.within_source && alpha.keeps_transparency,
                 }
             }
+            Kind::Morphology(morphology) => {
+                let input = get(morphology.input());
+                match morphology.operator() {
+                    usvg::filter::MorphologyOperator::Erode => Support::subset(input.within_source),
+                    usvg::filter::MorphologyOperator::Dilate => Support {
+                        retains_source: input.retains_source,
+                        within_source: false,
+                    },
+                }
+            }
             Kind::Composite(composite) => {
                 let (first, second) = (get(composite.input1()), get(composite.input2()));
                 match composite.operator() {
@@ -662,6 +678,12 @@ fn offset_chain(filter: &usvg::filter::Filter) -> Option<(Vec<[f32; 2]>, bool)> 
                 preserves_alpha &= alpha.retains_ink;
                 transfer.input()
             }
+            Kind::Morphology(morphology)
+                if morphology.operator() == usvg::filter::MorphologyOperator::Erode =>
+            {
+                preserves_alpha = false;
+                morphology.input()
+            }
             Kind::GaussianBlur(blur)
                 if blur.std_dev_x().get() == 0.0 && blur.std_dev_y().get() == 0.0 =>
             {
@@ -722,8 +744,9 @@ pub(super) struct GeometryStatus {
     pub(super) sample_subtree: bool,
     pub(super) moved_subtree: bool,
     pub(super) moved_children: bool,
-    pub(super) stacked_subtree: bool,
-    pub(super) one_stack_source: bool,
+    pub(super) needs_context: bool,
+    pub(super) context_subtree: bool,
+    pub(super) one_context_source: bool,
     filters_subtree: bool,
     incompatible_stack: bool,
 }
@@ -756,7 +779,7 @@ impl CaptureGeometry {
             status.unproven_subtree |= child.unproven_subtree;
             status.sample_subtree |= child.sample_subtree;
             status.moved_children |= child.moved_subtree;
-            status.stacked_subtree |= child.stacked_subtree;
+            status.context_subtree |= child.context_subtree;
             status.filters_subtree |= child.filters_subtree;
             status.incompatible_stack |= child.incompatible_stack;
             additive_input |= additive;
@@ -765,17 +788,34 @@ impl CaptureGeometry {
         let key = std::ptr::from_ref(group);
         if !group.filters().is_empty() {
             let axis_aligned = positive_axes(group.abs_transform());
+            let erosion = group
+                .filters()
+                .iter()
+                .flat_map(|filter| filter.primitives())
+                .any(|primitive| {
+                    matches!(
+                        primitive.kind(),
+                        usvg::filter::Kind::Morphology(value)
+                            if value.operator() == usvg::filter::MorphologyOperator::Erode
+                    )
+                });
             let can_stack = status.moved_children
                 && !status.incompatible_stack
                 && axis_aligned
                 && at_most_one_leaf(group, &mut false);
-            if status.moved_children {
+            if status.moved_children
+                || status.context_subtree
+                || (erosion && !axis_aligned) && filter == FilterGeometry::Sample
+            {
                 filter = FilterGeometry::Unproven;
             }
-            if filter == FilterGeometry::Unproven && (!status.filters_subtree || can_stack) {
+            if filter == FilterGeometry::Unproven
+                && (!status.filters_subtree || can_stack)
+                && (!erosion || axis_aligned)
+            {
                 if let [native] = group.filters() {
                     if let Some((offsets, preserves_alpha)) = offset_chain(native) {
-                        if preserves_alpha || at_most_one_leaf(group, &mut false) {
+                        if preserves_alpha || can_stack || at_most_one_leaf(group, &mut false) {
                             self.moves.insert(key, offsets);
                             filter = FilterGeometry::Moved;
                         }
@@ -787,14 +827,16 @@ impl CaptureGeometry {
             // the next layer's raster grid and cannot compose this way.
             status.incompatible_stack |= filter != FilterGeometry::Moved || !axis_aligned;
             status.filters_subtree = true;
+            status.needs_context = (status.moved_children && filter == FilterGeometry::Moved)
+                || erosion && matches!(filter, FilterGeometry::Sample | FilterGeometry::Moved);
         }
         status.filter = filter;
         status.unproven_subtree |= filter == FilterGeometry::Unproven;
         status.sample_subtree |= matches!(filter, FilterGeometry::Sample | FilterGeometry::Moved);
         status.moved_subtree = status.moved_children || filter == FilterGeometry::Moved;
-        status.stacked_subtree |= status.moved_children && filter == FilterGeometry::Moved;
-        status.one_stack_source =
-            status.stacked_subtree && group.should_isolate() && at_most_one_leaf(group, &mut false);
+        status.context_subtree |= status.needs_context;
+        status.one_context_source =
+            status.context_subtree && group.should_isolate() && at_most_one_leaf(group, &mut false);
         if status.unproven_subtree || status.sample_subtree {
             self.groups.insert(key, status);
         }
@@ -946,6 +988,16 @@ fn measure_group(
                     usvg::filter::Kind::Composite(_) | usvg::filter::Kind::Blend(_) => 12,
                     usvg::filter::Kind::ComponentTransfer(transfer) => transfer::work(transfer),
                     usvg::filter::Kind::Merge(merge) => 4 + 5 * merge.inputs().len(),
+                    usvg::filter::Kind::Morphology(morphology) => morphology::work(
+                        [
+                            morphology.radius_x().get() * sx,
+                            morphology.radius_y().get() * sy,
+                        ],
+                        [
+                            width.ceil().max(1.0) as usize,
+                            height.ceil().max(1.0) as usize,
+                        ],
+                    )?,
                     _ => return Err(unsupported("unsupported SVG filter primitive")),
                 };
                 charge_work(pixels, area, passes)?;

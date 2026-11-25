@@ -1104,6 +1104,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if filter_primitive && matches!(key, "in" | "result") => true,
                 None if tag == "feMergeNode" && key == "in" => true,
                 None if tag == "feBlend" && matches!(key, "in2" | "mode") => true,
+                None if tag == "feMorphology" && matches!(key, "operator" | "radius") => true,
                 None if transfer_channel
                     && matches!(
                         key,

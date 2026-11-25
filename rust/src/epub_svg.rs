@@ -259,8 +259,8 @@ struct PaintedNode<'tree> {
     unproven_geometry: bool,
     sample_geometry: bool,
     shifted_descendants: bool,
-    uses_moved_layer: bool,
-    stacked_root: bool,
+    uses_full_viewport: bool,
+    context_root: bool,
     // The original subtree renderer already performs its own filter.
     raster_shift: [f32; 2],
     geometry_shift: [f32; 2],
@@ -306,8 +306,8 @@ struct PaintFrame<'tree> {
     effects: usize,
     unproven: bool,
     shift: [f32; 2],
-    inside_stack: bool,
-    blocked_stack: bool,
+    inside_context: bool,
+    blocked_context: bool,
 }
 
 fn visit_painted_svg<'tree>(
@@ -330,8 +330,8 @@ fn visit_painted_svg<'tree>(
         effects: 0,
         unproven: false,
         shift: [0.0; 2],
-        inside_stack: false,
-        blocked_stack: false,
+        inside_context: false,
+        blocked_context: false,
     }];
     while let Some(frame) = stack.last_mut() {
         let Some(node) = frame.children.next() else {
@@ -343,15 +343,15 @@ fn visit_painted_svg<'tree>(
             .map(|capture| capture.status(node))
             .unwrap_or_default();
         let mut unproven = frame.unproven || status.filter == FilterGeometry::Unproven;
-        let mut blocked_stack = frame.blocked_stack;
+        let mut blocked_context = frame.blocked_context;
         let mut paint = PaintedNode {
             node,
             device_parent: frame.device,
             unproven_geometry: false,
             sample_geometry: status.sample_subtree,
             shifted_descendants: status.moved_children,
-            uses_moved_layer: status.moved_subtree,
-            stacked_root: false,
+            uses_full_viewport: status.moved_subtree || status.context_subtree,
+            context_root: false,
             raster_shift: frame.shift,
             geometry_shift: frame.shift,
         };
@@ -360,15 +360,13 @@ fn visit_painted_svg<'tree>(
             if group.opacity().get() == 0.0 {
                 continue;
             }
-            // An enclosing isolated layer can also change the translated
-            // source's native crop. Include it in the stack replay when the
-            // output still belongs to only one source.
-            if status.stacked_subtree && group.should_isolate() && !frame.inside_stack {
-                blocked_stack |= !status.one_stack_source;
-                paint.stacked_root = !blocked_stack;
+            // An enclosing isolated layer can change the native crop.
+            // Replay it when the output still belongs to one measured source.
+            if status.context_subtree && group.should_isolate() && !frame.inside_context {
+                blocked_context |= !status.one_context_source;
+                paint.context_root = !blocked_context;
             }
-            unproven |=
-                blocked_stack && status.moved_children && status.filter == FilterGeometry::Moved;
+            unproven |= blocked_context && status.needs_context;
             let device = frame.device.pre_concat(group.transform());
             if status.filter == FilterGeometry::Moved && !unproven {
                 if let Some([dx, dy]) = geometry.and_then(|geometry| geometry.shift(group, device))
@@ -378,8 +376,8 @@ fn visit_painted_svg<'tree>(
                     unproven = true;
                 }
             }
-            if !frame.inside_stack
-                && (paint.stacked_root
+            if !frame.inside_context
+                && (paint.context_root
                     || group.clip_path().is_some()
                     || group.mask().is_some()
                     || matches!(
@@ -396,7 +394,7 @@ fn visit_painted_svg<'tree>(
                 );
                 effects.push(paint);
             }
-            let inside_stack = frame.inside_stack || paint.stacked_root;
+            let inside_context = frame.inside_context || paint.context_root;
             stack.push(PaintFrame {
                 children: group.children().iter(),
                 clip,
@@ -404,12 +402,12 @@ fn visit_painted_svg<'tree>(
                 effects: effects.len(),
                 unproven,
                 shift: paint.geometry_shift,
-                inside_stack,
-                blocked_stack,
+                inside_context,
+                blocked_context,
             });
         }
         paint.unproven_geometry =
-            unproven || status.unproven_subtree || blocked_stack && status.stacked_subtree;
+            unproven || status.unproven_subtree || blocked_context && status.context_subtree;
         visit(paint, clip, &effects)?;
     }
     Ok(())
@@ -581,6 +579,14 @@ fn parse(
         } else {
             (styled, use_fonts::Aliases::new())
         };
+    let styled = if root
+        .descendants()
+        .any(|node| node.has_tag_name((NS, "feMorphology")))
+    {
+        effects::normalize_morphology(styled)?
+    } else {
+        styled
+    };
     let fonts = if has_text {
         Some(svg_fonts::Resolver::install(
             &mut options,

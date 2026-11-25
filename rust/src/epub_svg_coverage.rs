@@ -190,14 +190,12 @@ impl<'tree> Coverage<'tree> {
         let Some(bounds) = Bounds::from_rect(footprint, self.density) else {
             return Ok(None);
         };
-        // A verified stack has one source. Its top layer already contains
-        // all inner masks, clips and raster crops in their original domain.
-        // Replaying a translated intermediate layer on its own can lose
-        // inputs outside the shifted layer's native viewport bound.
-        let owner = if paint.uses_moved_layer {
+        // Replay one source with its original isolated context. Cropping
+        // an intermediate layer can change translated or neighboring pixels.
+        let owner = if paint.uses_full_viewport {
             effects
                 .iter()
-                .find(|effect| effect.stacked_root)
+                .find(|effect| effect.context_root)
                 .copied()
                 .unwrap_or(paint)
         } else {
@@ -276,10 +274,9 @@ impl<'tree> Coverage<'tree> {
                 bbox.height() + 2.0 * padding[1],
             ),
         );
-        let bounds = if paint.uses_moved_layer {
-            // Native filters can read source pixels outside the destination
-            // tile before moving them on-screen. Keep the same native clip
-            // domain as the full viewport when replaying a translated layer.
+        let bounds = if paint.uses_full_viewport {
+            // Spatial filters can read source pixels outside this tile.
+            // Preserve the renderer's viewport when replaying their layers.
             Bounds {
                 left: 0,
                 top: 0,

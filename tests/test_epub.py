@@ -10084,6 +10084,143 @@ overlay
         ):
             book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
 
+    def test_svg_morphology_surfaces_and_pdf_source_geometry(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="http://www.w3.org/2000/svg"
+                    viewBox="0 0 176 98">
+          <defs>
+            <filter id="erode" filterUnits="userSpaceOnUse" x="4" y="4" width="42" height="34" color-interpolation-filters="sRGB">
+              <feMorphology radius="2, 3"/>
+            </filter>
+            <filter id="dilate" filterUnits="userSpaceOnUse" x="50" y="4" width="45" height="34" color-interpolation-filters="sRGB">
+              <feMorphology operator="dilate" in="SourceAlpha" radius="2 3"/>
+            </filter>
+            <filter id="pass" filterUnits="userSpaceOnUse" x="100" y="4" width="48" height="34" color-interpolation-filters="sRGB">
+              <s:feMorphology operator="dilate" radius="0 8" result="source"></s:feMorphology>
+              <feOffset in="source" dx="4"/>
+            </filter>
+            <filter id="caption" filterUnits="userSpaceOnUse" x="0" y="38" width="174" height="56" color-interpolation-filters="sRGB">
+              <feMorphology radius="1" result="ink"/>
+              <feOffset in="ink" dx="6" dy="2"/>
+            </filter>
+          </defs>
+          <a href="https://example.org/eroded"><g filter="url(#erode)" id="marker">
+            <rect x="10" y="14" width="20" height="16" fill="#a04020"/>
+          </g></a>
+          <a href="https://example.org/dilated"><g filter="url(#dilate)">
+            <rect x="63" y="14" width="20" height="16" fill="olive"/>
+          </g></a>
+          <g filter="url(#pass)"><rect x="110" y="14" width="20" height="16" fill="#2050aa"/></g>
+          <g opacity=".8"><g filter="url(#caption)"><text x="5" y="75" font-weight="900" font-size="34">
+            <a href="https://example.org/gone" style="font-size:1px">Gone</a>
+            <a href="https://example.org/visible" x="76">Café</a>
+          </text></g></g>
+          <a href="#marker"><rect x="155" y="11" width="12" height="8" fill="green"/></a>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 176, 98)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Morphology</title>
+          <meta name="viewport" content="width=176,height=98"/></head><body style="margin:0">{}</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+
+        def open_book(markup: str, inline: bool) -> doc_ex.Document:
+            members = ({"OEBPS/s0.xhtml": template.format(markup)} if inline else
+                       {"OEBPS/content.opf": package, "OEBPS/s0.svg": markup})
+            return doc_ex.open(rewrite_epub(fixture, members))
+
+        def rgba(document: doc_ex.Document) -> tuple[int, bytes]:
+            return rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+
+        control = svg.replace('filter="url(#dilate)"', '').replace('filter="url(#caption)"', '')
+        for inline in (False, True):
+            with self.subTest(inline=inline), open_book(svg, inline) as book, open_book(control, inline) as plain:
+                width, pixels = preview = rgba(book)
+
+                def pixel(x: int, y: int) -> tuple[int, ...]:
+                    start = 4 * (y * width + x)
+                    return tuple(pixels[start:start + 4])
+
+                for x, y in ((10, 22), (12, 16), (60, 20), (113, 20), (134, 20)):
+                    sample = pixel(x, y)
+                    self.assertTrue(sample[3] == 0 or sample[:3] == (255, 255, 255), sample)
+                self.assertEqual(pixel(12, 17), (160, 64, 32, 255))
+                self.assertEqual(pixel(61, 11), (0, 0, 0, 255))
+                self.assertEqual(pixel(114, 20), (32, 80, 170, 255))
+                for attributes in ('radius="-1, 8"', 'radius="0"', ''):
+                    with open_book(svg.replace('radius="0 8"', attributes), inline) as disabled:
+                        self.assertEqual(rgba(disabled), preview)
+
+                output = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                baseline = plain.export_epub_fixed_pdf(dpi=96, searchable=True)
+                with doc_ex.open(output) as pdf, doc_ex.open(baseline) as expected, pdf.edit() as edit:
+                    self.assertEqual(rgba(pdf), preview)
+                    self.assertEqual(pdf[0].get_text(), "Café")
+                    result, = pdf[0].search_for("Café")
+                    source, = expected[0].search_for("Café")
+                    # Erosion can trim the moved glyph bounds but cannot grow
+                    # them beyond the original source shifted by the offset.
+                    self.assertGreaterEqual(result[0] + .1, source[0] + 4.5)
+                    self.assertLessEqual(result[2], source[2] + 4.6)
+                    links = {link.uri: link.bbox for link in pdf[0].get_links() if (link.uri or "").startswith("https:")}
+                    baseline_links = {link.uri: link.bbox for link in expected[0].get_links() if (link.uri or "").startswith("https:")}
+                    self.assertEqual(set(links), {"https://example.org/eroded", "https://example.org/dilated", "https://example.org/visible"})
+                    self.assertEqual(tuple(links["https://example.org/dilated"]), tuple(baseline_links["https://example.org/dilated"]))
+                    for actual, projected in zip(links["https://example.org/eroded"], (9, 12.75, 21, 20.25)):
+                        self.assertAlmostEqual(actual, projected, delta=0.01)
+                    local, = [link for link in pdf[0].get_links() if link.metadata.get("target_page") is not None]
+                    self.assertEqual(local.metadata["target_page"], 0)
+                    target, = re.findall(rb"/XYZ[ ]+([1-9][0-9.]*)[ ]+([0-9.]+)[ ]+null",
+                                         edit.to_bytes(object_streams=False))
+                    self.assertAlmostEqual(float(target[0]), 9)
+                    self.assertAlmostEqual(float(target[1]), 98 * .75 - 12.75)
+
+        uncertain = (
+            svg.replace('<g filter="url(#caption)">', '<g filter="url(#caption)" transform="rotate(6)">'),
+            svg.replace('<g filter="url(#caption)">',
+                        '<g filter="url(#caption)"><rect x="20" y="60" width="6" height="8"/>'),
+        )
+        for markup in uncertain:
+            with open_book(markup, False) as book:
+                rgba(book)
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                    book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+    def test_svg_morphology_validates_radii_dependencies_and_device_work(self) -> None:
+        def svg(value: str, *, transform: str = "", region: str = "", units: str = "") -> str:
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+              <defs><filter id="fx" {region} {units}>{value}</filter></defs>
+              <rect width="24" height="18" {transform} filter="url(#fx)"/></svg>"""
+
+        bad = (
+            ('<feMorphology operator="other" radius="2"/>', "", doc_ex.UnsupportedFormatError, "morphology operator"),
+            ('<feMorphology radius="NaN"/>', "", doc_ex.MalformedDocumentError, "morphology radius"),
+            ('<feMorphology radius="1,,2"/>', "", doc_ex.MalformedDocumentError, "morphology radius"),
+            ('<feMorphology radius="1 2 3"/>', "", doc_ex.MalformedDocumentError, "morphology radius"),
+            ('<feMorphology radius="65"/>', "", doc_ex.UnsafeArchiveError, "radius exceeds 64"),
+            ('<feMorphology radius="2"/>', 'primitiveUnits="objectBoundingBox"',
+             doc_ex.UnsafeArchiveError, "objectBoundingBox radius"),
+            ('<feMorphology in="later" radius="1"/><feFlood result="later"/>', "",
+             doc_ex.MalformedDocumentError, "prior named result"),
+        )
+        with doc_ex.open(epub_fixture()) as original:
+            for markup, units, error, reason in bad:
+                with self.subTest(markup=markup), self.assertRaisesRegex(error, reason):
+                    original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Morphology", svg(markup, units=units)), 0])
+            scaled = original.edit_epub_structure([
+                doc_ex.EpubSvgChapterSource("Morphology", svg('<feMorphology radius="2"/>', transform='transform="scale(40)"')), 0,
+            ])
+            costly = original.edit_epub_structure([
+                doc_ex.EpubSvgChapterSource("Morphology", svg(
+                    '<feMorphology radius="14 16"/>',
+                    region='filterUnits="userSpaceOnUse" width="320" height="240"',
+                )), 0,
+            ])
+        for data, reason in ((scaled, "device budget after scaling"), (costly, "filter work exceeds")):
+            with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, reason):
+                book.render_page(0, dpi=96)
+
     def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
         def svg(primitives: str, attrs: str = "", rect: str = "") -> str:
             return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 48">
