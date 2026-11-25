@@ -35,6 +35,7 @@ const SPREAD: &[(&str, &str)] = &[
 
 pub(super) struct Item {
     pub linear: bool,
+    pub became_auxiliary: bool,
     pub markup: Option<String>,
     pub fixed: Option<bool>,
 }
@@ -112,6 +113,7 @@ pub(super) fn stage(
                 index,
                 Item {
                     linear: linear.unwrap_or(current_linear),
+                    became_auxiliary: current_linear && *linear == Some(false),
                     markup,
                     fixed: layout.as_deref().map(|layout| {
                         layout == "pre-paginated" || (layout == "inherit" && package_fixed)

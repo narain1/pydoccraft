@@ -20,6 +20,8 @@ use crate::{
     EngineError,
 };
 
+#[path = "epub_auxiliary.rs"]
+mod auxiliary;
 #[path = "epub_overlay_edit.rs"]
 mod narration;
 #[path = "epub_resource_removal.rs"]
@@ -294,6 +296,7 @@ pub(crate) fn update_structure<'a>(
         plan.files.insert(path.clone(), Cow::Borrowed(data));
     }
     let mut check_layout = Vec::new();
+    let mut check_auxiliary = Vec::new();
     let mut reordered_ncx = None;
     if let Some((order, original)) = order.zip(original.as_ref()) {
         if references.len() != original.pages.len() {
@@ -317,6 +320,9 @@ pub(crate) fn update_structure<'a>(
                     );
                     if properties.is_some_and(|properties| properties.fixed.is_some()) {
                         check_layout.push(selected.len());
+                    }
+                    if properties.is_some_and(|properties| properties.became_auxiliary) {
+                        check_auxiliary.push(selected.len());
                     }
                     let page = &original.pages[index];
                     let path = page
@@ -348,6 +354,9 @@ pub(crate) fn update_structure<'a>(
                 }
                 (None, Some((label, source, path, fixed, svg, linear))) => {
                     has_linear |= *linear;
+                    if !linear {
+                        check_auxiliary.push(selected.len());
+                    }
                     validate_text(label, 1024, "chapter title")?;
                     if label.trim().is_empty() {
                         return Err(argument("EPUB chapter title is empty"));
@@ -541,6 +550,9 @@ pub(crate) fn update_structure<'a>(
         for (index, properties) in staged_properties {
             if properties.fixed.is_some() {
                 check_layout.push(index);
+            }
+            if properties.became_auxiliary {
+                check_auxiliary.push(index);
             }
             if let Some(markup) = properties.markup {
                 edits.push((references[index].range(), markup));
@@ -869,6 +881,9 @@ pub(crate) fn update_structure<'a>(
             authored_ncx.map(|(path, _, _)| path.as_str()),
             &supplemental,
         )?;
+    }
+    if epub3 && !check_auxiliary.is_empty() {
+        auxiliary::validate(&updated, &extracted, &check_auxiliary)?;
     }
     svg_chapters.sort_unstable();
     svg_chapters.dedup();

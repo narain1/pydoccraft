@@ -339,6 +339,90 @@ class EpubTests(unittest.TestCase):
             self.assertFalse(book[0].metadata["linear"])
             self.assertTrue(book[1].metadata["linear"])
 
+    def test_new_auxiliary_chapter_requires_reachable_staged_links(self) -> None:
+        source = epub_fixture()
+        prop = doc_ex.EpubSpineProperties(linear=False)
+        html = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title></head><body>{}</body></html>'
+        apply = {1: prop}
+        with doc_ex.open(source) as book:
+            with self.assertRaisesRegex(ValueError, 'two.xhtml.*no reachable local link'):
+                book.edit_epub_structure(spine_properties=apply)
+            first = html.format('<a href="two.xhtml#caf%C3%A9">Show the note</a>')
+            with self.assertRaisesRegex(ValueError, 'two.xhtml.*no reachable local link'):
+                book.edit_epub_structure(replacements={0: first}, spine_properties=apply)
+            second = html.format('<p xml:id="café">The note</p>')
+            revised = book.edit_epub_structure(
+                replacements={0: first, 1: second}, spine_properties=apply,
+            )
+            self.assertTrue(book[1].metadata["linear"])
+            self.assertEqual(book.edit_epub_structure(), source)
+        with doc_ex.open(revised) as book:
+            self.assertFalse(book[1].metadata["linear"])
+            self.assertEqual(book[0].get_links()[0].metadata["target_fragment"], "café")
+            self.assertEqual(book[1].get_text(), "The note")
+
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        fallback = package.replace(
+            b"</manifest>",
+            b'<item id="foreign" href="foreign.bin" media-type="application/vnd.example.chapter" fallback="two"/></manifest>',
+        ).replace(b'<itemref idref="two"/>', b'<itemref idref="foreign"/>')
+        with doc_ex.open(rewrite_epub(source, {
+            "OEBPS/content.opf": fallback,
+            "OEBPS/foreign.bin": b"Foreign source",
+            "OEBPS/one.xhtml": html.format('<a href="foreign.bin">Open fallback chapter</a>'),
+        })) as book:
+            revised = book.edit_epub_structure(spine_properties=apply)
+        with doc_ex.open(revised) as book:
+            self.assertFalse(book[1].metadata["linear"])
+            self.assertEqual(book[1].metadata["chapter_path"], "OEBPS/two.xhtml")
+
+        guided = package.replace(
+            b"</package>", b'<guide><reference type="notes" href="two.xhtml"/></guide></package>',
+        )
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/content.opf": guided})) as book:
+            revised = book.edit_epub_structure(spine_properties=apply)
+        with doc_ex.open(revised) as book:
+            self.assertFalse(book[1].metadata["linear"])
+
+    def test_auxiliary_access_resolves_transitive_links_and_frame_sources(self) -> None:
+        source = epub_fixture()
+        package_path = "OEBPS/content.opf"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read(package_path)
+        package = package.replace(
+            b"</manifest>",
+            b'<item id="three" href="three.xhtml" media-type="application/xhtml+xml"/></manifest>',
+        ).replace(b"</spine>", b'<itemref idref="three"/></spine>')
+        html = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title></head><body>{}</body></html>'
+        source = rewrite_epub(source, {
+            package_path: package,
+            "OEBPS/two.xhtml": html.format('<a href="three.xhtml#note">Next</a>'),
+            "OEBPS/three.xhtml": html.format('<p id="note">Note</p><a href="two.xhtml">Back</a>'),
+        })
+        prop = doc_ex.EpubSpineProperties(linear=False)
+        with doc_ex.open(source) as book:
+            with self.assertRaisesRegex(ValueError, "no reachable local link"):
+                book.edit_epub_structure(spine_properties={1: prop, 2: prop})
+            with self.assertRaisesRegex(ValueError, "no reachable local link"):
+                book.edit_epub_structure(
+                    replacements={
+                        0: html.format('<iframe src="two.xhtml" title="Embedded"/>'),
+                        2: html.format('<p id="note">Note</p>'),
+                    },
+                    spine_properties={1: prop, 2: prop},
+                )
+            revised = book.edit_epub_structure(
+                replacements={0: html.format('<iframe src="Index/frame.xhtml" title="Index"/>')},
+                resources={"OEBPS/Index/frame.xhtml": doc_ex.EpubResource(
+                    "application/xhtml+xml", html.format('<a href="../two.xhtml">View the notes</a>').encode(),
+                )},
+                spine_properties={1: prop, 2: prop},
+            )
+        with doc_ex.open(revised) as book:
+            self.assertEqual([page.metadata["linear"] for page in book], [True, False, False])
+            self.assertEqual(book[2].get_links()[0].metadata["target_path"], "OEBPS/two.xhtml")
+
     def test_resource_removal_checks_the_combined_edited_archive(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
           <link rel="stylesheet" href="Styles/chapter.css"/></head><body><p>Retained chapter</p></body></html>"""

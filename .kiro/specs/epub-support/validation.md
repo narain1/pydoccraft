@@ -921,3 +921,9 @@ The installed Linux x86-64 CPython 3.11.15 release wheel from `212d7d8e71` passe
 Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. Two independently authored EPUBs with edited spine properties passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
 
 The lockfiles and upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. Temporary Cargo output, wheels, test environments, downloaded books, generated site and the Node addon were pruned.
+
+## 2026-11-24 Reachability of newly auxiliary EPUB chapters
+
+Two installed regressions and the 17 spine-related tests passed on CPython 3.11 Linux x86-64. Staged edits reject a disconnected auxiliary cycle, a missing fragment, and a frame source that supplies no route into its own chapter. They accept decoded Unicode XML IDs, legacy OPF guide links, a foreign spine item's fallback, and a hyperlink chain beginning in a packaged XHTML frame. Rejected edits leave their source book usable.
+
+A separately authored EPUB with a non-linear chapter reachable from the primary reading order through a percent-encoded fragment passed EPUBCheck 5.4.0 with no errors or warnings. Its table of contents contained only the linear chapter.
