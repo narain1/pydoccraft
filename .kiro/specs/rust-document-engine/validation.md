@@ -3027,3 +3027,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 889 installed tests, including 2
 ## 2026-11-25 EPUB fit-content bounds, TTML timed sets, Theora selection and MathML limits
 
 The Linux x86-64 CPython 3.11 host wheel passed 893 installed tests, including 298 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-fit-content-bounds-ttml-timed-sets-theora-selection-and-mathml-limits)
+
+## 2026-11-25 EPUB CSS percentage ratios, staged narration, MathML spacing and layered AV1
+
+The Linux x86-64 CPython 3.11 host wheel passed 898 installed tests, including 303 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-percentage-ratios-staged-narration-mathml-spacing-and-layered-av1)
