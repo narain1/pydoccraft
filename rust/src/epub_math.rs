@@ -454,47 +454,49 @@ impl<'xml> Projection<'_, 'xml> {
         depth: usize,
         style: Presentation<'xml>,
     ) -> Result<Arg, EngineError> {
-        self.sequence(node.children().filter(Node::is_element), depth, style)
-    }
-
-    fn sequence<'input: 'xml>(
-        &mut self,
-        children: impl IntoIterator<Item = Node<'xml, 'input>>,
-        depth: usize,
-        style: Presentation<'xml>,
-    ) -> Result<Arg, EngineError> {
         let mut rows = Vec::new();
-        for child in children {
-            let seeking = self
-                .alignment_group
-                .is_some_and(table::alignment::Scope::seeking_caret);
-            let nodes = self.element(child, depth + 1, style)?;
-            if seeking {
-                if let Some(scope) = &mut self.alignment_group {
-                    let numeric = scope.has_numeric_cursor();
-                    if let Some(caret) = &mut scope.caret {
-                        // Composed Word boxes can replace one marker with a
-                        // differently sized run, changing later caret offsets.
-                        if numeric && rows.iter().any(compose::is_box_marker) {
-                            return Err(unsupported(
-                                "MathML decimal alignment after composed geometry",
-                            ));
-                        }
-                        // WordCraft counts one unit per run character or
-                        // compound node in the containing equation argument.
-                        *caret += rows
-                            .iter()
-                            .map(|node| match node {
-                                MNode::Run(run) => run.text.chars().count(),
-                                _ => 1,
-                            })
-                            .sum::<usize>();
-                    }
-                }
-            }
-            rows.extend(nodes);
+        for child in node.children().filter(Node::is_element) {
+            self.append_element(&mut rows, child, depth + 1, style)?;
         }
         Ok(rows)
+    }
+
+    fn append_element(
+        &mut self,
+        rows: &mut Arg,
+        child: Node<'xml, '_>,
+        depth: usize,
+        style: Presentation<'xml>,
+    ) -> Result<(), EngineError> {
+        let seeking = self
+            .alignment_group
+            .is_some_and(table::alignment::Scope::seeking_caret);
+        let nodes = self.element(child, depth, style)?;
+        if seeking {
+            if let Some(scope) = &mut self.alignment_group {
+                let numeric = scope.has_numeric_cursor();
+                if let Some(caret) = &mut scope.caret {
+                    // Composed Word boxes can replace one marker with a
+                    // differently sized run, changing later caret offsets.
+                    if numeric && rows.iter().any(compose::is_box_marker) {
+                        return Err(unsupported(
+                            "MathML decimal alignment after composed geometry",
+                        ));
+                    }
+                    // WordCraft counts one unit per run character or
+                    // compound node in the containing equation argument.
+                    *caret += rows
+                        .iter()
+                        .map(|node| match node {
+                            MNode::Run(run) => run.text.chars().count(),
+                            _ => 1,
+                        })
+                        .sum::<usize>();
+                }
+            }
+        }
+        rows.extend(nodes);
+        Ok(())
     }
 
     fn token(

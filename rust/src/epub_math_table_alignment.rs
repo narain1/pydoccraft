@@ -96,6 +96,115 @@ pub(super) fn check_boundaries<'a>(
     Ok(())
 }
 
+const MAX_GROUPS: usize = 8;
+
+pub(super) enum Groups<'xml, 'input> {
+    Single(Group),
+    Multiple(Vec<GroupSource<'xml, 'input>>),
+}
+
+pub(super) struct GroupSource<'xml, 'input> {
+    pub(super) group: Group,
+    pub(super) items: Vec<GroupItem<'xml, 'input>>,
+}
+
+pub(super) enum GroupItem<'xml, 'input> {
+    Enter(Node<'xml, 'input>),
+    Leave,
+    Element(Node<'xml, 'input>),
+}
+
+impl<'xml, 'input> Groups<'xml, 'input> {
+    pub(super) fn read(
+        table: Node<'xml, 'input>,
+        row: Node<'xml, 'input>,
+        cell: Node<'xml, 'input>,
+        marker: Node<'xml, 'input>,
+        column: usize,
+        depth: usize,
+        mut remaining: usize,
+    ) -> Result<Self, EngineError> {
+        let mut parts = Vec::new();
+        let mut items = Vec::new();
+        let mut opening = None;
+        let read_part = |opening, ordinal, items: Vec<GroupItem<'xml, 'input>>| {
+            let content = items.iter().filter_map(|item| match item {
+                GroupItem::Element(node) if *node != opening => Some(*node),
+                _ => None,
+            });
+            if content.clone().next().is_none() {
+                return Err(unsupported(
+                    "MathML element maligngroup in an empty alignment group",
+                ));
+            }
+            let group = read(table, row, cell, opening, column, ordinal, content)?;
+            Ok(GroupSource { group, items })
+        };
+        let mut collect = |item| {
+            if let GroupItem::Element(node) = item {
+                if tag(node) == Some("maligngroup") {
+                    if let Some(previous) = opening.replace(node) {
+                        if parts.len() + 1 == MAX_GROUPS {
+                            return Err(limited(
+                                "MathML table cell exceeds eight alignment groups",
+                            ));
+                        }
+                        parts.push(read_part(
+                            previous,
+                            parts.len(),
+                            std::mem::take(&mut items),
+                        )?);
+                    } else if node != marker {
+                        return Err(invalid("misplaced MathML alignment group"));
+                    }
+                }
+            }
+            items.push(item);
+            Ok(())
+        };
+        for child in cell.children().filter(Node::is_element) {
+            visit_group_items(child, depth + 1, &mut remaining, &mut collect)?;
+        }
+        if parts.is_empty() {
+            return read(table, row, cell, marker, column, 0, std::iter::once(cell))
+                .map(Self::Single);
+        }
+        let marker = opening.ok_or_else(|| invalid("missing MathML alignment group"))?;
+        parts.push(read_part(marker, parts.len(), items)?);
+        Ok(Self::Multiple(parts))
+    }
+}
+
+fn visit_group_items<'xml, 'input>(
+    node: Node<'xml, 'input>,
+    depth: usize,
+    remaining: &mut usize,
+    emit: &mut impl FnMut(GroupItem<'xml, 'input>) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    if depth > DEPTH || *remaining == 0 {
+        return Err(limited("MathML structure exceeds its layout budget"));
+    }
+    *remaining -= 1;
+    let count = match tag(node) {
+        Some("mrow" | "mstyle") => usize::MAX,
+        Some("semantics") => 1,
+        _ => return emit(GroupItem::Element(node)),
+    };
+    let mut children = node
+        .children()
+        .filter(Node::is_element)
+        .take(count)
+        .peekable();
+    if count == 1 && children.peek().is_none() {
+        return Err(invalid("MathML semantics has no presentation child"));
+    }
+    emit(GroupItem::Enter(node))?;
+    for child in children {
+        visit_group_items(child, depth + 1, remaining, emit)?;
+    }
+    emit(GroupItem::Leave)
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Group {
     pub(super) scope: Scope,
@@ -193,14 +302,14 @@ pub(super) fn table_has_groups(table: Node<'_, '_>) -> bool {
         .any(|cell| leading_group(cell).is_some())
 }
 
-pub(super) fn read<'xml, 'input>(
+fn read<'xml, 'input>(
     table: Node<'xml, 'input>,
     row: Node<'xml, 'input>,
     cell: Node<'xml, 'input>,
     marker: Node<'xml, 'input>,
     column: usize,
     ordinal: usize,
-    content: &[Node<'xml, 'input>],
+    content: impl Iterator<Item = Node<'xml, 'input>> + Clone,
 ) -> Result<Group, EngineError> {
     if marker
         .children()
@@ -227,7 +336,7 @@ pub(super) fn read<'xml, 'input>(
         cursor: None,
         caret: None,
     };
-    if let Some(mark) = first_in(content, first_mark)? {
+    if let Some(mark) = first_in(content.clone(), first_mark)? {
         scope.cursor = Some(Cursor::Mark(mark.id()));
         return Ok(Group {
             scope,
@@ -266,10 +375,10 @@ pub(super) fn read<'xml, 'input>(
 }
 
 fn first_in<'xml, 'input>(
-    content: &[Node<'xml, 'input>],
+    content: impl Iterator<Item = Node<'xml, 'input>>,
     find: impl Fn(Node<'xml, 'input>, usize) -> Result<Option<Node<'xml, 'input>>, EngineError>,
 ) -> Result<Option<Node<'xml, 'input>>, EngineError> {
-    for &node in content {
+    for node in content {
         if let Some(found) = find(node, 0)? {
             return Ok(Some(found));
         }

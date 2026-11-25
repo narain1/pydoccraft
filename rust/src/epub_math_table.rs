@@ -22,11 +22,10 @@ use crate::EngineError;
 pub(super) mod alignment;
 #[path = "epub_math_table_rules.rs"]
 mod rules;
-use alignment::Anchor;
+use alignment::{Anchor, GroupItem, Groups};
 use rules::{Occupancy, Rules};
 
 const MAX_ROWS: usize = 128;
-const MAX_GROUPS: usize = 8;
 const MAX_DIMENSION: f32 = 20_000.0;
 const WIDTH_EPSILON: f32 = 0.0001;
 const TABLE_WIDTH_EPSILON: f32 = 0.01;
@@ -67,89 +66,8 @@ struct CellPlacement<'xml, 'input> {
     horizontal: ColJc,
     vertical: Vertical,
     label_above: bool,
-    groups: Option<Groups<'xml, 'input>>,
+    marker: Option<Node<'xml, 'input>>,
     style: Presentation<'xml>,
-}
-
-enum Groups<'xml, 'input> {
-    Single(alignment::Group),
-    Multiple {
-        wrappers: Vec<Node<'xml, 'input>>,
-        parts: Vec<GroupSource<'xml, 'input>>,
-    },
-}
-
-struct GroupSource<'xml, 'input> {
-    group: alignment::Group,
-    content: Vec<Node<'xml, 'input>>,
-}
-
-impl<'xml, 'input> Groups<'xml, 'input> {
-    fn read(
-        table: Node<'xml, 'input>,
-        row: Node<'xml, 'input>,
-        cell: Node<'xml, 'input>,
-        marker: Node<'xml, 'input>,
-        column: usize,
-    ) -> Result<Self, EngineError> {
-        let is_marker = |node: &Node<'_, '_>| node.has_tag_name((MATHML, "maligngroup"));
-        if !marker.next_siblings().skip(1).any(|node| is_marker(&node)) {
-            return alignment::read(table, row, cell, marker, column, 0, &[cell]).map(Self::Single);
-        }
-        let mut wrappers = Vec::new();
-        for wrapper in marker.ancestors().skip(1).take_while(|node| *node != cell) {
-            let parent = wrapper
-                .parent_element()
-                .ok_or_else(|| invalid("missing MathML cell"))?;
-            if !parent.has_tag_name((MATHML, "semantics"))
-                && wrapper
-                    .next_siblings()
-                    .skip(1)
-                    .any(|node| node.is_element())
-            {
-                return Err(unsupported(
-                    "MathML alignment groups across nested wrappers",
-                ));
-            }
-            wrappers.push(wrapper);
-        }
-        wrappers.reverse();
-        let mut groups = Vec::new();
-        let mut opening = marker;
-        let mut content = Vec::new();
-        for node in marker.next_siblings().skip(1).filter(Node::is_element) {
-            if is_marker(&node) {
-                if groups.len() + 1 == MAX_GROUPS {
-                    return Err(limited("MathML table cell exceeds eight alignment groups"));
-                }
-                if content.is_empty() {
-                    return Err(unsupported(
-                        "MathML element maligngroup in an empty alignment group",
-                    ));
-                }
-                let group =
-                    alignment::read(table, row, cell, opening, column, groups.len(), &content)?;
-                groups.push(GroupSource {
-                    group,
-                    content: std::mem::take(&mut content),
-                });
-                opening = node;
-            } else {
-                content.push(node);
-            }
-        }
-        if content.is_empty() {
-            return Err(unsupported(
-                "MathML element maligngroup in an empty alignment group",
-            ));
-        }
-        let group = alignment::read(table, row, cell, opening, column, groups.len(), &content)?;
-        groups.push(GroupSource { group, content });
-        Ok(Self::Multiple {
-            wrappers,
-            parts: groups,
-        })
-    }
 }
 
 struct AlignedEquation {
@@ -401,16 +319,12 @@ pub(super) fn project<'xml>(
             let style = projection.style(cell, row_style)?;
             let rows_spanned = span(cell, "rowspan")?;
             let columns_spanned = span(cell, "columnspan")?;
-            let groups = alignment::leading_group(cell)
-                .map(|marker| {
-                    if label || columns_spanned != 1 {
-                        return Err(unsupported(
-                            "MathML alignment group without one data column",
-                        ));
-                    }
-                    Groups::read(table, row, cell, marker, column)
-                })
-                .transpose()?;
+            let marker = alignment::leading_group(cell);
+            if marker.is_some() && (label || columns_spanned != 1) {
+                return Err(unsupported(
+                    "MathML alignment group without one data column",
+                ));
+            }
             if label {
                 if rows_spanned != 1 || columns_spanned != 1 {
                     return Err(unsupported("spanning MathML table row label"));
@@ -422,7 +336,7 @@ pub(super) fn project<'xml>(
                     horizontal,
                     vertical,
                     label_above: row_alignment.trim() == "top",
-                    groups,
+                    marker,
                     style,
                 });
                 continue;
@@ -445,7 +359,7 @@ pub(super) fn project<'xml>(
                 horizontal,
                 vertical,
                 label_above: false,
-                groups,
+                marker,
                 style,
             });
             column = right;
@@ -496,28 +410,72 @@ pub(super) fn project<'xml>(
         };
         let (content, anchor) =
             projection.with_cell_width(cell.node, content_width, |projection| {
-                let group = match cell.groups {
-                    Some(Groups::Multiple { wrappers, parts }) => {
-                        let mut scope_depth = depth + 2;
-                        let mut style = cell.style;
-                        for wrapper in wrappers {
-                            scope_depth += 1;
-                            projection.charge(scope_depth)?;
-                            style = projection.style(wrapper, style)?;
-                        }
+                let cell_depth = depth + 2;
+                let groups = cell
+                    .marker
+                    .map(|marker| {
+                        let row = cell
+                            .node
+                            .parent_element()
+                            .ok_or_else(|| invalid("missing MathML row"))?;
+                        Groups::read(
+                            table,
+                            row,
+                            cell.node,
+                            marker,
+                            cell.columns.start,
+                            cell_depth,
+                            *projection.remaining,
+                        )
+                    })
+                    .transpose()?;
+                let group = match groups {
+                    Some(Groups::Multiple(parts)) => {
+                        // Wrapper styles stay active when an alignment boundary
+                        // passes through their inferred rows.
+                        let mut styles = vec![cell.style];
                         let mut aligned = Vec::with_capacity(parts.len());
-                        for GroupSource { group, content } in parts {
-                            projection.charge(scope_depth + 1)?;
-                            let (nodes, caret) = projection
-                                .with_alignment_group(Some(group.scope), |projection| {
-                                    projection.sequence(content, scope_depth, style)
-                                })?;
+                        for part in parts {
+                            let (nodes, caret) = projection.with_alignment_group(
+                                Some(part.group.scope),
+                                |projection| {
+                                    let mut nodes = Arg::new();
+                                    for item in part.items {
+                                        let style = styles.last().copied().ok_or_else(|| {
+                                            invalid("missing MathML wrapper style")
+                                        })?;
+                                        let depth = cell_depth + styles.len();
+                                        match item {
+                                            GroupItem::Enter(wrapper) => {
+                                                if wrapper.attribute("dir").map(str::trim)
+                                                    == Some("rtl")
+                                                {
+                                                    return Err(unsupported(
+                                                        "right-to-left MathML alignment groups",
+                                                    ));
+                                                }
+                                                projection.charge(depth)?;
+                                                styles.push(projection.style(wrapper, style)?);
+                                            }
+                                            GroupItem::Leave => {
+                                                styles.pop();
+                                            }
+                                            GroupItem::Element(node) => {
+                                                projection.append_element(
+                                                    &mut nodes, node, depth, style,
+                                                )?;
+                                            }
+                                        }
+                                    }
+                                    Ok(nodes)
+                                },
+                            )?;
                             aligned.push(AlignedEquation {
                                 math: Math {
                                     nodes: math::merge_runs(nodes),
                                     ..Default::default()
                                 },
-                                anchor: group.resolve(caret)?,
+                                anchor: part.group.resolve(caret)?,
                             });
                         }
                         alignment::check_boundaries(aligned.iter().map(|group| &group.math))?;

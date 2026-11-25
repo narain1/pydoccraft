@@ -8439,6 +8439,101 @@ Trailing
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment group boundary through operator spacing"):
                     operation()
 
+    def test_mathml_alignment_spans_transparent_wrapper_boundaries(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Cross-wrapper alignment</title><meta name="viewport" content="width=520,height=320"/>
+            <style>body {margin:0}.tone {color:#903b25} .strong {font-weight:bold}</style></head><body><p>
+            <m:math mathsize="12pt"><m:mtable groupalign="{decimalpoint center right}" columnwidth="330pt"
+                rowspacing="18pt">ROWS</m:mtable></m:math>
+          </p></body></html>"""
+        terms = ("12.345", "7,89", "Rust", "Metal", "West", "FarWest", "East", "Coast", "Upper", "Lower",
+                 "High", "Low", "Factor", "Term", "Suffix", "Closing")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def cell(row: tuple[str, ...], nested: bool) -> str:
+            number, tail, left, right, numerator, denominator, last, suffix, point = row
+            fraction = f"<m:mfrac><m:mtext>{numerator}</m:mtext><m:mtext>{denominator}</m:mtext></m:mfrac>"
+            mark = '<m:malignmark edge="right"/>'
+            terminal = f'<m:maligngroup/><m:mtext class="strong">{suffix}</m:mtext><m:msup><m:mi>y</m:mi><m:mn>3</m:mn></m:msup>'
+            digit = f'<m:mn mathcolor="#22367b">{number}</m:mn>'
+            first = f'<m:maligngroup/><m:mstyle decimalpoint="{point}">{digit}</m:mstyle>'
+            a = f'<m:mtext class="tone">{tail}</m:mtext>'
+            b = f'<m:mtext class="tone">{left}</m:mtext>'
+            c = f'<m:mtext mathcolor="#21753a">{right}</m:mtext>'
+            d = f'<m:mtext>{last}</m:mtext>'
+            if nested:
+                content = f"""<m:mstyle class="tone">
+                  <m:mstyle decimalpoint="{point}"><m:maligngroup/>{digit}</m:mstyle>
+                  <m:mrow><m:mtext>{tail}</m:mtext><m:maligngroup/><m:mtext>{left}</m:mtext>{mark}</m:mrow>
+                </m:mstyle><m:semantics><m:mrow>{c}{fraction}{d}{terminal}</m:mrow>
+                  <m:annotation-xml encoding="MathML-Presentation"><m:mrow>
+                     <m:maligngroup/><m:mtext>Ignored alternative</m:mtext>
+                  </m:mrow></m:annotation-xml></m:semantics>"""
+            else:
+                content = f"{first}{a}<m:maligngroup/>{b}{mark}{c}{fraction}{d}{terminal}"
+            return f"<m:mtr><m:mtd>{content}</m:mtd></m:mtr>"
+
+        rows = (("12.345", "Rust", "West", "East", "Upper", "Lower", "Factor", "Suffix", "."),
+                ("7,89", "Metal", "FarWest", "Coast", "High", "Low", "Term", "Closing", ","))
+        flat, nested = (template.replace("ROWS", "".join(cell(row, wrapped) for row in rows))
+                        for wrapped in (False, True))
+
+        def positions(pdf: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            found = {}
+            for term in terms:
+                # Search can also find West as a substring of FarWest.
+                matches = pdf[0].search_for(term)
+                found[term] = min(matches, key=lambda box: box[1])
+            self.assertNotIn("Ignored alternative", pdf[0].get_text())
+            self.assertAlmostEqual(found["West"][2], found["FarWest"][2], delta=0.25)
+            self.assertAlmostEqual(found["East"][0], found["Coast"][0], delta=0.25)
+            return found
+
+        reference = None
+        for chapter in (flat, nested):
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                preview = book.render_page(0, dpi=96)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    vector = positions(pdf)
+                    self.assertFalse(pdf[0].get_images())
+                converted = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            matrix = xml.find(".//m:oMath//m:m", ns)
+            self.assertIsNotNone(matrix)
+            self.assertEqual(len(matrix.findall(".//m:f", ns)), 2)
+            self.assertEqual(len(matrix.findall(".//m:sSup", ns)), 2)
+            source_order = [term for row in rows for term in row[:-1]]
+            token_order = [run.text for run in matrix.findall(".//m:t", ns) if run.text in terms]
+            self.assertEqual(token_order, source_order)
+            with doc_ex.open(converted) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                text = word[0].get_text()
+                self.assertNotIn("Ignored alternative", text)
+                self.assertNotIn("⟡H", text)
+                native = positions(pdf)
+            fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 520, 320)])
+            with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter})) as book:
+                fixed = book.render_page(0, dpi=96)
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))),
+                                     rgba_pixels(png_chunks(fixed)))
+                    fixed_positions = positions(pdf)
+            result = (preview, vector, native, fixed, fixed_positions)
+            if reference is None:
+                reference = result
+            else:
+                self.assertEqual(result, reference)
+
+        inside_operand = nested.replace("<m:mtext>Upper</m:mtext>",
+            "<m:mrow><m:maligngroup/><m:mtext>Upper</m:mtext></m:mrow>")
+        right_to_left = nested.replace('<m:mstyle class="tone">', '<m:mstyle dir="rtl" class="tone">')
+        for chapter, error in ((inside_operand, "MathML element maligngroup"),
+                               (right_to_left, "right-to-left MathML alignment groups")):
+            with self.subTest(error=error), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, error):
+                        operation()
+
     def test_mathml_explicit_alignment_marks_preserve_editable_edges_and_tokens(self) -> None:
         source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Math alignment marks</title><meta name="viewport" content="width=500,height=300"/>
