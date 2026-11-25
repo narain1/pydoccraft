@@ -3019,3 +3019,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 881 installed tests, including 2
 ## 2026-11-25 EPUB chapter navigation, CSS gaps, MathML widths, SVG spacing and TTML
 
 The Linux x86-64 CPython 3.11 host wheel passed 886 installed tests, including 291 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-chapter-navigation-css-gaps-mathml-widths-svg-spacing-and-ttml)
+
+## 2026-11-25 EPUB intrinsic CSS bounds, labeled MathML widths and in-place SVG filters
+
+The Linux x86-64 CPython 3.11 host wheel passed 889 installed tests, including 294 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-intrinsic-css-bounds-labeled-mathml-widths-and-in-place-svg-filters)
