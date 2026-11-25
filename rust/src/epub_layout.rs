@@ -3,6 +3,8 @@ use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 #[path = "epub_layout/link_geometry.rs"]
 mod link_geometry;
+#[path = "epub_layout/tree.rs"]
+mod tree;
 pub(super) use link_geometry::InlineNavigation;
 
 use roxmltree::Node;
@@ -19,7 +21,7 @@ use wordcraft_layout::{
 
 use super::{
     child, content,
-    css::Cascade,
+    css::{Cascade, MixedLength},
     fonts::{Fonts, Text as FontText},
     invalid, limited, name,
     output::{has_relative_math, image_bytes, Output, RasterImage},
@@ -218,14 +220,13 @@ fn paint_xhtml(
     let mut layout = Layout::new(output, viewport, fonts);
     let root_id = layout.build(root, &mut context)?;
     let id = layout.boxes[root_id].id;
-    let mut root_style = layout.tree.style(id).map_err(failure)?.clone();
+    let root_style = layout.tree.style_mut(id);
     root_style.size.width = Dimension::length(viewport[0]);
     if fixed {
         root_style.size.height = Dimension::length(viewport[1]);
     }
     root_style.box_sizing = taffy::style::BoxSizing::BorderBox;
-    layout.tree.set_style(id, root_style).map_err(failure)?;
-    let dimension = layout.place(root_id, fixed)?;
+    let dimension = layout.place(root_id, fixed, &styles.calculations)?;
     let cropped = !matches!(region, Region::Viewport(None));
     let region = region.for_page(dimension.map(f64::from), dpi, fixed)?;
     if cropped {
@@ -366,7 +367,7 @@ fn numeric_prefix(source: &str) -> Option<f32> {
 }
 
 struct Layout<'book> {
-    tree: TaffyTree<usize>,
+    tree: tree::Tree,
     boxes: Vec<PaintBox>,
     output: Output<'book>,
     cache: LayoutCache,
@@ -491,10 +492,8 @@ fn is_svg(node: Node<'_, '_>) -> bool {
 
 impl<'book> Layout<'book> {
     fn new(output: Output<'book>, viewport: [f32; 2], fonts: Option<Fonts>) -> Self {
-        let mut tree = TaffyTree::new();
-        tree.disable_rounding();
         Self {
-            tree,
+            tree: tree::Tree::default(),
             boxes: Vec::new(),
             output,
             cache: LayoutCache::new(),
@@ -688,11 +687,10 @@ impl<'book> Layout<'book> {
         if let Some(caption) = super::child(node, XHTML, "caption") {
             let index = self.build(caption, context)?;
             let id = self.boxes[index].id;
-            let mut placement = self.tree.style(id).map_err(failure)?.clone();
+            let placement = self.tree.style_mut(id);
             placement.grid_column.start = line(1);
             placement.grid_column.end = span(columns as u16);
             placement.grid_row.start = line(1);
-            self.tree.set_style(id, placement).map_err(failure)?;
             children.push(index);
         }
         let first_row = 1 + children.len();
@@ -708,12 +706,11 @@ impl<'book> Layout<'book> {
                     .as_u64()
                     .ok_or_else(|| invalid("EPUB styled table cell has no column"))?
                     as usize;
-                let mut placement = self.tree.style(id).map_err(failure)?.clone();
+                let placement = self.tree.style_mut(id);
                 placement.grid_column.start = line((column + 1) as i16);
                 placement.grid_column.end = span(cell.col_span as u16);
                 placement.grid_row.start = line((row + first_row) as i16);
                 placement.grid_row.end = span(cell.row_span as u16);
-                self.tree.set_style(id, placement).map_err(failure)?;
                 children.push(index);
             }
             if positions.next().is_some() {
@@ -811,99 +808,95 @@ impl<'book> Layout<'book> {
         if index >= MAX_BOXES {
             return Err(limited("EPUB layout exceeds 8000 boxes"));
         }
-        paint_box.id = if paint_box.children.is_empty() {
-            self.tree
-                .new_leaf_with_context(style, index)
-                .map_err(failure)?
-        } else {
-            let children: Vec<_> = paint_box
-                .children
-                .iter()
-                .map(|index| self.boxes[*index].id)
-                .collect();
-            self.tree
-                .new_with_children(style, &children)
-                .map_err(failure)?
-        };
+        let children = paint_box
+            .children
+            .iter()
+            .map(|index| self.boxes[*index].id)
+            .collect();
+        paint_box.id = self.tree.add(style, children);
         self.boxes.push(paint_box);
         Ok(index)
     }
 
-    fn place(&mut self, root: usize, fixed: bool) -> Result<[f32; 2], EngineError> {
+    fn place(
+        &mut self,
+        root: usize,
+        fixed: bool,
+        calculations: &[MixedLength],
+    ) -> Result<[f32; 2], EngineError> {
         let mut error = None;
-        self.tree
-            .compute_layout_with_measure(
-                self.boxes[root].id,
-                Size {
-                    width: AvailableSpace::Definite(self.viewport[0]),
-                    height: if fixed {
-                        AvailableSpace::Definite(self.viewport[1])
-                    } else {
-                        AvailableSpace::MaxContent
-                    },
+        self.tree.place(
+            self.boxes[root].id,
+            Size {
+                width: AvailableSpace::Definite(self.viewport[0]),
+                height: if fixed {
+                    AvailableSpace::Definite(self.viewport[1])
+                } else {
+                    AvailableSpace::MaxContent
                 },
-                |input, _, index, style| {
-                    let size = if error.is_none() {
-                        let content = index.and_then(|index| self.boxes[*index].content.as_mut());
-                        if let Some(Contents::RelativeMath(relative)) = content {
-                            return taffy::compute_leaf_layout(
-                                input,
-                                style,
-                                |_, _| 0.0,
-                                |_, available| {
-                                    if input.known_dimensions.width.is_some()
-                                        && !input.known_dimensions_are_definite.width
-                                    {
-                                        return Size::ZERO;
-                                    }
-                                    let measured = self
-                                        .fonts
-                                        .as_mut()
-                                        .ok_or_else(|| invalid("missing EPUB MathML fonts"))
-                                        .and_then(|fonts| {
-                                            relative.measure(
-                                                available.width,
-                                                fonts,
-                                                &mut self.output,
-                                                &mut self.measure_count,
-                                            )
-                                        });
-                                    match measured {
-                                        Ok(value) => value,
-                                        Err(err) => {
-                                            error = Some(err);
-                                            Size::ZERO
-                                        }
-                                    }
-                                },
-                            );
-                        }
-                        match measure(
-                            content.as_deref(),
+            },
+            calculations,
+            |input, index, style| {
+                let size = if error.is_none() {
+                    let content = self.boxes[index].content.as_mut();
+                    if let Some(Contents::RelativeMath(relative)) = content {
+                        return taffy::compute_leaf_layout(
                             input,
-                            &mut self.output.document,
-                            &mut self.cache,
-                            &mut self.measure_count,
-                        ) {
-                            Ok(value) => value,
-                            Err(err) => {
-                                error = Some(err);
-                                Size::ZERO
-                            }
+                            style,
+                            |handle, basis| tree::calculated_length(calculations, handle, basis),
+                            |_, available| {
+                                if input.known_dimensions.width.is_some()
+                                    && !input.known_dimensions_are_definite.width
+                                {
+                                    return Size::ZERO;
+                                }
+                                let measured = self
+                                    .fonts
+                                    .as_mut()
+                                    .ok_or_else(|| invalid("missing EPUB MathML fonts"))
+                                    .and_then(|fonts| {
+                                        relative.measure(
+                                            available.width,
+                                            fonts,
+                                            &mut self.output,
+                                            &mut self.measure_count,
+                                        )
+                                    });
+                                match measured {
+                                    Ok(value) => value,
+                                    Err(err) => {
+                                        error = Some(err);
+                                        Size::ZERO
+                                    }
+                                }
+                            },
+                        );
+                    }
+                    match measure(
+                        content.as_deref(),
+                        input,
+                        &mut self.output.document,
+                        &mut self.cache,
+                        &mut self.measure_count,
+                    ) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            error = Some(err);
+                            Size::ZERO
                         }
-                    } else {
-                        Size::ZERO
-                    };
-                    LayoutOutput::from_outer_size(size)
-                },
-            )
-            .map_err(failure)?;
+                    }
+                } else {
+                    Size::ZERO
+                };
+                LayoutOutput::from_outer_size(size)
+            },
+        );
         if let Some(error) = error {
             return Err(error);
         }
         for node in &mut self.boxes {
             if let Some(Contents::RelativeMath(relative)) = node.content.as_mut() {
-                let layout = self.tree.layout(node.id).map_err(failure)?;
+                let layout = self.tree.layout(node.id);
                 let width = layout.size.width
                     - layout.border.left
                     - layout.border.right
@@ -923,7 +916,7 @@ impl<'book> Layout<'book> {
                 ));
             }
         }
-        let root = self.tree.layout(self.boxes[root].id).map_err(failure)?;
+        let root = self.tree.layout(self.boxes[root].id);
         let height = if fixed {
             self.viewport[1]
         } else {
@@ -945,12 +938,12 @@ impl<'book> Layout<'book> {
         output: &mut Vec<Draw>,
     ) -> Result<(), EngineError> {
         let node = &self.boxes[index];
-        let layout = *self.tree.layout(node.id).map_err(failure)?;
+        let layout = *self.tree.layout(node.id);
         let origin = positions.origins.remove(&node.id).unwrap_or(origin);
         let [x, y] = [origin[0] + layout.location.x, origin[1] + layout.location.y];
         // Taffy reports out-of-flow locations relative to their containing
         // block. Paint in DOM order but use that block's geometry.
-        for &child in self.tree.hoisted_children(node.id).map_err(failure)? {
+        for &child in self.tree.hoisted_children(node.id) {
             positions.origins.insert(child, [x, y]);
         }
         let rectangle = Rect::new(x, y, layout.size.width, layout.size.height);
@@ -1296,8 +1289,4 @@ fn raster(
     );
     region.validate_result(rendered.width, rendered.height)?;
     Ok(rendered)
-}
-
-fn failure(error: impl std::fmt::Display) -> EngineError {
-    EngineError::Conversion(format!("EPUB layout failed: {error}"))
 }

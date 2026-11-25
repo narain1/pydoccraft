@@ -49,7 +49,7 @@ skrifa = "=0.44.0"
 unicode-bidi = "=0.3.18"
 unicode-segmentation = "=1.13.3"
 write-fonts = { version = "=0.48.1", features = ["read"] }
-taffy = { version = "=0.16.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size"] }
+taffy = { version = "=0.16.0", default-features = false, features = ["std", "block_layout", "flexbox", "grid", "content_size", "calc"] }
 thiserror = "=2.0.21"
 wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
 wordcraft-docx = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }

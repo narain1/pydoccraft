@@ -1164,11 +1164,76 @@ class EpubTests(unittest.TestCase):
                 outcomes.append((pixels, hits, external.bbox, destination.groups()))
         self.assertEqual(outcomes[0], outcomes[1])
 
-    def test_epub_css_calc_rejects_unresolved_bases_and_excess_geometry(self) -> None:
+    def test_epub_css_calc_uses_containing_box_for_mixed_lengths_and_percentages(self) -> None:
+        source = fixed_spread_fixture([("", "white", 320, 182)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Mixed calculations</title>
+          <meta name="viewport" content="width=320,height=182"/>
+          <style>
+           html,body,p {{margin:0}} #holder{{position:absolute;left:18px;top:16px;width:{width}px;
+                    height:100px;background:#203b78;font-size:18px;--add:12px}}
+           #panel{{position:absolute;direction:rtl;color:#332155;background:#98d8ad}}
+           #target{{font-size:12px;background:#efc833}}
+           #note{{position:absolute;left:18px;top:140px}}
+           {styles}</style></head><body>
+           <div id="holder"><div id="panel"><p id="target"><a href="https://example.org/mixed">Mixed width</a></p></div></div>
+           <p id="note"><a href="#target">Go to width</a></p></body></html>"""
+        calculated = """
+          #panel{inset-inline-start:calc(10% - 2px);top:calc(10% + 3px);
+            inline-size:calc(50% + var(--add));min-inline-size:calc(75% - 40px);
+            block-size:calc(60% - 4px);padding-top:calc(5% - 3px);
+            margin-inline-start:calc(5% - 15px);padding-inline-end:calc(0% + 1em)}
+          #target{padding-inline-end:inherit}
+        """
+        locations = []
+        for width in (180, 240):
+            with self.subTest(width=width):
+                explicit = f"""
+                  #panel{{right:{width / 10 - 2}px;top:13px;
+                    width:{width / 2 + 12}px;min-width:{3 * width / 4 - 40}px;
+                    height:56px;padding-top:{width / 20 - 3}px;
+                    margin-right:{width / 20 - 15}px;padding-left:18px}}
+                  #target{{padding-left:18px}}
+                """
+                results = []
+                for styles in (calculated, explicit):
+                    xhtml = template.format(width=width, styles=styles)
+                    edited = rewrite_epub(source, {"OEBPS/s0.xhtml": xhtml})
+                    with doc_ex.open(edited) as book:
+                        pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                        pdf = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(pdf) as document, document.edit() as editor:
+                        self.assertEqual(rgba_pixels(png_chunks(document.render_page(0, dpi=96))), pixels)
+                        hits = document[0].search_for("Mixed width")
+                        self.assertEqual(len(hits), 1)
+                        external, internal = document[0].get_links()
+                        self.assertEqual(external.uri, "https://example.org/mixed")
+                        self.assertEqual(internal.metadata["target_page"], 0)
+                        xyz = re.search(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
+                                        editor.to_bytes(object_streams=False))
+                        assert xyz is not None
+                        results.append((pixels, hits, external.bbox, xyz.groups()))
+                self.assertEqual(results[0], results[1])
+                locations.append(results[0][2])
+        self.assertGreater(locations[1][0] - locations[0][0], 25)
+
+    def test_epub_css_calc_retains_zero_percent_for_indefinite_reflow_height(self) -> None:
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Indefinite height</title>
+        <style>body,p {margin:0} div{width:120px;background:#35a74c;height:EXPR}
+          p{background:#d84e3d}</style></head>
+        <body><section><div>Auto height</div><p>Next paragraph</p></section></body></html>"""
+        previews = []
+        for expression in ("auto", "calc(100% - 100% + 90px)", "90px"):
+            chapter = xhtml.replace("EXPR", expression)
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as publication:
+                previews.append(publication.render_page(0, dpi=96))
+        self.assertEqual(previews[0], previews[1])
+        self.assertNotEqual(previews[0], previews[2])
+
+    def test_epub_css_calc_rejects_unsupported_operations_and_excess_geometry(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
           <style>div {background:green; CSS}</style></head><body><div>Panel</div></body></html>"""
         cases = (
-            ("inline-size:calc(50% - 1px)", doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"),
+            ("inline-size:calc(50% / 0)", doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"),
             ("width:calc(18000px * 3)", doc_ex.UnsafeArchiveError, "CSS calc exceeds"),
             ("padding-inline-start:calc(" + "1px + " * 90 + "1px)", doc_ex.UnsafeArchiveError, "CSS calc exceeds"),
         )

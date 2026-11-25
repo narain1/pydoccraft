@@ -23,6 +23,7 @@ pub(super) type Paint = (Rgb, f32);
 pub(super) struct ChapterStyles {
     pub boxes: Styles,
     pub equations: HashMap<NodeId, math::Css>,
+    pub calculations: Vec<css::MixedLength>,
 }
 
 pub(super) struct Styled {
@@ -134,7 +135,14 @@ impl ChapterStyles {
             text.apply(node, &values, viewport, font);
             text.chars.rtl = flow.rtl;
             let font = text.chars.size.unwrap_or(12.0);
-            css::logical::resolve_calculated_geometry(&mut values, flow, font, viewport)?;
+            let calculations = css::logical::resolve_calculated_geometry(
+                node,
+                &mut values,
+                flow,
+                font,
+                viewport,
+                &mut styles.calculations,
+            )?;
             let tag = node.tag_name().name();
             let position = match value(&values, "position") {
                 "fixed" => Position::Fixed,
@@ -162,9 +170,24 @@ impl ChapterStyles {
                 values.get("unicode-bidi").map(String::as_str),
                 parent.map_or(super::bidi::Mode::Normal, |parent| parent.bidi),
             );
-            let auto = |key| dimension::<LengthPercentageAuto>(value(&values, key), font, viewport);
-            let dim = |key| dimension::<Dimension>(value(&values, key), font, viewport);
-            let len = |key| length(value(&values, key), font, viewport);
+            let auto = |key| {
+                calculations.get(key).copied().map_or_else(
+                    || dimension::<LengthPercentageAuto>(value(&values, key), font, viewport),
+                    LengthPercentageAuto::calc,
+                )
+            };
+            let dim = |key| {
+                calculations.get(key).copied().map_or_else(
+                    || dimension::<Dimension>(value(&values, key), font, viewport),
+                    Dimension::calc,
+                )
+            };
+            let len = |key| {
+                calculations.get(key).copied().map_or_else(
+                    || length(value(&values, key), font, viewport),
+                    LengthPercentage::calc,
+                )
+            };
             let overflow = |key| match values
                 .get(key)
                 .map_or_else(|| value(&values, "overflow"), String::as_str)
@@ -247,24 +270,20 @@ impl ChapterStyles {
                 margin: Rect {
                     top: values
                         .get("margin-top")
-                        .map_or(LengthPercentageAuto::length(spacing), |v| {
-                            dimension(v, font, viewport)
+                        .map_or(LengthPercentageAuto::length(spacing), |_| {
+                            auto("margin-top")
                         }),
                     bottom: values
                         .get("margin-bottom")
-                        .map_or(LengthPercentageAuto::length(spacing), |v| {
-                            dimension(v, font, viewport)
+                        .map_or(LengthPercentageAuto::length(spacing), |_| {
+                            auto("margin-bottom")
                         }),
                     right: values
                         .get("margin-right")
-                        .map_or(LengthPercentageAuto::length(0.0), |v| {
-                            dimension(v, font, viewport)
-                        }),
+                        .map_or(LengthPercentageAuto::length(0.0), |_| auto("margin-right")),
                     left: values
                         .get("margin-left")
-                        .map_or(LengthPercentageAuto::length(0.0), |v| {
-                            dimension(v, font, viewport)
-                        }),
+                        .map_or(LengthPercentageAuto::length(0.0), |_| auto("margin-left")),
                 },
                 padding: Rect {
                     top: len("padding-top"),

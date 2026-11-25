@@ -12,6 +12,7 @@ use crate::EngineError;
 
 #[path = "epub_css_calc.rs"]
 mod calc;
+pub(super) use calc::MixedLength;
 #[path = "epub_html_direction.rs"]
 mod html_direction;
 #[path = "epub_css_logical.rs"]

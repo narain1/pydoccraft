@@ -57,7 +57,8 @@
 - [x] Transport fixed-layout PDF text, annotations and destinations along provable single-layer SVG offset chains using native raster transforms and clipping.
 - [x] Compose nested axis-aligned SVG offsets for one painted source and capture surviving search, links and fragments from the whole native stack.
 - [x] Render bounded native SVG blend and component transfer and retain searchable text, links and fragments through provable alpha and offset chains.
-- [ ] Extend the supported EPUB CSS and fixed-layout rendering profile, including calculations that mix lengths and layout-dependent percentages.
+- [x] Resolve mixed length and percentage calculations for supported box geometry against the native containing box and preserve indefinite percentage sizing.
+- [ ] Extend the supported EPUB CSS and fixed-layout rendering profile, including intrinsic sizing keywords, additional math functions, and calculations in grid tracks.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, nested length owners and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.

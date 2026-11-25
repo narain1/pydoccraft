@@ -1,5 +1,8 @@
 //! Horizontal flow-relative box properties, resolved before native layout.
+use std::collections::HashMap;
+
 use roxmltree::Node;
+use taffy::CalcHandle;
 
 use super::{calc, html_direction, points, Properties};
 use crate::EngineError;
@@ -193,20 +196,45 @@ pub(super) fn physical_pair(name: &str, flow: Flow) -> Option<&'static Pair> {
 }
 
 pub(in crate::epub) fn resolve_calculated_geometry(
+    node: Node<'_, '_>,
     values: &mut Properties,
     flow: Flow,
     font: f32,
     viewport: [f32; 2],
-) -> Result<(), EngineError> {
+    calculations: &mut Vec<calc::MixedLength>,
+) -> Result<HashMap<&'static str, CalcHandle>, EngineError> {
+    let table_track = node.tag_name().namespace() == Some(super::XHTML)
+        && matches!(
+            node.tag_name().name(),
+            "col" | "colgroup" | "tr" | "thead" | "tbody" | "tfoot" | "td" | "th"
+        );
+    let mut handles = HashMap::new();
     for (name, value) in values {
         if !calc::is_calc(value) {
             continue;
         }
         if let Some(pair) = physical_pair(name, flow).filter(|pair| pair.is_length()) {
-            *value = calc::resolve(value, font, viewport, pair.allows_negative())?;
+            *value = match calc::resolve(value, font, viewport, pair.allows_negative())? {
+                calc::Resolved::Simple(simple) => simple,
+                calc::Resolved::Mixed(length) => {
+                    let computed = length.computed_css();
+                    // The used size of an HTML table track is auto in this case.
+                    // Keep the computed expression available for explicit inheritance.
+                    if !(table_track
+                        && matches!(name.as_str(), "width" | "height")
+                        && length.has_fixed_part())
+                    {
+                        calculations.push(length);
+                        // CompactLength reserves three low bits and the zero sentinel.
+                        let handle = CalcHandle::from_bits((calculations.len() as u64) << 3);
+                        handles.insert(pair.physical(flow), handle);
+                    }
+                    computed
+                }
+            };
         }
     }
-    Ok(())
+    Ok(handles)
 }
 
 pub(super) fn shorthand(name: &str) -> Option<[&'static str; 2]> {
