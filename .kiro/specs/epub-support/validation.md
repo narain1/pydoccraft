@@ -959,3 +959,9 @@ The installed Linux x86-64 CPython 3.11.15 release wheel from `abb7811a41` passe
 Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. An independently authored EPUB with a chapter reachable through a link to a Unicode fragment passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
 
 The lockfiles and upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. Temporary Cargo output, wheels, test environments, downloaded books, generated site and the Node addon were pruned.
+
+## 2026-11-24 Horizontal XHTML logical properties
+
+Installed-wheel regressions compare LTR and RTL logical styles against physical controls with identical preview pixels, reopened fixed-layout PDF pixels, searchable text, and clickable areas at 96 DPI. They verify importance, source order within a declaration block, font-relative inheritance when direction changes, and color functions in border shorthands. A missing custom property resets the winning alias. Unresolved vertical and automatic inline directions and unsupported logical border styles return explicit errors.
+
+A separately authored EPUB with a fixed XHTML chapter and an HTML direction hint passed EPUBCheck 5.4.0 with no errors or warnings. Its logical layout rendered in preview and in a searchable PDF with a local link.

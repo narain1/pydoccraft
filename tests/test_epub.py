@@ -1060,6 +1060,88 @@ class EpubTests(unittest.TestCase):
                 self.assertRegex(readable_pdf, rb'/XYZ\s+12(?:\.0+)?\s+51(?:\.0+)?\s+null')
                 self.assertRegex(readable_pdf, rb'/XYZ\s+18(?:\.0+)?\s+63(?:\.0+)?\s+null')
 
+    def test_logical_css_box_cascade_matches_physical_layout_in_ltr_and_rtl(self) -> None:
+        markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Logical boxes</title>
+          <meta name="viewport" content="width=240,height=150"/><style>
+            html,body{margin:0} #panel{position:absolute;left:112px;top:17px;width:110px;height:100px;
+                                        background:#eaead1;font-size:12px}
+            #first,#child{position:absolute;display:block;background:#c94b39}
+            #child{direction:rtl;background:#215caa;font-size:7px}
+            #target{position:absolute;left:12px;top:120px;font-size:13px}
+            STYLES
+          </style></head><body>
+            <a id="first" href="#target">First</a>
+            <div id="panel"><a id="child" href="#target">Next</a></div>
+            <p id="target">Visible target</p>
+          </body></html>"""
+        logical = """
+            #first { left:15px!important; inset-inline-start:16px!important;
+                     top:15px; inset-block-start:13px; inline-size:66px; width:58px;
+                     min-inline-size:61px; block-size:30px; max-block-size:24px;
+                     --space: 7px 3px; padding-inline:var(--space); padding-block:4px 2px;
+                     border:1px solid #474747; border-block-start:2px solid rgb(252, 208, 17);
+                     border-inline-end-color:#9444b4 }
+            #panel {padding-inline-start:2em}
+            #child { inset-inline-start:14px; inset-block:16px auto;
+                     inline-size:28px; block-size:24px; padding-inline-start:inherit;
+                     padding-inline-end:4px; margin-inline-start:5px; margin-inline-end:2px;
+                     border-inline:solid 2px #272952;
+                     border-inline-color:rgb(252, 208, 17) #9444b4 }
+        """
+        physical = """
+            #first { left:16px;top:13px;width:58px;min-width:61px;height:30px;max-height:24px;
+                     padding:4px 3px 2px 7px;border:1px solid #474747;
+                     border-top:2px solid rgb(252, 208, 17);border-right-color:#9444b4 }
+            #panel {padding-left:24px}
+            #child {right:14px;top:16px;width:28px;height:24px;padding-right:24px;padding-left:4px;
+                     margin-right:5px;margin-left:2px;border-right:solid 2px rgb(252, 208, 17);
+                     border-left:solid 2px #9444b4}
+        """
+        source = fixed_spread_fixture([("", "white", 240, 150)])
+        results = []
+        for css in (logical, physical):
+            with doc_ex.open(source) as book:
+                revised = book.edit_epub_structure(replacements={0: markup.replace("STYLES", css)})
+            with doc_ex.open(revised) as book:
+                paint = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                pdf = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(pdf) as output:
+                self.assertEqual(paint, rgba_pixels(png_chunks(output.render_page(0, dpi=96))))
+                self.assertEqual(len(output[0].search_for("Visible target")), 1)
+                links = output[0].get_links()
+                self.assertEqual(len(links), 2)
+                self.assertTrue(all(link.metadata["target_page"] == 0 for link in links))
+                results.append((paint, [link.bbox for link in links]))
+        self.assertEqual(results[0], results[1])
+        _, pixels = results[0][0]
+        for color in ("c94b39ff", "215caaff", "fcd011ff", "9444b4ff"):
+            self.assertIn(bytes.fromhex(color), pixels)
+
+    def test_logical_css_var_failure_resets_alias_and_unresolved_writing_modes_fail(self) -> None:
+        markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Logical flow</title>
+          <style>body{margin:0} #outer{width:64px;height:40px;background:#c94b39}
+            #inside{width:20px;height:12px;background:#24b781} STYLES
+          </style></head><body><div id="outer" DIR><div id="inside"/></div></body></html>"""
+        preview = []
+        for css in (
+            "#outer {padding-left:9px; padding-inline-start:var(--unresolved); margin-block:initial}",
+            "#outer {padding-left:0; margin-top:0; margin-bottom:0}",
+        ):
+            with doc_ex.open(epub_fixture(chapter_one=markup.replace("STYLES", css).replace("DIR", ""))) as book:
+                preview.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertEqual(preview[0], preview[1])
+        for css, direction in (
+            ("#outer {writing-mode:vertical-rl; inline-size:30px}", ""),
+            ("#outer {padding-inline-start:9px}", 'dir="auto"'),
+        ):
+            data = epub_fixture(chapter_one=markup.replace("STYLES", css).replace("DIR", direction))
+            with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "horizontal writing direction"):
+                book.render_page(0, dpi=96)
+        dashed = markup.replace("STYLES", "#outer{border-inline:2px dashed red}").replace("DIR", "")
+        with doc_ex.open(epub_fixture(chapter_one=dashed)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "logical CSS border style"):
+                book.render_page(0, dpi=96)
+
     def test_fixed_layout_embedded_xhtml_preserves_frame_pixels_text_and_links(self) -> None:
         source = fixed_spread_fixture([("", "white", 220, 154)])
         host = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Host</title>

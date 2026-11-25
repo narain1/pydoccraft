@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use super::{charge, external, invalid, limited, name, resolve, unsupported, Book, XHTML};
 use crate::EngineError;
 
+#[path = "epub_css_logical.rs"]
+pub(super) mod logical;
 #[path = "epub_css_variables.rs"]
 mod variables;
 
@@ -374,8 +376,104 @@ impl Cascade {
         )
     }
 
-    pub(super) fn properties(&mut self, node: Node<'_, '_>) -> Result<Properties, EngineError> {
-        self.properties_for_instance(node).map(|(props, _)| props)
+    pub(super) fn properties(
+        &mut self,
+        node: Node<'_, '_>,
+        parent: Option<&logical::Inherited>,
+    ) -> Result<(Properties, logical::Flow), EngineError> {
+        let (mut selected, _) = self.local_selection(node)?;
+        let mut flow_value = |name| {
+            selected.remove(name).map_or(Ok(None), |(_, value)| {
+                computed_value(&mut self.variables, name, &value)
+            })
+        };
+        let direction = flow_value("direction")?;
+        let writing_mode = flow_value("writing-mode")?;
+        let flow = logical::Flow::resolve(
+            node,
+            direction.as_deref(),
+            writing_mode.as_deref(),
+            parent.map_or_else(logical::Flow::default, |parent| parent.flow),
+        );
+        let mut winners = HashMap::new();
+        for (name, (priority, value)) in &selected {
+            let pair = logical::pair(name);
+            if pair.is_some_and(|pair| flow.unresolved(pair)) {
+                return Err(unsupported(
+                    "logical EPUB CSS requires a definite horizontal writing direction",
+                ));
+            }
+            let physical = pair.map_or(name.as_str(), |pair| pair.physical(flow));
+            if winners
+                .get(&physical)
+                .is_none_or(|(winner, _, _, _)| winner < priority)
+            {
+                winners.insert(physical, (*priority, name, value, pair));
+            }
+        }
+        let mut output = Properties::new();
+        for (physical, (_, name, value, pair)) in winners {
+            let computed = computed_value(&mut self.variables, name, value)?;
+            let computed = if computed.as_deref().is_none_or(css_wide) {
+                let geometry = pair.or_else(|| logical::physical_pair(physical, flow));
+                if let Some(geometry) = geometry {
+                    match computed.as_deref() {
+                        Some(value) if value.eq_ignore_ascii_case("inherit") => {
+                            if let (Some(alias), Some(parent)) = (pair, parent) {
+                                if parent.flow.unresolved(alias) {
+                                    return Err(unsupported("inherited logical EPUB CSS requires a definite horizontal writing direction"));
+                                }
+                            }
+                            Some(parent.map_or_else(
+                                || geometry.3.to_owned(),
+                                |parent| {
+                                    let key =
+                                        pair.map_or(physical, |alias| alias.physical(parent.flow));
+                                    parent.value(key, geometry.3)
+                                },
+                            ))
+                        }
+                        Some(value) if value.eq_ignore_ascii_case("revert") => None,
+                        Some(value)
+                            if value.eq_ignore_ascii_case("revert-layer") && pair.is_some() =>
+                        {
+                            return Err(unsupported("logical EPUB CSS revert-layer"));
+                        }
+                        _ => Some(geometry.3.to_owned()),
+                    }
+                } else {
+                    computed
+                }
+            } else {
+                computed
+            };
+            if let Some(computed) = computed {
+                let computed =
+                    if pair.is_some() && name.starts_with("border-") && name.ends_with("-style") {
+                        if !simple_border_style(&computed) {
+                            return Err(unsupported("EPUB logical CSS border style"));
+                        }
+                        computed.to_ascii_lowercase()
+                    } else {
+                        computed
+                    };
+                output.insert(physical.to_owned(), computed);
+            }
+        }
+        Ok((output, flow))
+    }
+
+    fn local_selection(
+        &mut self,
+        node: Node<'_, '_>,
+    ) -> Result<(Selection, HashMap<String, CssValue>), EngineError> {
+        let mut selected = self.select(node, None)?;
+        let custom = selected
+            .extract_if(|name, _| name.starts_with("--"))
+            .map(|(name, (_, value))| (name, value))
+            .collect();
+        self.variables.enter_at(node, &custom, 0)?;
+        Ok((selected, custom))
     }
 
     pub(super) fn take_variable_scope(&mut self) -> VariableScope {
@@ -397,12 +495,7 @@ impl Cascade {
         &mut self,
         node: Node<'_, '_>,
     ) -> Result<(Properties, InstanceStyle), EngineError> {
-        let mut selected = self.select(node, None)?;
-        let custom = selected
-            .extract_if(|name, _| name.starts_with("--"))
-            .map(|(name, (_, value))| (name, value))
-            .collect();
-        self.variables.enter_at(node, &custom, 0)?;
+        let (selected, custom) = self.local_selection(node)?;
         let mut output = Properties::new();
         for (name, (_, value)) in selected {
             if let Some(computed) = computed_value(&mut self.variables, &name, &value)? {
@@ -440,7 +533,7 @@ impl Cascade {
         &mut self,
         node: Node<'_, '_>,
         boundary: Option<NodeId>,
-    ) -> Result<HashMap<String, (Priority, CssValue)>, EngineError> {
+    ) -> Result<Selection, EngineError> {
         let mut selected = HashMap::new();
         for order in self.candidates.matching_keys(node, &mut self.work)? {
             let rule = &self.rules[order];
@@ -448,7 +541,7 @@ impl Cascade {
                 .selector
                 .matches(node, rule.selector.steps.len(), &mut self.work, boundary)?
             {
-                for (key, value, important) in rule.declarations.iter() {
+                for (index, (key, value, important)) in rule.declarations.iter().enumerate() {
                     charge(
                         &mut self.work,
                         1,
@@ -459,7 +552,7 @@ impl Cascade {
                         &mut selected,
                         key,
                         value,
-                        (*important, false, rule.selector.specificity, order),
+                        (*important, false, rule.selector.specificity, order, index),
                     );
                 }
             }
@@ -475,10 +568,17 @@ impl Cascade {
             } else {
                 self.charge_bytes(style)?;
             }
-            for (key, value, important) in inline_declarations(style)? {
+            for (index, (key, value, important)) in
+                inline_declarations(style)?.into_iter().enumerate()
+            {
                 self.inline_pending |=
                     !key.starts_with("--") && matches!(value, CssValue::Pending(..));
-                update(&mut selected, &key, &value, (important, true, [0; 3], 0));
+                update(
+                    &mut selected,
+                    &key,
+                    &value,
+                    (important, true, [0; 3], 0, index),
+                );
             }
         }
         Ok(selected)
@@ -549,14 +649,10 @@ fn computed_value(
     }
 }
 
-type Priority = (bool, bool, Specificity, usize);
+type Priority = (bool, bool, Specificity, usize, usize);
+type Selection = HashMap<String, (Priority, CssValue)>;
 
-fn update(
-    values: &mut HashMap<String, (Priority, CssValue)>,
-    name: &str,
-    value: &CssValue,
-    priority: Priority,
-) {
+fn update(values: &mut Selection, name: &str, value: &CssValue, priority: Priority) {
     if values
         .get(name)
         .is_none_or(|(winner, _)| *winner <= priority)
@@ -1068,6 +1164,24 @@ fn valid_literal(
     font_descriptor: bool,
 ) -> bool {
     match name {
+        "direction" => {
+            css_wide(value)
+                || ["ltr", "rtl"]
+                    .iter()
+                    .any(|word| value.eq_ignore_ascii_case(word))
+        }
+        "writing-mode" => {
+            css_wide(value)
+                || [
+                    "horizontal-tb",
+                    "vertical-rl",
+                    "vertical-lr",
+                    "sideways-rl",
+                    "sideways-lr",
+                ]
+                .iter()
+                .any(|word| value.eq_ignore_ascii_case(word))
+        }
         "font-style" => {
             slope_components(components, font_descriptor).is_some()
                 || !font_descriptor
@@ -1089,6 +1203,12 @@ fn valid_literal(
     }
 }
 
+fn css_wide(value: &str) -> bool {
+    ["inherit", "initial", "unset", "revert", "revert-layer"]
+        .iter()
+        .any(|keyword| value.eq_ignore_ascii_case(keyword))
+}
+
 fn valid_computed(name: &str, value: &str) -> bool {
     if value.is_empty() {
         return false;
@@ -1108,13 +1228,14 @@ fn side_names(name: &str) -> Option<[String; 4]> {
         "inset" => Some(SIDES.map(str::to_owned)),
         "border-width" => Some(SIDES.map(|side| format!("border-{side}-width"))),
         "border-color" => Some(SIDES.map(|side| format!("border-{side}-color"))),
+        "border-style" => Some(SIDES.map(|side| format!("border-{side}-style"))),
         "margin" | "padding" => Some(SIDES.map(|side| format!("{name}-{side}"))),
         _ => None,
     }
 }
 
-fn border_names() -> impl Iterator<Item = String> {
-    SIDES.into_iter().flat_map(|side| {
+fn border_names(sides: &'static [&'static str]) -> impl Iterator<Item = String> {
+    sides.iter().flat_map(|side| {
         ["width", "color", "style"].map(move |name| format!("border-{side}-{name}"))
     })
 }
@@ -1122,14 +1243,44 @@ fn border_names() -> impl Iterator<Item = String> {
 fn shorthand_parts(name: &str) -> Option<Vec<String>> {
     match name {
         "background" => Some(vec!["background-color".to_owned()]),
-        "border" => Some(border_names().collect()),
-        _ => side_names(name).map(Vec::from),
+        _ => {
+            if let Some(sides) = logical::border_sides(name) {
+                Some(border_names(sides).collect())
+            } else if let Some(names) = logical::shorthand(name) {
+                Some(names.map(str::to_owned).into())
+            } else {
+                side_names(name).map(Vec::from)
+            }
+        }
     }
 }
 
 fn expand(name: &str, value: &str) -> Vec<(String, String)> {
+    if let Some(names) = logical::shorthand(name) {
+        let pieces = value_components(value);
+        return match pieces.as_slice() {
+            [start] => names
+                .into_iter()
+                .zip([start, start])
+                .map(|(name, value)| (name.into(), (*value).into()))
+                .collect(),
+            [start, end] => names
+                .into_iter()
+                .zip([start, end])
+                .map(|(name, value)| (name.into(), (*value).into()))
+                .collect(),
+            _ => Vec::new(),
+        };
+    }
     if let Some(names) = side_names(name) {
-        let pieces = value.split_ascii_whitespace().collect::<Vec<_>>();
+        let pieces = value_components(value);
+        if name == "border-style"
+            && !pieces
+                .iter()
+                .all(|piece| simple_border_style(piece) || css_wide(piece))
+        {
+            return Vec::new();
+        }
         return sides(&pieces)
             .map(|pieces| names.into_iter().zip(pieces.map(str::to_owned)).collect())
             .unwrap_or_default();
@@ -1137,25 +1288,62 @@ fn expand(name: &str, value: &str) -> Vec<(String, String)> {
     if name == "background" && color(value).is_some() {
         return vec![("background-color".into(), value.into())];
     }
-    if name == "border" {
-        let mut width = "0";
+    if let Some(sides) = logical::border_sides(name) {
+        if css_wide(value) {
+            return border_names(sides)
+                .map(|name| (name, value.into()))
+                .collect();
+        }
+        let mut width = "medium";
         let mut ink = "currentColor";
         let mut style = "none";
-        for word in value.split_ascii_whitespace() {
+        let flow_relative = name.starts_with("border-inline") || name.starts_with("border-block");
+        for word in value_components(value) {
             if points(word, 12.0, [0.0; 2]).is_some() || matches!(word, "thin" | "medium" | "thick")
             {
                 width = word;
             } else if color(word).is_some() {
                 ink = word;
-            } else if matches!(word, "solid" | "none" | "hidden") {
+            } else if simple_border_style(word) || flow_relative && additional_border_style(word) {
                 style = word;
             }
         }
-        return border_names()
+        return border_names(sides)
             .zip([width, ink, style].into_iter().cycle().map(str::to_owned))
             .collect();
     }
     vec![(name.to_owned(), value.to_owned())]
+}
+
+fn simple_border_style(value: &str) -> bool {
+    ["solid", "none", "hidden"]
+        .iter()
+        .any(|style| value.eq_ignore_ascii_case(style))
+}
+
+fn additional_border_style(value: &str) -> bool {
+    matches!(
+        value,
+        "dotted" | "dashed" | "double" | "groove" | "ridge" | "inset" | "outset"
+    )
+}
+
+fn value_components(value: &str) -> Vec<&str> {
+    if !value.contains('(') {
+        return value.split_ascii_whitespace().collect();
+    }
+    // Preserve spaces inside color functions as components of the shorthand.
+    let source = format!("value:{value}");
+    Parser::new(&source, Syntax::Css)
+        .parse::<Declaration>()
+        .ok()
+        .into_iter()
+        .flat_map(|declaration| declaration.value)
+        .filter_map(|component| {
+            let span = component.span();
+            value.get(span.start.checked_sub(6)?..span.end.checked_sub(6)?)
+        })
+        .collect()
 }
 
 fn sides<'a>(parts: &[&'a str]) -> Option<[&'a str; 4]> {

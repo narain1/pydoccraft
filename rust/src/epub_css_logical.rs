@@ -1,0 +1,257 @@
+//! Horizontal flow-relative box properties, resolved before native layout.
+use roxmltree::Node;
+
+use super::{points, Properties};
+
+#[derive(Clone, Copy, Default)]
+pub(in crate::epub) struct Flow {
+    pub rtl: Option<bool>,
+    automatic: bool,
+    vertical: bool,
+}
+
+impl Flow {
+    pub(super) fn resolve(
+        node: Node<'_, '_>,
+        direction: Option<&str>,
+        writing_mode: Option<&str>,
+        mut inherited: Self,
+    ) -> Self {
+        let hint = node.attribute("dir");
+        let direction = direction.filter(|value| !keyword(value, "revert"));
+        let explicit = direction.or(hint);
+        if let Some(direction) = explicit {
+            if keyword(direction, "rtl") {
+                inherited.rtl = Some(true);
+                inherited.automatic = false;
+            } else if keyword(direction, "ltr") || keyword(direction, "initial") {
+                inherited.rtl = Some(false);
+                inherited.automatic = false;
+            } else if keyword(direction, "auto") && explicit == hint {
+                inherited.rtl = None;
+                inherited.automatic = true;
+            }
+        }
+        if let Some(mode) = writing_mode {
+            if ["vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"]
+                .into_iter()
+                .any(|keyword_value| keyword(mode, keyword_value))
+            {
+                inherited.vertical = true;
+            } else if keyword(mode, "horizontal-tb") || keyword(mode, "initial") {
+                inherited.vertical = false;
+            }
+        }
+        inherited
+    }
+
+    pub(super) fn unresolved(self, pair: &Pair) -> bool {
+        self.vertical || self.automatic && pair.1 != pair.2
+    }
+}
+
+fn keyword(value: &str, name: &str) -> bool {
+    value.eq_ignore_ascii_case(name)
+}
+
+// Logical longhand, physical LTR and RTL aliases, and its initial value.
+pub(super) struct Pair(
+    pub &'static str,
+    &'static str,
+    &'static str,
+    pub &'static str,
+);
+
+impl Pair {
+    pub(super) fn physical(&self, flow: Flow) -> &'static str {
+        if flow.rtl == Some(true) {
+            self.2
+        } else {
+            self.1
+        }
+    }
+}
+
+static PAIRS: &[Pair] = &[
+    Pair("block-size", "height", "height", "auto"),
+    Pair(
+        "border-block-end-color",
+        "border-bottom-color",
+        "border-bottom-color",
+        "currentColor",
+    ),
+    Pair(
+        "border-block-end-style",
+        "border-bottom-style",
+        "border-bottom-style",
+        "none",
+    ),
+    Pair(
+        "border-block-end-width",
+        "border-bottom-width",
+        "border-bottom-width",
+        "medium",
+    ),
+    Pair(
+        "border-block-start-color",
+        "border-top-color",
+        "border-top-color",
+        "currentColor",
+    ),
+    Pair(
+        "border-block-start-style",
+        "border-top-style",
+        "border-top-style",
+        "none",
+    ),
+    Pair(
+        "border-block-start-width",
+        "border-top-width",
+        "border-top-width",
+        "medium",
+    ),
+    Pair(
+        "border-inline-end-color",
+        "border-right-color",
+        "border-left-color",
+        "currentColor",
+    ),
+    Pair(
+        "border-inline-end-style",
+        "border-right-style",
+        "border-left-style",
+        "none",
+    ),
+    Pair(
+        "border-inline-end-width",
+        "border-right-width",
+        "border-left-width",
+        "medium",
+    ),
+    Pair(
+        "border-inline-start-color",
+        "border-left-color",
+        "border-right-color",
+        "currentColor",
+    ),
+    Pair(
+        "border-inline-start-style",
+        "border-left-style",
+        "border-right-style",
+        "none",
+    ),
+    Pair(
+        "border-inline-start-width",
+        "border-left-width",
+        "border-right-width",
+        "medium",
+    ),
+    Pair("inline-size", "width", "width", "auto"),
+    Pair("inset-block-end", "bottom", "bottom", "auto"),
+    Pair("inset-block-start", "top", "top", "auto"),
+    Pair("inset-inline-end", "right", "left", "auto"),
+    Pair("inset-inline-start", "left", "right", "auto"),
+    Pair("margin-block-end", "margin-bottom", "margin-bottom", "0"),
+    Pair("margin-block-start", "margin-top", "margin-top", "0"),
+    Pair("margin-inline-end", "margin-right", "margin-left", "0"),
+    Pair("margin-inline-start", "margin-left", "margin-right", "0"),
+    Pair("max-block-size", "max-height", "max-height", "none"),
+    Pair("max-inline-size", "max-width", "max-width", "none"),
+    Pair("min-block-size", "min-height", "min-height", "auto"),
+    Pair("min-inline-size", "min-width", "min-width", "auto"),
+    Pair("overflow-block", "overflow-y", "overflow-y", "visible"),
+    Pair("overflow-inline", "overflow-x", "overflow-x", "visible"),
+    Pair("padding-block-end", "padding-bottom", "padding-bottom", "0"),
+    Pair("padding-block-start", "padding-top", "padding-top", "0"),
+    Pair("padding-inline-end", "padding-right", "padding-left", "0"),
+    Pair("padding-inline-start", "padding-left", "padding-right", "0"),
+];
+
+pub(super) fn pair(name: &str) -> Option<&'static Pair> {
+    PAIRS
+        .binary_search_by_key(&name, |pair| pair.0)
+        .ok()
+        .map(|index| &PAIRS[index])
+}
+
+pub(super) fn physical_pair(name: &str, flow: Flow) -> Option<&'static Pair> {
+    PAIRS.iter().find(|pair| pair.physical(flow) == name)
+}
+
+pub(super) fn shorthand(name: &str) -> Option<[&'static str; 2]> {
+    Some(match name {
+        "margin-inline" => ["margin-inline-start", "margin-inline-end"],
+        "margin-block" => ["margin-block-start", "margin-block-end"],
+        "padding-inline" => ["padding-inline-start", "padding-inline-end"],
+        "padding-block" => ["padding-block-start", "padding-block-end"],
+        "inset-inline" => ["inset-inline-start", "inset-inline-end"],
+        "inset-block" => ["inset-block-start", "inset-block-end"],
+        "overflow" => ["overflow-x", "overflow-y"],
+        "border-inline-width" => ["border-inline-start-width", "border-inline-end-width"],
+        "border-block-width" => ["border-block-start-width", "border-block-end-width"],
+        "border-inline-color" => ["border-inline-start-color", "border-inline-end-color"],
+        "border-block-color" => ["border-block-start-color", "border-block-end-color"],
+        "border-inline-style" => ["border-inline-start-style", "border-inline-end-style"],
+        "border-block-style" => ["border-block-start-style", "border-block-end-style"],
+        _ => return None,
+    })
+}
+
+pub(super) fn border_sides(name: &str) -> Option<&'static [&'static str]> {
+    Some(match name {
+        "border" => &["top", "right", "bottom", "left"],
+        "border-inline" => &["inline-start", "inline-end"],
+        "border-block" => &["block-start", "block-end"],
+        "border-inline-start" => &["inline-start"],
+        "border-inline-end" => &["inline-end"],
+        "border-block-start" => &["block-start"],
+        "border-block-end" => &["block-end"],
+        "border-top" => &["top"],
+        "border-right" => &["right"],
+        "border-bottom" => &["bottom"],
+        "border-left" => &["left"],
+        _ => return None,
+    })
+}
+
+pub(in crate::epub) struct Inherited {
+    pub(super) flow: Flow,
+    geometry: Properties,
+    margin: f32,
+}
+
+impl Inherited {
+    pub(in crate::epub) fn new(
+        flow: Flow,
+        values: &Properties,
+        font: f32,
+        viewport: [f32; 2],
+        margin: f32,
+    ) -> Self {
+        let geometry = PAIRS
+            .iter()
+            .filter_map(|pair| {
+                let physical = pair.physical(flow);
+                let value = values.get(physical)?;
+                let computed = points(value, font, viewport)
+                    .map_or_else(|| value.clone(), |length| format!("{length}pt"));
+                Some((physical.to_owned(), computed))
+            })
+            .collect();
+        Self {
+            flow,
+            geometry,
+            margin,
+        }
+    }
+
+    pub(super) fn value(&self, physical: &str, initial: &str) -> String {
+        self.geometry.get(physical).cloned().unwrap_or_else(|| {
+            if matches!(physical, "margin-top" | "margin-bottom") {
+                format!("{}pt", self.margin)
+            } else {
+                initial.to_owned()
+            }
+        })
+    }
+}

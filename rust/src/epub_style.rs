@@ -62,6 +62,7 @@ impl ChapterStyles {
         let mut equation_bytes = 0;
         let mut font_values = HashMap::new();
         let mut axis_values = HashMap::new();
+        let mut box_context = Vec::<(usize, css::logical::Inherited)>::new();
         for node in root.descendants().filter(Node::is_element) {
             let range = node.range();
             if range.start < annotation_end {
@@ -77,7 +78,14 @@ impl ChapterStyles {
             if in_formula && !is_math {
                 continue;
             }
-            let values = cascade.properties(node)?;
+            while box_context
+                .last()
+                .is_some_and(|(end, _)| *end <= range.start)
+            {
+                box_context.pop();
+            }
+            let (values, flow) =
+                cascade.properties(node, box_context.last().map(|(_, parent)| parent))?;
             if is_math {
                 if let Some(css) = math::Css::from_properties(&values) {
                     charge(
@@ -123,6 +131,7 @@ impl ChapterStyles {
                 text.optical_sizing_disabled = !enabled;
             }
             text.apply(node, &values, viewport, font);
+            text.chars.rtl = flow.rtl;
             let tag = node.tag_name().name();
             let position = match value(&values, "position") {
                 "fixed" => Position::Fixed,
@@ -180,6 +189,10 @@ impl ChapterStyles {
             } else {
                 0.0
             };
+            box_context.push((
+                range.end,
+                css::logical::Inherited::new(flow, &values, font, viewport, spacing),
+            ));
             let ratio = value(&values, "aspect-ratio")
                 .split_once('/')
                 .and_then(|(a, b)| {
@@ -194,7 +207,7 @@ impl ChapterStyles {
                     _ if hidden => Display::None,
                     _ => Display::Block,
                 },
-                direction: if value(&values, "direction") == "rtl" || text.chars.rtl == Some(true) {
+                direction: if text.chars.rtl == Some(true) {
                     taffy::style::Direction::Rtl
                 } else {
                     taffy::style::Direction::Ltr
@@ -493,15 +506,6 @@ impl Typography {
             "normal" | "nowrap" | "pre-line" => false,
             _ => tag == "pre" || self.preformatted,
         };
-        match values
-            .get("direction")
-            .map(String::as_str)
-            .or_else(|| node.attribute("dir"))
-        {
-            Some("ltr") => self.chars.rtl = Some(false),
-            Some("rtl") => self.chars.rtl = Some(true),
-            _ => {}
-        }
     }
 }
 
