@@ -8,58 +8,15 @@ use oxideav_opus::{
     OpusHead, OpusPacket, OUTPUT_SAMPLE_RATE_HZ,
 };
 
-use super::{invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES, MAX_FRAMES_PER_CLIP};
+use super::{
+    invalid, limited, unsupported, EngineError, FRONT_CENTER, FRONT_LEFT, FRONT_RIGHT,
+    MAX_CLIP_SAMPLES, MAX_FRAMES_PER_CLIP, VORBIS_SPEAKERS,
+};
 
 use super::super::{
     ogg::{self as ogg_pages, Codec, MAX_PACKETS},
     webm,
 };
-
-// The decoded family-1 samples are ordered as in RFC 7845 §5.1.1.2.
-// Values are the WAVE_FORMAT_EXTENSIBLE bits for each speaker.
-const FRONT_LEFT: u32 = 0x001;
-const FRONT_RIGHT: u32 = 0x002;
-const FRONT_CENTER: u32 = 0x004;
-const LFE: u32 = 0x008;
-const BACK_LEFT: u32 = 0x010;
-const BACK_RIGHT: u32 = 0x020;
-const BACK_CENTER: u32 = 0x100;
-const SIDE_LEFT: u32 = 0x200;
-const SIDE_RIGHT: u32 = 0x400;
-const VORBIS_SPEAKERS: [&[u32]; 8] = [
-    &[FRONT_CENTER],
-    &[FRONT_LEFT, FRONT_RIGHT],
-    &[FRONT_LEFT, FRONT_CENTER, FRONT_RIGHT],
-    &[FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT],
-    &[FRONT_LEFT, FRONT_CENTER, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT],
-    &[
-        FRONT_LEFT,
-        FRONT_CENTER,
-        FRONT_RIGHT,
-        BACK_LEFT,
-        BACK_RIGHT,
-        LFE,
-    ],
-    &[
-        FRONT_LEFT,
-        FRONT_CENTER,
-        FRONT_RIGHT,
-        SIDE_LEFT,
-        SIDE_RIGHT,
-        BACK_CENTER,
-        LFE,
-    ],
-    &[
-        FRONT_LEFT,
-        FRONT_CENTER,
-        FRONT_RIGHT,
-        SIDE_LEFT,
-        SIDE_RIGHT,
-        BACK_LEFT,
-        BACK_RIGHT,
-        LFE,
-    ],
-];
 
 pub(in crate::epub) struct Track {
     links: Vec<Link>,

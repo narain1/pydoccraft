@@ -2843,6 +2843,71 @@ first
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(book.epub_embedded_audio(0, 0))
 
+    def test_surround_vorbis_preserves_speakers_in_embedded_audio_and_narration(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        chapter = "OEBPS/surround.xhtml"
+        ogg = "OEBPS/surround.ogg"
+        webm = "OEBPS/surround.webm"
+        video = "OEBPS/clip.webm"
+        layout = "OEBPS/undefined.ogg"
+        markup = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Surround</title></head>
+          <body><p id="ogg">Ogg surround</p><p id="webm">WebM surround</p>
+          <audio src="surround.ogg#t=0.15,0.4"/><audio src="surround.webm"/>
+          <video src="clip.webm"/><audio src="undefined.ogg"/></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Surround", markup, chapter)],
+                resources={
+                    ogg: doc_ex.EpubResource(
+                        "audio/ogg", (fixtures / "epub-audio-vorbis-surround.ogg").read_bytes()),
+                    webm: doc_ex.EpubResource(
+                        "audio/webm", (fixtures / "epub-audio-vorbis-surround.webm").read_bytes()),
+                    video: doc_ex.EpubResource(
+                        "video/webm", (fixtures / "epub-video-vorbis-surround.webm").read_bytes()),
+                    layout: doc_ex.EpubResource(
+                        "audio/ogg", (fixtures / "epub-audio-vorbis-undefined-order.ogg").read_bytes()),
+                },
+                overlays={chapter: [
+                    doc_ex.EpubOverlayCue("ogg", ogg, 150_000, 400_000),
+                    doc_ex.EpubOverlayCue("webm", webm, 150_000, 400_000),
+                ]},
+            )
+
+        def pcm(clip: doc_ex.EpubAudioClip | None) -> bytes:
+            assert clip is not None
+            self.assertEqual((clip.sample_rate, clip.channels), (48_000, 8))
+            self.assertEqual(clip.wave[12:20], b"fmt \x28\0\0\0")
+            self.assertEqual(struct.unpack_from("<HH", clip.wave, 20), (0xFFFE, 8))
+            self.assertEqual(struct.unpack_from("<I", clip.wave, 40), (0x63F,))
+            self.assertEqual(clip.wave[60:64], b"data")
+            self.assertEqual(len(clip.wave[68:]), clip.frame_count * 16)
+            return clip.wave[68:]
+
+        with doc_ex.open(data) as book:
+            narration = [pcm(cue.audio) for cue in book.epub_narration(0)]
+            self.assertEqual(len(narration), 2)
+            for index, expected in enumerate(narration):
+                audio = book.epub_embedded_audio(0, index, start_us=150_000, end_us=400_000, chunk_frames=499)
+                self.assertEqual(len(expected), 12_000 * 16)
+                self.assertEqual(b"".join(pcm(clip) for clip in audio), expected)
+                channels = zip(*struct.iter_unpack("<8h", expected))
+                # The mask orders the speakers FL, FR, FC, LFE, BL, BR, SL, SR.
+                for samples, frequency in zip(channels, (370, 430, 510, 70, 590, 650, 730, 810)):
+                    self.assertGreater(max(samples), 1_000)
+                    crossings = sum(a <= 0 < b for a, b in zip(samples, samples[1:]))
+                    self.assertAlmostEqual(crossings, frequency * 0.25, delta=2)
+
+            # The independently muxed WebM places its first audible packet at 3 ms.
+            self.assertEqual(narration[1][144 * 16:], narration[0][:-144 * 16])
+            soundtrack = book.epub_embedded_audio(
+                0, 2, start_us=150_000, end_us=400_000, chunk_frames=331, audio_track=0)
+            self.assertEqual(b"".join(pcm(clip) for clip in soundtrack), narration[1])
+            pictures = book.epub_embedded_video(0, 2, start_us=150_000, end_us=400_000)
+            self.assertEqual([(f.start_us, f.duration_us) for f in pictures],
+                             [(150_000, 100_000), (250_000, 125_000), (375_000, 25_000)])
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "no defined speaker order"):
+                next(book.epub_embedded_audio(0, 3, source_index=0))
+
     def test_chained_theora_vorbis_uses_the_longer_track_at_the_boundary(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         red = (fixtures / "epub-theora-vorbis-short-audio.ogv").read_bytes()

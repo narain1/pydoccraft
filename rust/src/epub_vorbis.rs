@@ -9,7 +9,10 @@ use oxideav_vorbis::{
     VorbisCodebook, VorbisSetupHeader, VqLookup,
 };
 
-use super::{invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES, MAX_FRAMES_PER_CLIP};
+use super::{
+    invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES, MAX_FRAMES_PER_CLIP,
+    VORBIS_SPEAKERS,
+};
 use crate::epub::{
     charge,
     ogg::{self, Codec, Page},
@@ -25,6 +28,8 @@ const MAX_LINKS: usize = 256;
 
 pub(in crate::epub) struct Track {
     spec: WavSpec,
+    wave_order: Vec<usize>,
+    speaker_mask: Option<u32>,
     frames: usize,
     links: Vec<Link>,
     playback: Option<Playback>,
@@ -164,8 +169,16 @@ impl Track {
                 "chained Ogg Vorbis changes its sample rate or channel count",
             ));
         }
+        let speakers = VORBIS_SPEAKERS[usize::from(spec.channels - 1)];
+        let speaker_mask =
+            (spec.channels > 2).then(|| speakers.iter().fold(0, |mask, flag| mask | flag));
+        let mut wave_order: Vec<_> = (0..speakers.len()).collect();
+        wave_order.sort_unstable_by_key(|&channel| speakers[channel]);
+
         let mut track = Self {
             spec,
+            wave_order,
+            speaker_mask,
             frames: 0,
             links,
             playback: None,
@@ -176,6 +189,10 @@ impl Track {
 
     pub(in crate::epub) fn spec(&self) -> WavSpec {
         self.spec
+    }
+
+    pub(super) fn speaker_mask(&self) -> Option<u32> {
+        self.speaker_mask
     }
 
     pub(super) fn frames(&self) -> usize {
@@ -257,7 +274,7 @@ impl Track {
                 let raw = raw_start..raw_start + count;
                 let offset = (link.offset + from - start) * channels;
                 let output = &mut samples[offset..offset + count * channels];
-                state.read(&link.index, raw, channels, &mut work, output)?;
+                state.read(&link.index, raw, &self.wave_order, &mut work, output)?;
             }
         }
         Ok(samples)
@@ -269,11 +286,14 @@ impl Format {
         [ident, comment, setup]: [&[u8]; 3],
     ) -> Result<(Self, VorbisSetupHeader), EngineError> {
         let ident = parse_identification_header(ident).map_err(invalid)?;
-        if !(1..=2).contains(&ident.audio_channels)
-            || !(1..=192_000).contains(&ident.audio_sample_rate)
-        {
+        if usize::from(ident.audio_channels) > VORBIS_SPEAKERS.len() {
             return Err(unsupported(
-                "Vorbis playback requires mono or stereo audio up to 192 kHz",
+                "Vorbis channel layout has no defined speaker order",
+            ));
+        }
+        if !(1..=192_000).contains(&ident.audio_sample_rate) {
+            return Err(unsupported(
+                "Vorbis playback requires a sample rate up to 192 kHz",
             ));
         }
         let spec = WavSpec {
@@ -461,18 +481,18 @@ impl Playback {
         &mut self,
         index: &Index,
         frames: Range<usize>,
-        channels: usize,
+        wave_order: &[usize],
         work: &mut usize,
         output: &mut [i16],
     ) -> Result<(), EngineError> {
         let mut begin = frames.start;
         let first = index.packets.partition_point(|packet| packet.end <= begin);
-        let mut output = output.chunks_exact_mut(channels);
+        let mut output = output.chunks_exact_mut(wave_order.len());
         for number in first..index.packets.len() {
             charge(
                 work,
-                1,
-                MAX_FRAMES_PER_CLIP,
+                wave_order.len().max(2),
+                MAX_FRAMES_PER_CLIP * 2,
                 "Vorbis clip exceeds its packet work budget",
             )?;
             self.decode(index, number)?;
@@ -480,8 +500,8 @@ impl Playback {
             let packet_start = index.packets[number - 1].end;
             let stop = frames.end.min(packet_end);
             for (frame, row) in (begin - packet_start..stop - packet_start).zip(&mut output) {
-                for (value, channel) in row.iter_mut().zip(&self.pcm) {
-                    let sample = channel[frame];
+                for (value, &channel) in row.iter_mut().zip(wave_order) {
+                    let sample = self.pcm[channel][frame];
                     if !sample.is_finite() {
                         return Err(invalid("non-finite Vorbis sample"));
                     }

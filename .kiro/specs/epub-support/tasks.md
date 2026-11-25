@@ -79,7 +79,8 @@
 - [x] Select a WebM audio track explicitly for embedded audio, video soundtracks and SMIL playback.
 - [x] Select a WebM video track explicitly while retaining clipped intervals and synchronized captions.
 - [x] Stream fixed-geometry SDR AV1 pictures from WebM with bounded keyframe seeking and synchronized audio and captions.
-- [ ] Extend WebM to additional AV1 profiles, surround Vorbis, high dynamic range, and alpha. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and media fragment dimensions.
+- [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
+- [ ] Extend WebM to additional AV1 profiles, high dynamic range, and alpha. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and media fragment dimensions.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.

@@ -24,6 +24,52 @@ const MAX_FRAMES_PER_CLIP: usize = 120_000;
 const MP3_DECODER_DELAY: usize = 529;
 const MAX_NARRATION_BYTES: usize = 1024 * 1024;
 
+// Vorbis I §4.3.9 and Opus channel mapping family 1 share this order.
+// Values are the WAVE_FORMAT_EXTENSIBLE bits for each speaker.
+const FRONT_LEFT: u32 = 0x001;
+const FRONT_RIGHT: u32 = 0x002;
+const FRONT_CENTER: u32 = 0x004;
+const LFE: u32 = 0x008;
+const BACK_LEFT: u32 = 0x010;
+const BACK_RIGHT: u32 = 0x020;
+const BACK_CENTER: u32 = 0x100;
+const SIDE_LEFT: u32 = 0x200;
+const SIDE_RIGHT: u32 = 0x400;
+const VORBIS_SPEAKERS: [&[u32]; 8] = [
+    &[FRONT_CENTER],
+    &[FRONT_LEFT, FRONT_RIGHT],
+    &[FRONT_LEFT, FRONT_CENTER, FRONT_RIGHT],
+    &[FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT],
+    &[FRONT_LEFT, FRONT_CENTER, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT],
+    &[
+        FRONT_LEFT,
+        FRONT_CENTER,
+        FRONT_RIGHT,
+        BACK_LEFT,
+        BACK_RIGHT,
+        LFE,
+    ],
+    &[
+        FRONT_LEFT,
+        FRONT_CENTER,
+        FRONT_RIGHT,
+        SIDE_LEFT,
+        SIDE_RIGHT,
+        BACK_CENTER,
+        LFE,
+    ],
+    &[
+        FRONT_LEFT,
+        FRONT_CENTER,
+        FRONT_RIGHT,
+        SIDE_LEFT,
+        SIDE_RIGHT,
+        BACK_LEFT,
+        BACK_RIGHT,
+        LFE,
+    ],
+];
+
 pub(crate) struct AudioSource {
     decoder: Decoder,
     stream: Option<AudioWindow>,
@@ -252,6 +298,7 @@ impl AudioSource {
         }
         let speaker_mask = match &self.decoder {
             Decoder::Opus(track) => track.speaker_mask(),
+            Decoder::Vorbis(track) => track.speaker_mask(),
             _ => None,
         };
         Ok(AudioWindow {
