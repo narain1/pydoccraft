@@ -1,4 +1,4 @@
-//! Decode bounded VP8 and VP9 pictures using WebM presentation timestamps.
+//! Decode bounded AV1, VP8 and VP9 pictures using WebM presentation timestamps.
 use std::{ops::Range, sync::Mutex};
 
 use oxideav_core::{
@@ -19,9 +19,25 @@ use super::{
 };
 use crate::epub::webm;
 
+#[path = "epub_webm_av1.rs"]
+mod av1;
+
 enum Codec {
     Vp8,
     Vp9(Option<ColorConfig>),
+    Av1(Box<av1::Track>),
+}
+
+enum Playback {
+    Native(Mutex<Box<dyn Decoder>>),
+    Av1(Box<av1::Playback>),
+}
+
+#[derive(Clone, Copy)]
+struct VideoColour {
+    depth: u8,
+    matrix: MatrixCoefficients,
+    full: bool,
 }
 
 struct Picture {
@@ -33,7 +49,7 @@ struct Picture {
 pub(crate) struct WebmSource {
     pictures: Vec<Picture>,
     next: usize,
-    decoder: Mutex<Box<dyn Decoder>>,
+    decoder: Playback,
     clip: Range<u64>,
     geometry: Geometry,
     coded: (u32, u32),
@@ -50,17 +66,18 @@ impl WebmSource {
         let mut reader = webm::Reader::open(bytes)?;
         let index = reader.track(MediaType::Video, video_track)?;
         let stream = &reader.demux.streams()[index as usize];
-        let mut codec = match stream.params.codec_id.as_str() {
-            "vp8" => Codec::Vp8,
-            "vp9" => Codec::Vp9(None),
-            _ => return Err(unsupported("WebM video requires a VP8 or VP9 track")),
-        };
         let coded = stream
             .params
             .width
             .zip(stream.params.height)
             .ok_or_else(|| invalid("missing WebM video dimensions"))?;
         check_size(coded)?;
+        let mut codec = match stream.params.codec_id.as_str() {
+            "vp8" => Codec::Vp8,
+            "vp9" => Codec::Vp9(None),
+            "av1" => Codec::Av1(Box::new(av1::Track::new(&stream.params.extradata, coded)?)),
+            _ => return Err(unsupported("WebM video requires an AV1, VP8 or VP9 track")),
+        };
         let timing = reader.demux.track_timing(index);
         let nominal = timing
             .and_then(|timing| timing.default_duration())
@@ -116,11 +133,7 @@ impl WebmSource {
         if shown.is_empty() {
             return Err(invalid("WebM has no displayed pictures"));
         }
-        let bitstream_colour = match codec {
-            Codec::Vp8 => None,
-            Codec::Vp9(colour) => colour,
-        };
-        let (kr, kb, full) = colour(&reader, index, bitstream_colour)?;
+        let (kr, kb, full) = colour(&reader, index, codec.colour()?)?;
         (geometry.kr, geometry.kb, geometry.full_range) = (kr, kb, full);
         let mut last_end = 0;
         for (i, &(packet, begin, explicit, tick)) in shown.iter().enumerate() {
@@ -156,14 +169,17 @@ impl WebmSource {
         } else {
             pictures.len()
         };
-        let decoder: Box<dyn Decoder> = match codec {
-            Codec::Vp8 => Box::new(Vp8Decoder::new(CodecId::new("vp8"))),
-            Codec::Vp9(_) => Box::new(Vp9Decoder::new()),
+        let decoder = match codec {
+            Codec::Vp8 => {
+                Playback::Native(Mutex::new(Box::new(Vp8Decoder::new(CodecId::new("vp8")))))
+            }
+            Codec::Vp9(_) => Playback::Native(Mutex::new(Box::new(Vp9Decoder::new()))),
+            Codec::Av1(track) => Playback::Av1(Box::new(track.into_playback()?)),
         };
         Ok(Self {
             pictures,
             next,
-            decoder: Mutex::new(decoder),
+            decoder,
             clip,
             geometry,
             coded,
@@ -184,35 +200,17 @@ impl WebmSource {
                 return Ok(None);
             }
             self.next += 1;
-            let decoder = self.decoder.get_mut().map_err(invalid)?;
-            decoder.send_packet(&picture.packet).map_err(invalid)?;
-            let frame = match decoder.receive_frame() {
-                Ok(Frame::StreamParams(..)) => decoder.receive_frame(),
-                frame => frame,
-            };
+            let frame = self.decoder.next(&picture.packet, self.coded)?;
             match (frame, &picture.display) {
-                (Err(Error::NeedMore), None) => continue,
-                (Ok(Frame::Video(frame)), Some(time)) => {
-                    let params = decoder
-                        .output_params()
-                        .ok_or_else(|| invalid("missing WebM picture format"))?;
-                    if params.width.zip(params.height) != Some(self.coded)
-                        || frame.pts != picture.packet.pts
-                    {
-                        return Err(invalid(
-                            "WebM decoder returned unexpected picture dimensions or timestamp",
-                        ));
-                    }
+                (None, None) => continue,
+                (Some((frame, format)), Some(time)) => {
                     if time.end <= self.clip.start {
                         continue;
                     }
                     let start = time.start.max(self.clip.start);
                     let stop = time.end.min(self.clip.end);
-                    return self
-                        .image(&frame, params.pixel_format, start, stop - start)
-                        .map(Some);
+                    return self.image(&frame, format, start, stop - start).map(Some);
                 }
-                (Err(error), _) => return Err(invalid(error)),
                 _ => return Err(invalid("WebM decoder disagrees with the picture timeline")),
             }
         }
@@ -274,9 +272,49 @@ impl WebmSource {
     }
 }
 
+impl Playback {
+    fn next(
+        &mut self,
+        packet: &Packet,
+        coded: (u32, u32),
+    ) -> Result<Option<(VideoFrame, Option<PixelFormat>)>, EngineError> {
+        match self {
+            Self::Native(decoder) => {
+                let decoder = decoder.get_mut().map_err(invalid)?;
+                decoder.send_packet(packet).map_err(invalid)?;
+                let result = match decoder.receive_frame() {
+                    Ok(Frame::StreamParams(..)) => decoder.receive_frame(),
+                    frame => frame,
+                };
+                match result {
+                    Err(Error::NeedMore) => Ok(None),
+                    Err(error) => Err(invalid(error)),
+                    Ok(Frame::Video(frame)) => {
+                        let params = decoder
+                            .output_params()
+                            .ok_or_else(|| invalid("missing WebM picture format"))?;
+                        if params.width.zip(params.height) != Some(coded) || frame.pts != packet.pts
+                        {
+                            return Err(invalid(
+                                "WebM decoder returned unexpected picture dimensions or timestamp",
+                            ));
+                        }
+                        Ok(Some((frame, params.pixel_format)))
+                    }
+                    _ => Err(invalid("WebM decoder returned a non-video frame")),
+                }
+            }
+            Self::Av1(decoder) => decoder
+                .next(packet)
+                .map(|frame| frame.map(|(frame, fmt)| (frame, Some(fmt)))),
+        }
+    }
+}
+
 impl Codec {
     fn inspect(&mut self, bytes: &[u8], coded: (u32, u32)) -> Result<(bool, bool), EngineError> {
         match self {
+            Self::Av1(state) => state.inspect(bytes),
             Self::Vp8 => {
                 let header = parse_header(bytes).map_err(invalid)?;
                 if let Some(key) = header.keyframe {
@@ -325,6 +363,27 @@ impl Codec {
                 }
                 Ok((keyframe, shown == 1))
             }
+        }
+    }
+
+    fn colour(&self) -> Result<VideoColour, EngineError> {
+        match self {
+            Self::Av1(track) => track.colour(),
+            Self::Vp9(Some(colour)) => Ok(VideoColour {
+                depth: colour.bit_depth,
+                matrix: match colour.color_space {
+                    ColorSpace::Bt709 => MatrixCoefficients::BT709,
+                    ColorSpace::Smpte240 => MatrixCoefficients::Smpte240M,
+                    ColorSpace::Bt2020 => MatrixCoefficients::BT2020NonConstantLuminance,
+                    _ => MatrixCoefficients::Unspecified,
+                },
+                full: colour.color_range_full,
+            }),
+            _ => Ok(VideoColour {
+                depth: 8,
+                matrix: MatrixCoefficients::Unspecified,
+                full: false,
+            }),
         }
     }
 }
@@ -443,12 +502,11 @@ fn geometry(
 fn colour(
     reader: &webm::Reader,
     index: u32,
-    signal: Option<ColorConfig>,
+    signal: VideoColour,
 ) -> Result<(f32, f32, bool), EngineError> {
     let declared = reader.demux.video_colour(index);
     if declared.is_some_and(|colour| {
-        (colour.bits_per_channel() != 0
-            && colour.bits_per_channel() != signal.map_or(8, |c| u64::from(c.bit_depth)))
+        (colour.bits_per_channel() != 0 && colour.bits_per_channel() != u64::from(signal.depth))
             || matches!(
                 colour.transfer_characteristics(),
                 TransferCharacteristics::BT2100Pq | TransferCharacteristics::AribStdB67Hlg
@@ -456,18 +514,10 @@ fn colour(
     }) {
         return Err(unsupported("WebM HDR colour or inconsistent sample depth"));
     }
-    let default = signal.map_or(MatrixCoefficients::Unspecified, |colour| {
-        match colour.color_space {
-            ColorSpace::Bt709 => MatrixCoefficients::BT709,
-            ColorSpace::Smpte240 => MatrixCoefficients::Smpte240M,
-            ColorSpace::Bt2020 => MatrixCoefficients::BT2020NonConstantLuminance,
-            _ => MatrixCoefficients::Unspecified,
-        }
-    });
     let matrix = declared
         .map(|colour| colour.matrix_coefficients())
         .filter(|&matrix| matrix != MatrixCoefficients::Unspecified)
-        .unwrap_or(default);
+        .unwrap_or(signal.matrix);
     let (kr, kb) = match matrix {
         MatrixCoefficients::Unspecified
         | MatrixCoefficients::BT470Bg
@@ -479,7 +529,7 @@ fn colour(
         _ => return Err(unsupported("WebM colour matrix")),
     };
     let full = match declared.map_or(ColourRange::Unspecified, |colour| colour.range()) {
-        ColourRange::Unspecified => signal.is_some_and(|colour| colour.color_range_full),
+        ColourRange::Unspecified => signal.full,
         ColourRange::Broadcast => false,
         ColourRange::Full => true,
         _ => return Err(unsupported("WebM colour range")),

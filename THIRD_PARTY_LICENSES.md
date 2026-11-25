@@ -173,6 +173,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `once_cell` | `1.21.4` | MIT OR Apache-2.0 |
 | `ordered-channel` | `1.2.0` | MIT OR Apache-2.0 |
 | `oxideav-aac` | `0.1.7` | MIT |
+| `oxideav-av1` | `0.1.24` | MIT |
 | `oxideav-core` | `0.1.43` | MIT |
 | `oxideav-h264` | `0.1.12` | MIT |
 | `oxideav-mkv` | `0.0.12` | MIT |

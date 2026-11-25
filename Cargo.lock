@@ -1565,6 +1565,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideav-av1"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "166904a6f5742c4eec359f32ff0fe4c269bbc54f4424291567827f483071b8de"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
 name = "oxideav-core"
 version = "0.1.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2032,6 +2041,7 @@ dependencies = [
  "mp3dec",
  "ogg",
  "oxideav-aac",
+ "oxideav-av1",
  "oxideav-core",
  "oxideav-h264",
  "oxideav-mkv",

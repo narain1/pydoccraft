@@ -145,7 +145,10 @@ fn source(
             || ((ogg_video || webm_video) && (advertises("opus") || advertises("vorbis")));
     let playable_video = kind == "video" && media == "video/mp4"
         || (ogg_video && advertises("theora"))
-        || (webm_video && ["vp8", "vp9", "vp09"].into_iter().any(advertises));
+        || (webm_video
+            && ["av01", "av1", "vp8", "vp9", "vp09"]
+                .into_iter()
+                .any(advertises));
     Ok(json!({
         "uri": src, "path": path, "media_type": media, "playable_audio": playable_audio,
         "fragment_start_us": fragment_start_us, "fragment_end_us": fragment_end_us,

@@ -3111,6 +3111,49 @@ first
             self.assertEqual(audio, video[:-441 * 4])
             self.assertEqual(narration, audio)
 
+    def test_embedded_webm_av1_seeks_and_retains_sdr_depth(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        markup = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>AV1</title></head>
+          <body><video><source src="eight.webm" type="video/webm; codecs=&quot;av01.0.00M.08, opus&quot;"/>
+          <track kind="captions" srclang="en" src="captions.vtt"/></video>
+          <video><source src="ten.webm" type="video/webm; codecs=av01.0.00M.10"/></video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("AV1", markup, "OEBPS/clip.xhtml")],
+                resources={
+                    "OEBPS/eight.webm": doc_ex.EpubResource(
+                        "video/webm", (fixtures / "epub-video-av1-opus.webm").read_bytes()),
+                    "OEBPS/ten.webm": doc_ex.EpubResource(
+                        "video/webm", (fixtures / "epub-video-av1-10.webm").read_bytes()),
+                    "OEBPS/captions.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00:00.550 --> 00:00:00.650\nCaption\n"),
+                },
+            )
+        with doc_ex.open(data) as book:
+            for element in book.epub_embedded_media(0):
+                self.assertTrue(element.sources[0].playable_video)
+            pictures = list(book.epub_embedded_video(0, 0))
+            self.assertEqual([frame.start_us for frame in pictures], [i * 125_000 for i in range(12)])
+            for i, frame in enumerate(pictures):
+                self.assertEqual((frame.width, frame.height, frame.pixel_aspect_ratio), (96, 64, (4, 3)))
+                red, _, blue = frame.rgb[:3]
+                self.assertGreater(red if i < 6 else blue, 245)
+                self.assertLess(blue if i < 6 else red, 22)
+            window = list(book.epub_embedded_video(0, 0, start_us=575_000, end_us=830_000, text_track=0))
+            self.assertEqual([(frame.start_us, frame.duration_us) for frame in window],
+                             [(575_000, 50_000), (625_000, 25_000), (650_000, 100_000), (750_000, 80_000)])
+            self.assertEqual([frame.rgb for frame in window], [pictures[i].rgb for i in (4, 5, 5, 6)])
+            self.assertEqual([bool(frame.text_cues) for frame in window], [True, True, False, False])
+            audio = list(book.epub_embedded_audio(0, 0, start_us=575_000, end_us=830_000))
+            self.assertEqual(sum(chunk.frame_count for chunk in audio), 12_240)
+            ten = list(book.epub_embedded_video(0, 1))
+            self.assertEqual([frame.start_us for frame in ten], [0, 167_000, 333_000, 500_000])
+            for frame in ten:
+                self.assertEqual((frame.width, frame.height), (64, 48))
+                red, green, blue = frame.rgb[:3]
+                self.assertLess(red, 10)
+                self.assertGreater(min(green, blue), 245)
+
     def test_embedded_webm_vp9_retains_colour_and_depth(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         for filename, codecs, geometry, fps, count in (
