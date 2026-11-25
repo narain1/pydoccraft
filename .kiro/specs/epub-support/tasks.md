@@ -78,7 +78,8 @@
 - [x] Draw MathML solid and dashed table rules and frames, respect span interruptions and frame spacing, and preserve standalone rules as editable Word table borders.
 - [x] Preserve tight column spacing in editable DOCX matrix projections and recover their logical rows during extraction.
 - [x] Render native MathML row labels outside auto-width data grids on the authored side, including minimum label spacing, searchable PDF and editable unruled DOCX.
-- [ ] Support MathML row-label overlap modes, authored whole-table widths with row labels, and editable Word borders for ruled labeled grids.
+- [x] Honor definite whole-table widths for MathML labeled grids and retain editable unruled DOCX positions.
+- [ ] Support MathML row-label overlap modes and editable Word borders for ruled labeled grids.
 - [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
 - [ ] Extend MathML alignment to multiple groups per cell, explicit alignment marks, compound numeric expressions, right-to-left groups and cross-table scopes.
 - [ ] Extend editable DOCX export to negative leading offsets and expand the remaining MathML visual properties.

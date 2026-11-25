@@ -7028,13 +7028,78 @@ overlay
 
         for attrs, message in (
             ('side="rightoverlap"', "overlapping MathML table row labels"),
-            ('width="250pt"', "MathML table row labels with a definite table width"),
             ('minlabelspacing="-1pt"', "MathML table label spacing"),
         ):
             with self.subTest(attrs=attrs), doc_ex.open(epub_fixture(chapter_one=template.format(attrs=attrs))) as book:
                 for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                         operation()
+
+    def test_mathml_labeled_rows_honor_authored_whole_table_width(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Equation widths</title><meta name="viewport" content="width=440,height=200"/>
+            <style>body {{margin:0}} p {{margin:0;text-align:center}}</style></head>
+          <body><p><m:math mathsize="12pt">
+            <m:mtable width="{width}" side="{side}" columnwidth="{columns}"
+                columnalign="left right" minlabelspacing="10pt" rowspacing="8pt">
+              <m:mlabeledtr><m:mtd><m:mtext>LabelOne</m:mtext></m:mtd>
+                <m:mtd><m:mtext>North</m:mtext></m:mtd><m:mtd><m:mtext>East</m:mtext></m:mtd>
+              </m:mlabeledtr>
+              <m:mlabeledtr><m:mtd><m:mtext>LabelTwo</m:mtext></m:mtd>
+                <m:mtd columnspan="2"><m:mtext>Center</m:mtext></m:mtd>
+              </m:mlabeledtr>
+            </m:mtable>
+          </m:math></p></body></html>"""
+        book_fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 440, 200)])
+        tokens = ("LabelOne", "LabelTwo", "North", "East", "Center")
+
+        def coordinates(document: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            return {token: document[0].search_for(token)[0] for token in tokens}
+
+        for side, sign in (("left", -1), ("right", 1)):
+            results = []
+            for width in ("200pt", "247.5pt", "75%"):
+                xhtml = chapter.format(width=width, side=side, columns="auto")
+                with doc_ex.open(rewrite_epub(book_fixed, {"OEBPS/s0.xhtml": xhtml})) as book:
+                    preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                    with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                        self.assertEqual(preview, rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                        results.append((preview, coordinates(pdf)))
+                if width.endswith("pt"):
+                    with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
+                        with doc_ex.open(book.convert("pdf")) as pdf:
+                            reflow = coordinates(pdf)
+                        with doc_ex.open(book.convert("docx")) as editable:
+                            self.assertTrue(all(editable[0].get_text().count(token) == 1 for token in tokens))
+                            with doc_ex.open(editable.convert("pdf")) as pdf:
+                                reopened = coordinates(pdf)
+                        for token in tokens:
+                            for exact, word in zip(reflow[token], reopened[token]):
+                                self.assertAlmostEqual(exact, word, delta=0.35)
+            narrow, wide = results[0][1], results[1][1]
+            self.assertEqual(results[1], results[2])
+            grid_shift = wide["North"][0] - narrow["North"][0]
+            for token in ("North", "East", "Center"):
+                self.assertAlmostEqual(wide[token][0] - narrow[token][0], grid_shift, delta=0.05)
+                self.assertEqual(narrow[token][1], wide[token][1])
+            for token in ("LabelOne", "LabelTwo"):
+                label_shift = wide[token][0] - narrow[token][0] - grid_shift
+                self.assertAlmostEqual(label_shift, sign * 23.75, delta=0.2)
+
+        fitted = chapter.format(width="260pt", side="right", columns="15% fit")
+        with doc_ex.open(epub_fixture(chapter_one=fitted)) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                boxes = coordinates(pdf)
+                self.assertGreater(boxes["East"][0] - boxes["North"][0], 90)
+                self.assertAlmostEqual(boxes["LabelOne"][0] - boxes["East"][2], 10, delta=1)
+            with doc_ex.open(book.convert("docx")) as word:
+                self.assertTrue(all(word[0].get_text().count(token) == 1 for token in tokens))
+
+        narrow = chapter.format(width="130pt", side="right", columns="55pt 45pt")
+        with doc_ex.open(epub_fixture(chapter_one=narrow)) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "labeled contents exceed the authored"):
+                    operation()
 
     def test_mathml_table_rules_and_frame_preserve_spans(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">

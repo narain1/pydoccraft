@@ -493,14 +493,6 @@ fn horizontal_alignment(value: &str) -> Result<ColJc, EngineError> {
 
 impl Labels {
     fn read(table: Node<'_, '_>, em: f32) -> Result<Self, EngineError> {
-        if table
-            .attribute("width")
-            .is_some_and(|width| width.trim() != "auto")
-        {
-            return Err(unsupported(
-                "MathML table row labels with a definite table width",
-            ));
-        }
         let left = match table.attribute("side").unwrap_or("right").trim() {
             "left" => true,
             "right" => false,
@@ -660,6 +652,7 @@ pub(in crate::epub) struct Layout {
     heights: Vec<f32>,
     row_positions: Vec<f32>,
     label_width: f32,
+    label_inset: f32,
     rules: Vec<MItem>,
     occupancy: Option<Occupancy>,
     rule_color: Rgb,
@@ -782,21 +775,31 @@ impl Table {
         Ok(())
     }
 
-    fn declared_track_width(&self) -> Result<Option<f32>, EngineError> {
+    fn declared_track_width(&self, label_inset: f32) -> Result<Option<f32>, EngineError> {
         let Some(width) = self.width else {
             return Ok(None);
         };
-        let remaining = width - self.column_gaps.iter().sum::<f32>() - 2.0 * self.rules.inset()[0];
+        let remaining = width
+            - self.column_gaps.iter().sum::<f32>()
+            - 2.0 * (self.rules.inset()[0] + label_inset);
         if remaining < -TABLE_WIDTH_EPSILON {
-            return Err(unsupported(
-                "MathML table width is smaller than its gaps and frame",
-            ));
+            return Err(unsupported(if label_inset > 0.0 {
+                "MathML labeled contents exceed the authored table width"
+            } else {
+                "MathML table width is smaller than its gaps and frame"
+            }));
         }
         Ok(Some(remaining.max(0.0)))
     }
 
     fn definite_columns(&self) -> Result<Vec<Option<f32>>, EngineError> {
-        let total = self.declared_track_width()?;
+        // A labeled grid's free space depends on the measured label. Its
+        // authored fixed tracks remain available for nested relative widths.
+        let total = if self.labels.is_some() {
+            None
+        } else {
+            self.declared_track_width(0.0)?
+        };
         let widths: Vec<_> = self
             .column_widths
             .iter()
@@ -899,11 +902,12 @@ impl Table {
         let [column_gap, row_pitch] = editor.matrix_spacing()?;
         let mut widths = layout.widths;
         let mut gaps = self.column_gaps;
-        if let Some(labels) = &self.labels {
+        if self.labels.is_some() {
             widths.insert(0, layout.label_width);
             widths.push(layout.label_width);
-            gaps.insert(0, labels.gap);
-            gaps.push(labels.gap);
+            let gap = layout.label_inset - layout.label_width;
+            gaps.insert(0, gap);
+            gaps.push(gap);
         }
         let native_columns = matrix_columns(&widths, &gaps, column_gap);
         let split_columns = native_columns.is_none();
@@ -1105,7 +1109,15 @@ impl Table {
             indices.sort_by_key(|&index| key(&self.cells[index]));
             indices
         };
-        let declared = self.declared_track_width()?;
+        let minimum_label_inset = self
+            .labels
+            .as_ref()
+            .map_or(0.0, |labels| label_width + labels.gap);
+        let declared = self.declared_track_width(minimum_label_inset)?;
+        // Size automatic data columns intrinsically. Fit columns can use
+        // remaining space once both outside tracks reserve the label gap.
+        let fill = declared
+            .filter(|_| self.labels.is_none() || self.column_widths.contains(&ColumnWidth::Fit));
         if self.equal_columns {
             let common_width = self
                 .cells
@@ -1117,7 +1129,7 @@ impl Table {
                     equal_track_size(&self.column_gaps, &cell.columns, width)
                 })
                 .fold(0.0, f32::max);
-            widths.fill(self.equal_column_width(common_width, declared)?);
+            widths.fill(self.equal_column_width(common_width, fill)?);
         } else {
             let order = if declared.is_some() {
                 ordered(|cell| cell.columns.end)
@@ -1142,7 +1154,7 @@ impl Table {
                     measures[index].width(span.start, &anchors),
                 )?;
             }
-            if let Some(total) = declared {
+            if let Some(total) = fill {
                 self.fill_width(&mut widths, total)?;
             }
             for index in fitted {
@@ -1176,10 +1188,18 @@ impl Table {
         let y = starts(&heights, &self.row_gaps);
         let [left_inset, top_inset] = self.rules.inset();
         let grid_width = x[widths.len()] + left_inset * 2.0;
-        let label_inset = self
-            .labels
-            .as_ref()
-            .map_or(0.0, |labels| label_width + labels.gap);
+        let label_inset = match self.width {
+            Some(width) if self.labels.is_some() => {
+                let available = (width - grid_width) / 2.0;
+                if available < minimum_label_inset - TABLE_WIDTH_EPSILON {
+                    return Err(unsupported(
+                        "MathML labeled contents exceed the authored table width",
+                    ));
+                }
+                available.max(minimum_label_inset)
+            }
+            _ => minimum_label_inset,
+        };
         let width = grid_width + 2.0 * label_inset;
         let height = y[heights.len()] + top_inset * 2.0;
         if ![width, height]
@@ -1289,6 +1309,7 @@ impl Table {
             heights,
             row_positions: y.into_iter().map(|start| start + top_inset).collect(),
             label_width,
+            label_inset,
             rules,
             occupancy,
             rule_color,
