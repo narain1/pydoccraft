@@ -631,7 +631,7 @@ impl<'book> Layout<'book> {
             style.overflow.x != Overflow::Visible || style.overflow.y != Overflow::Visible;
         self.add(
             style,
-            styled.inline_bounds,
+            styled.intrinsic_bounds,
             PaintBox {
                 id: NodeId::from(0usize),
                 dom: Some(node.id()),
@@ -789,10 +789,7 @@ impl<'book> Layout<'book> {
                     display: Display::Block,
                     ..Default::default()
                 },
-                super::style::InlineBounds {
-                    min: None,
-                    max: None,
-                },
+                super::style::IntrinsicBounds::NONE,
                 PaintBox {
                     id: NodeId::from(0usize),
                     dom: None,
@@ -814,7 +811,7 @@ impl<'book> Layout<'book> {
     fn add(
         &mut self,
         style: Style,
-        bounds: super::style::InlineBounds,
+        bounds: super::style::IntrinsicBounds,
         mut paint_box: PaintBox,
     ) -> Result<usize, EngineError> {
         let index = self.boxes.len();

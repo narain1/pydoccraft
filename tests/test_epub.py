@@ -2629,7 +2629,7 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(middle, preview("width:8px;min-width:fit-content(calc(4em + 7px))"))
         self.assertEqual(minimum, preview("width:0px;min-inline-size:fit-content(0px)"))
         self.assertEqual(maximum, preview("width:200px;max-width:fit-content(200px)"))
-        for size in ("min-height:min-content", "max-inline-size:fit-content(10%)", "width:contain"):
+        for size in ("min-height:fit-content(10px)", "max-inline-size:fit-content(10%)", "width:contain"):
             with self.subTest(size=size):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "CSS intrinsic box size"):
                     preview(size)
@@ -2690,6 +2690,56 @@ class EpubTests(unittest.TestCase):
         )) as book:
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "relative border-box padding"):
                 book.render_page(0, dpi=96)
+
+    def test_css_intrinsic_block_bounds_measure_at_definite_inline_sizes(self) -> None:
+        original = fixed_spread_fixture([("", "white", 280, 165)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Block bounds</title>
+          <meta name="viewport" content="width=280,height=165"/><style>
+          html,body,p{margin:0;font-size:10px}
+          #holder{position:absolute;left:20px;top:10px;width:200px}
+          #panel{width:92px;padding:4px;border:2px solid #2a5a7a;background:#98b970}
+          #plate{display:block;position:absolute;left:150px;top:75px;width:72px}
+          CSS</style></head><body><div id="holder"><div id="panel">
+          <p><a href="https://example.org/block">First row of narrow searchable words</a></p>
+          <p>Additional text wraps here.</p></div></div>
+          <svg xmlns="http://www.w3.org/2000/svg" id="plate" viewBox="0 0 20 10" width="20" height="10">
+          <rect x="0" y="0" width="20" height="10" fill="#553366"/>
+          </svg></body></html>"""
+
+        def publication(rules: str) -> bytes:
+            chapter = template.replace("CSS", rules)
+            return rewrite_epub(original, {"OEBPS/s0.xhtml": chapter})
+
+        for sizing in ("content-box", "border-box"):
+            views = []
+            for body, plate in (
+                ("min-block-size:min-content;height:5px", "min-height:min-content;height:6px"),
+                ("max-height:max-content;height:120px", "max-block-size:min-content;height:100px"),
+                ("height:auto", "height:36px"),
+            ):
+                rules = f"#panel{{box-sizing:{sizing};{body}}}#plate{{{plate}}}"
+                with doc_ex.open(publication(rules)) as book:
+                    pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                    exported = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                with doc_ex.open(exported) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                    hit, = pdf[0].search_for("First")
+                    self.assertIn("Additional", pdf[0].get_text())
+                    links = pdf[0].get_links()
+                    self.assertTrue(links)
+                    self.assertTrue(all(link.uri == "https://example.org/block" for link in links))
+                    views.append((pixels, hit, [link.bbox for link in links]))
+            with self.subTest(sizing=sizing):
+                self.assertTrue(views[0] == views[1] == views[2], "intrinsic block size changed geometry")
+
+        for rules, message in (
+            ("#panel{width:60%;min-height:min-content}", "definite inline size"),
+            ("#holder{display:flex}#panel{min-height:min-content}", "definite inline size"),
+            ("#panel{padding-top:10%;min-height:min-content}", "fixed padding and borders"),
+        ):
+            with self.subTest(rules=rules), doc_ex.open(publication(rules)) as book:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                    book.render_page(0, dpi=96)
 
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>

@@ -21,6 +21,33 @@ pub(super) type Paint = (Rgb, f32);
 pub(super) type InlineBounds = MinMax<Option<InlineBound>, Option<InlineBound>>;
 
 #[derive(Clone, Copy)]
+pub(super) struct IntrinsicBounds {
+    pub inline: InlineBounds,
+    pub block: MinMax<bool, bool>,
+}
+
+impl IntrinsicBounds {
+    pub const NONE: Self = Self {
+        inline: MinMax {
+            min: None,
+            max: None,
+        },
+        block: MinMax {
+            min: false,
+            max: false,
+        },
+    };
+
+    pub fn has_inline(self) -> bool {
+        self.inline.min.is_some() || self.inline.max.is_some()
+    }
+
+    pub fn has_block(self) -> bool {
+        self.block.min || self.block.max
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(super) enum InlineBound {
     Minimum,
     Maximum,
@@ -36,7 +63,7 @@ pub(super) struct ChapterStyles {
 
 pub(super) struct Styled {
     pub box_style: Style,
-    pub inline_bounds: InlineBounds,
+    pub intrinsic_bounds: IntrinsicBounds,
     pub text: Typography,
     pub inline: bool,
     pub bidi: super::bidi::Mode,
@@ -321,9 +348,20 @@ impl ChapterStyles {
                     _ => None,
                 })
             };
-            let inline_bounds = InlineBounds {
-                min: intrinsic_bound("min-width")?,
-                max: intrinsic_bound("max-width")?,
+            let block_bound = |key| {
+                let value = value(&values, key);
+                value.eq_ignore_ascii_case("min-content")
+                    || value.eq_ignore_ascii_case("max-content")
+            };
+            let intrinsic_bounds = IntrinsicBounds {
+                inline: InlineBounds {
+                    min: intrinsic_bound("min-width")?,
+                    max: intrinsic_bound("max-width")?,
+                },
+                block: MinMax {
+                    min: block_bound("min-height"),
+                    max: block_bound("max-height"),
+                },
             };
             let box_style = Style {
                 display: match display {
@@ -472,7 +510,7 @@ impl ChapterStyles {
                 node.id(),
                 Styled {
                     box_style,
-                    inline_bounds,
+                    intrinsic_bounds,
                     text,
                     inline,
                     bidi,

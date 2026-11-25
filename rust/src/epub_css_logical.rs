@@ -390,8 +390,15 @@ pub(super) fn intrinsic_size_kind(name: &str, value: &str) -> Option<ValueKind> 
     ) && (keyword(value, "min-content")
         || keyword(value, "max-content")
         || fit_content_argument(value).is_some());
+    let intrinsic_block_bound = matches!(
+        name,
+        "min-height" | "max-height" | "min-block-size" | "max-block-size"
+    ) && (keyword(value, "min-content")
+        || keyword(value, "max-content"));
     Some(match kind {
-        ValueKind::Supported if !preferred && !intrinsic_width_bound => ValueKind::Unsupported,
+        ValueKind::Supported if !preferred && !intrinsic_width_bound && !intrinsic_block_bound => {
+            ValueKind::Unsupported
+        }
         _ => kind,
     })
 }
