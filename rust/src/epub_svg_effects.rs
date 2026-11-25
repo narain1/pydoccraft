@@ -76,6 +76,10 @@ pub(in crate::epub) fn is_lighting(tag: &str) -> bool {
     matches!(tag, "feDiffuseLighting" | "feSpecularLighting")
 }
 
+pub(in crate::epub) fn is_light_source(tag: &str) -> bool {
+    matches!(tag, "feDistantLight" | "fePointLight")
+}
+
 pub(in crate::epub) fn paint_properties(tag: &str) -> &'static [&'static str] {
     match tag {
         "feDropShadow" | "feFlood" => &["flood-color", "flood-opacity"],
@@ -174,7 +178,7 @@ pub(in crate::epub) fn validate_markup(root: Node<'_, '_>) -> Result<(), EngineE
             "filter" => validate_chain(node)?,
             tag if is_filter_primitive(tag) => validate_primitive(node)?,
             tag if is_transfer_channel(tag) => transfer::validate_channel(node)?,
-            "feDistantLight" => lighting::validate_source(node)?,
+            tag if is_light_source(tag) => lighting::validate_source(node)?,
             "feMergeNode"
                 if !node
                     .parent_element()

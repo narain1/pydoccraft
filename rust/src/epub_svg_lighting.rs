@@ -1,14 +1,14 @@
-/*! Validate the distant-light profile before calling the native raster kernel. */
+//! Validate bounded SVG lighting before calling the native raster kernel.
 use resvg::{
     tiny_skia::Transform,
     usvg::{
-        filter::{ColorInterpolation, Kind, Primitive},
+        filter::{ColorInterpolation, Kind, LightSource, Primitive},
         NonZeroRect,
     },
 };
 use roxmltree::Node;
 
-use super::{finite_number, is_lighting, positive_axes};
+use super::{finite_number, is_light_source, is_lighting, positive_axes, MAX_OFFSET};
 use crate::{
     epub::{css, invalid, limited, unsupported},
     EngineError,
@@ -20,10 +20,12 @@ pub(super) fn validate(node: Node<'_, '_>) -> Result<(), EngineError> {
     let mut sources = node.children().filter(Node::is_element);
     if !sources
         .next()
-        .is_some_and(|light| light.has_tag_name("feDistantLight"))
+        .is_some_and(|light| is_light_source(light.tag_name().name()))
         || sources.next().is_some()
     {
-        return Err(invalid("SVG lighting requires one distant light"));
+        return Err(invalid(
+            "SVG lighting requires one distant light or point light",
+        ));
     }
     if node.has_attribute("kernelUnitLength") {
         return Err(unsupported("SVG lighting kernelUnitLength"));
@@ -63,11 +65,16 @@ pub(super) fn validate_source(node: Node<'_, '_>) -> Result<(), EngineError> {
         .is_some_and(|parent| is_lighting(parent.tag_name().name()))
         || node.children().any(|child| child.is_element())
     {
-        return Err(invalid("misplaced SVG distant light"));
+        return Err(invalid("misplaced SVG light source"));
     }
-    for property in ["azimuth", "elevation"] {
+    let (coordinates, max): (&[_], _) = if node.has_tag_name("fePointLight") {
+        (&["x", "y", "z"], MAX_OFFSET)
+    } else {
+        (&["azimuth", "elevation"], 360.0)
+    };
+    for &property in coordinates {
         if let Some(value) = node.attribute(property) {
-            bounded_number(value, 360.0)?;
+            bounded_number(value, max)?;
         }
     }
     Ok(())
@@ -122,11 +129,46 @@ pub(super) fn work(
             "SVG lighting region must fit within the raster viewport",
         ));
     }
-    // Charge the eight neighboring alpha samples, input and output buffers,
-    // normal calculation and color work. Specular also evaluates an exponent.
-    Ok(if matches!(primitive.kind(), Kind::SpecularLighting(_)) {
-        32
-    } else {
-        24
-    })
+    // Charge the neighboring alpha samples, buffers and color work.
+    // Specular also evaluates an exponent.
+    let (source, surface, passes) = match primitive.kind() {
+        Kind::DiffuseLighting(light) => (light.light_source(), light.surface_scale(), 24),
+        Kind::SpecularLighting(light) => (light.light_source(), light.surface_scale(), 32),
+        _ => return Err(invalid("invalid SVG lighting primitive")),
+    };
+    if let LightSource::PointLight(point) = source {
+        if device.sx != device.sy {
+            return Err(unsupported(
+                "SVG point lighting requires uniform device scale",
+            ));
+        }
+        // Native resvg scales the light's z coordinate with the device,
+        // while surface heights remain in the original units.
+        if surface != 0.0 && device.sx != 1.0 {
+            return Err(unsupported(
+                "SVG raised point lighting requires unit device scale",
+            ));
+        }
+        if (point.z - surface.max(0.0)) * device.sx < 1.0 / 256.0 {
+            return Err(unsupported(
+                "SVG point light height must be above the sampled surface",
+            ));
+        }
+        let position = [
+            point.x * device.sx + device.tx,
+            point.y * device.sy + device.ty,
+            point.z * device.sx,
+        ];
+        if position
+            .iter()
+            .any(|v| !v.is_finite() || v.abs() > MAX_OFFSET)
+        {
+            return Err(limited(
+                "SVG point lighting exceeds its device position budget",
+            ));
+        }
+        // A point light normalizes a new light vector at every sample.
+        return Ok(passes + 8);
+    }
+    Ok(passes)
 }

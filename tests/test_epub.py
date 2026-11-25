@@ -16341,6 +16341,138 @@ Final cue
                     else:
                         book.render_page(0, dpi=96)
 
+    def test_svg_point_lighting_matches_transformed_planar_shading_and_masked_pdf(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 160, 112)])
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Point light</title>
+          <meta name="viewport" content="width=160,height=112"/><style>body {margin:0}</style>
+          </head><body>SVGCONTENT</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        title = '<text id="ink" x="26" y="54" font-size="22">Café</text>'
+        link = f'<a href="https://example.org/ink">{title}</a>'
+        marker = '<a href="#ink"><rect x="2" y="2" width="6" height="6" fill="green"/></a>'
+        transform = 'translate(12 8) scale(1.25)'
+        attrs = 'filterUnits="userSpaceOnUse" x="8" y="8" width="96" height="64" color-interpolation-filters="sRGB"'
+        mask = '<feComposite operator="in" in="lit" in2="SourceAlpha"/>'
+
+        def markup(primitive: str, artwork: str = title, placement: str = transform, after: str = "") -> str:
+            filt = f'<defs><filter id="light" {attrs}>{primitive}</filter></defs>' if primitive else ""
+            use = ' filter="url(#light)"' if primitive else ""
+            return (f'<svg xmlns="http://www.w3.org/2000/svg" width="160" height="112" viewBox="0 0 160 112">'
+                    f'{filt}<g transform="{placement}"{use}>{artwork}</g>{after}</svg>')
+
+        def publication(svg: str, inline: bool) -> bytes:
+            if inline:
+                return rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter.replace("SVGCONTENT", svg)})
+            return rewrite_epub(fixture, {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg})
+
+        def light(kind: str, color: str, coefficient: str, surface: int = 0) -> str:
+            mode = f'{kind.lower()}Constant="{coefficient}"'
+            if kind == "Specular":
+                mode += ' specularExponent="6"'
+            return (f'<fe{kind}Lighting in="SourceAlpha" result="lit" lighting-color="{color}" '
+                    f'surfaceScale="{surface}" {mode}>'
+                    f'<fePointLight x="48" y="30" z="24"/></fe{kind}Lighting>')
+
+        def color_at(plane: tuple[int, bytes], x: int, y: int) -> tuple[int, ...]:
+            width, pixels = plane
+            offset = (y * width + x) * 4
+            return tuple(pixels[offset:offset + 4])
+
+        def diffuse_at(x: float, y: float, point: tuple[float, float, float]) -> float:
+            a, b, z = point
+            return z / ((a - x)**2 + (b - y)**2 + z*z)**.5
+
+        def display_channels(lighting: tuple[int, ...], factor: float, *, specular: bool) -> tuple[int, ...]:
+            values = tuple(int(channel * factor + .5) for channel in lighting)
+            alpha = max(values) if specular else 255
+            return (*(255 - alpha + value for value in values), 255)
+
+        for inline in (False, True):
+            for dpi in (96, 144):
+                scale = dpi / 96
+                for kind, raw, color, constant in (
+                    ("Diffuse", (100, 180, 220), "#64b4dc", ".75"),
+                    ("Specular", (200, 100, 50), "#c86432", ".65"),
+                ):
+                    with self.subTest(inline=inline, dpi=dpi, kind=kind):
+                        with doc_ex.open(publication(markup(light(kind, color, constant)), inline)) as book:
+                            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+                            self.assertEqual(color_at(preview, 3, 3), (255, 255, 255, 255))
+                            # The authored transform maps the light from
+                            # (48, 30, 24) to (72, 45.5, 30) in SVG space.
+                            for x, y in ((24, 26), (32, 60), (72, 46), (90, 70), (122, 90)):
+                                cosine = diffuse_at(x, y, (72, 45.5, 30))
+                                specular = kind == "Specular"
+                                factor = float(constant) * (((1 + cosine) / 2)**3 if specular else cosine)
+                                self.assertEqual(color_at(preview, int(x * scale), int(y * scale)),
+                                                 display_channels(raw, factor, specular=specular))
+                            with doc_ex.open(book.export_epub_fixed_pdf(dpi=dpi)) as pdf:
+                                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))), preview)
+                            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "filter.*geometry"):
+                                book.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+
+                lit = markup(light("Diffuse", "blue", ".8") + mask, link, after=marker)
+                plain = markup("", link, after=marker)
+                with doc_ex.open(publication(lit, inline)) as book, doc_ex.open(publication(plain, inline)) as control:
+                    width, pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+                    expected_width, expected = rgba_pixels(png_chunks(control.render_page(0, dpi=dpi)))
+                    self.assertEqual(width, expected_width)
+                    self.assertEqual(pixels[0::4], expected[0::4])
+                    self.assertEqual(pixels[1::4], expected[1::4])
+                    self.assertNotEqual(pixels[2::4], expected[2::4])
+                    with (
+                        doc_ex.open(book.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as pdf,
+                        doc_ex.open(control.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as manual,
+                    ):
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))), (width, pixels))
+                        self.assertEqual(pdf[0].get_text(), "Café")
+                        found = pdf[0].search_for("Café")
+                        self.assertTrue(found)
+                        self.assertEqual(found, manual[0].search_for("Café"))
+                        actual = {entry.uri: entry for entry in pdf[0].get_links()}
+                        authored = {entry.uri: entry for entry in manual[0].get_links()}
+                        self.assertEqual(actual.keys(), authored.keys())
+                        self.assertEqual(len(actual), 2)
+                        self.assertEqual(actual["#page=1"].metadata["target_page"], 0)
+                        for uri, entry in actual.items():
+                            for edge, authored_edge in zip(entry.bbox, authored[uri].bbox, strict=True):
+                                self.assertAlmostEqual(edge, authored_edge, delta=72 / dpi)
+                        with pdf.edit() as edit:
+                            target, = re.findall(rb"/XYZ[ ]+([1-9][0-9.]*)[ ]+([0-9.]+)[ ]+null",
+                                                 edit.to_bytes(object_streams=False))
+                        ink = [(i // 4 % width, i // 4 // width) for i in range(0, len(expected), 4)
+                               if expected[i] == expected[i + 1] == expected[i + 2] < 255]
+                        self.assertTrue(ink)
+                        self.assertEqual(tuple(map(float, target)),
+                                         (min(x for x, _ in ink) * 72 / dpi, 84 - min(y for _, y in ink) * 72 / dpi))
+
+        raised = markup(light("Diffuse", "white", ".75", surface=6),
+                        '<rect x="36" y="24" width="36" height="24"/>', "translate(12 8)")
+        with doc_ex.open(publication(raised, False)) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            for x, z in ((76, 18), (92, 24)):
+                factor = .75 * diffuse_at(x, 44, (60, 38, z))
+                self.assertEqual(color_at(preview, x, 44), display_channels((255,) * 3, factor, specular=False))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "raised point lighting requires unit"):
+                book.render_page(0, dpi=144)
+
+        point = markup(light("Diffuse", "blue", ".8"))
+        for svg, reason, error in (
+            (point.replace("scale(1.25)", "scale(1.25 1)"), "requires uniform device scale",
+             doc_ex.UnsupportedFormatError),
+            (point.replace('z="24"', 'z="0"'), "light height must be above", doc_ex.UnsupportedFormatError),
+            (point.replace('z="24"', 'z="16001"'), "lighting exceeds its numeric budget", doc_ex.UnsafeArchiveError),
+            (point.replace('x="48"', 'x="15000"'), "exceeds its device position budget", doc_ex.UnsafeArchiveError),
+            (point.replace('z="24"', 'z="NaN"'), "invalid SVG lighting number", doc_ex.MalformedDocumentError),
+        ):
+            with self.subTest(reason=reason), self.assertRaisesRegex(error, reason):
+                with doc_ex.open(publication(svg, False)) as book:
+                    book.render_page(0, dpi=96)
+
     def test_svg_filter_chain_renders_named_results_and_alpha_to_visual_outputs(self) -> None:
         tint = "0 0 0 0 0, 1 0 0 0 0, 0 0 0 0 0, 0 0 0 1 0"
         half = "1 0 0 0 0, 0 1 0 0 0, 0 0 1 0 0, 0 0 0 .5 0"
