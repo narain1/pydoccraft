@@ -229,6 +229,19 @@ impl ChapterStyles {
                     Some(a.trim().parse::<f32>().ok()? / b.trim().parse::<f32>().ok()?)
                 })
                 .filter(|n| n.is_finite() && *n > 0.0);
+            let mut tracks = |key, inherited: fn(&Style) -> &Vec<GridTemplateComponent<String>>| {
+                let source = value(&values, key);
+                if source.eq_ignore_ascii_case("inherit") {
+                    return Ok(parent
+                        .map(|p| inherited(&p.box_style).clone())
+                        .unwrap_or_default());
+                }
+                css::grid::resolve(source, font, viewport, &mut styles.calculations)
+            };
+            let columns = tracks("grid-template-columns", |style| {
+                &style.grid_template_columns
+            })?;
+            let rows = tracks("grid-template-rows", |style| &style.grid_template_rows)?;
             let box_style = Style {
                 display: match display {
                     "flex" | "inline-flex" => Display::Flex,
@@ -340,8 +353,8 @@ impl ChapterStyles {
                     "space-evenly" => JustifyContent::SPACE_EVENLY,
                     _ => JustifyContent::START,
                 },
-                grid_template_columns: tracks(&values, "grid-template-columns", font, viewport),
-                grid_template_rows: tracks(&values, "grid-template-rows", font, viewport),
+                grid_template_columns: columns,
+                grid_template_rows: rows,
                 grid_auto_flow: if value(&values, "grid-auto-flow") == "column" {
                     GridAutoFlow::Column
                 } else {
@@ -609,34 +622,6 @@ where
         .map(T::from_percent)
         .or_else(|| css::points(value, font, viewport).map(T::from_length))
         .unwrap_or(T::AUTO)
-}
-
-fn tracks(
-    values: &Properties,
-    key: &str,
-    font: f32,
-    viewport: [f32; 2],
-) -> Vec<GridTemplateComponent<String>> {
-    value(values, key)
-        .split_ascii_whitespace()
-        .take(32)
-        .map(|track| {
-            percent(track)
-                .map(taffy::style_helpers::percent::<_, TrackSizingFunction>)
-                .or_else(|| {
-                    css::points(track, font, viewport)
-                        .map(taffy::style_helpers::length::<_, TrackSizingFunction>)
-                })
-                .or_else(|| {
-                    track
-                        .strip_suffix("fr")
-                        .and_then(|n| number(n, 0.0, 100.0))
-                        .map(taffy::style_helpers::fr::<_, TrackSizingFunction>)
-                })
-                .unwrap_or_else(taffy::style_helpers::auto::<TrackSizingFunction>)
-                .into()
-        })
-        .collect()
 }
 
 fn align(value: &str) -> Option<AlignItems> {

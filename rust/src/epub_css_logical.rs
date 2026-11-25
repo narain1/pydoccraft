@@ -215,7 +215,8 @@ pub(in crate::epub) fn resolve_calculated_geometry(
         }
         if let Some(pair) = physical_pair(name, flow).filter(|pair| pair.is_length()) {
             *value = match calc::resolve(value, font, viewport, pair.allows_negative())? {
-                calc::Resolved::Simple(simple) => simple,
+                calc::Resolved::Points(points) => format!("{points}pt"),
+                calc::Resolved::Percent(percent) => format!("{percent}%"),
                 calc::Resolved::Mixed(length) => {
                     let computed = length.computed_css();
                     // The used size of an HTML table track is auto in this case.
@@ -224,10 +225,7 @@ pub(in crate::epub) fn resolve_calculated_geometry(
                         && matches!(name.as_str(), "width" | "height")
                         && length.has_fixed_part())
                     {
-                        calculations.push(length);
-                        // CompactLength reserves three low bits and the zero sentinel.
-                        let handle = CalcHandle::from_bits((calculations.len() as u64) << 3);
-                        handles.insert(pair.physical(flow), handle);
+                        handles.insert(pair.physical(flow), length.register(calculations));
                     }
                     computed
                 }

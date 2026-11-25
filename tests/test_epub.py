@@ -2063,6 +2063,79 @@ class EpubTests(unittest.TestCase):
             _, pixels = rgba_pixels(clip)
             self.assertEqual(pixels[:4], bytes((221, 68, 68, 255)))
 
+    def test_css_calculated_grid_tracks_match_explicit_sizes_in_fixed_pdf(self) -> None:
+        source = fixed_spread_fixture([("", "white", 340, 160)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated grid</title>
+          <meta name="viewport" content="width=340,height=160"/><style>
+          html,body,p{{margin:0;font-size:11px}}
+          body{{--column:minmax(calc(25% + 5px),calc(25% + 5px))}}
+          #grid{{position:absolute;left:12px;top:14px;display:grid;width:{width}px;height:100px;gap:8px}}
+          p{{background:#89ba92}} p:nth-child(even){{background:#db9353}}
+          {css}</style></head><body><div id="grid">
+          <p>First</p><p>Second</p><p id="target"><a href="https://example.org/grid">Third track</a></p>
+          <p><a href="#target">Go to third</a></p><p>Fifth</p><p>Sixth</p></div></body></html>"""
+        calculated = """
+          body{grid-template-columns:var(--column) REPEAT(2,minmax(calc(10% + 2px),1fr))}
+          #grid{grid-template-columns:inherit;grid-template-rows:calc(40% - 2px) 1fr}
+          #grid{grid-template-columns:minmax(1fr,20px)}
+        """
+        for width in (220, 260):
+            with self.subTest(width=width):
+                first = width / 4 + 5
+                rest = (width - first - 16) / 2
+                explicit = f"#grid{{grid-template-columns:{first}px {rest}px {rest}px;grid-template-rows:38px 54px}}"
+                results = []
+                for style in (calculated, explicit):
+                    chapter = template.format(width=width, css=style)
+                    with doc_ex.open(rewrite_epub(source, {"OEBPS/s0.xhtml": chapter})) as book:
+                        pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                        pdf_bytes = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(pdf_bytes) as pdf, pdf.edit() as editor:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                        hit, = pdf[0].search_for("Third track")
+                        external, internal = pdf[0].get_links()
+                        self.assertEqual(external.uri, "https://example.org/grid")
+                        self.assertEqual(internal.metadata["target_page"], 0)
+                        xyz = re.search(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
+                                        editor.to_bytes(object_streams=False))
+                        assert xyz is not None
+                        results.append((pixels, hit, external.bbox, xyz.groups()))
+                self.assertEqual(results[0], results[1])
+
+    def test_css_grid_intrinsic_and_fit_tracks_in_reflow(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic grid</title>
+          <style>body,p{margin:0;font-size:10px}
+          #grid{display:grid;width:240px;gap:4px;grid-template-columns:min-content max-content FIT}
+          #narrow{background:#d04839} #wide{background:#297da3} #fit{background:#488a3d}
+          </style></head><body><div id="grid"><p id="narrow">Wide enough words</p>
+          <p id="wide">Wide enough words</p><p id="fit">Words are kept on this grid track</p></div>
+          </body></html>"""
+        previews = []
+        for limit in ("fit-content(calc(20% + 8px))", "fit-content(56px)"):
+            with doc_ex.open(epub_fixture(chapter_one=chapter.replace("FIT", limit))) as book:
+                previews.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertEqual(previews[0], previews[1])
+        width, pixels = previews[0]
+        pixel_widths = []
+        for color in ("d04839ff", "297da3ff", "488a3dff"):
+            ink = bytes.fromhex(color)
+            xs = [(index // 4) % width for index in range(0, len(pixels), 4)
+                  if pixels[index:index + 4] == ink]
+            self.assertTrue(xs)
+            pixel_widths.append(max(xs) - min(xs) + 1)
+        minimum, maximum, fit = pixel_widths
+        self.assertLess(minimum, maximum)
+        self.assertAlmostEqual(fit, 56, delta=1)
+        for value, error, message in (
+            ("repeat(33, 1px)", doc_ex.UnsafeArchiveError, "grid track expression exceeds"),
+            ("repeat(auto-fit, 10px)", doc_ex.UnsupportedFormatError, "unsupported EPUB grid track"),
+        ):
+            with self.subTest(value=value):
+                xhtml = chapter.replace("min-content max-content FIT", value)
+                with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
+                    with self.assertRaisesRegex(error, message):
+                        book.render_page(0, dpi=96)
+
     def test_reflow_css_flex_layout_and_archive_only_imports(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
         <style>body { margin: 0; } .row { display: flex; gap: 10px; }

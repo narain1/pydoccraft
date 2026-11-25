@@ -3,6 +3,7 @@ use raffia::{
     ast::{CalcOperatorKind as Op, ComponentValue, Declaration, DimensionKind, FunctionName},
     Parser, Syntax,
 };
+use taffy::CalcHandle;
 
 use super::{ident, points};
 use crate::{
@@ -75,13 +76,20 @@ impl MixedLength {
         self.points != 0.0
     }
 
+    pub(super) fn register(self, lengths: &mut Vec<Self>) -> CalcHandle {
+        lengths.push(self);
+        // CompactLength reserves the zero sentinel and three low bits.
+        CalcHandle::from_bits((lengths.len() as u64) << 3)
+    }
+
     pub(super) fn computed_css(&self) -> String {
         format!("calc({}pt + {}%)", self.points, self.percent)
     }
 }
 
 pub(super) enum Resolved {
-    Simple(String),
+    Points(f32),
+    Percent(f32),
     Mixed(MixedLength),
 }
 
@@ -210,28 +218,25 @@ pub(super) fn resolve(
     viewport: [f32; 2],
     signed: bool,
 ) -> Result<Resolved, EngineError> {
-    let (value, unit) = match read(source, font, viewport) {
+    let clamp = |value: f32| if signed { value } else { value.max(0.0) };
+    match read(source, font, viewport) {
         Ok(Value::Length {
             points: Some(points),
             percent: Some(percent),
-        }) => {
-            return Ok(Resolved::Mixed(MixedLength {
-                points,
-                percent,
-                signed,
-            }));
-        }
+        }) => Ok(Resolved::Mixed(MixedLength {
+            points,
+            percent,
+            signed,
+        })),
         Ok(Value::Length {
             points: Some(value),
             percent: None,
-        }) => (value, "pt"),
+        }) => Ok(Resolved::Points(clamp(value))),
         Ok(Value::Length {
             points: None,
             percent: Some(value),
-        }) => (value, "%"),
-        Err(Issue::Limit) => return Err(limited("EPUB CSS calc exceeds its expression budget")),
-        _ => return Err(unsupported("unsupported EPUB CSS calc expression")),
-    };
-    let value = if signed { value } else { value.max(0.0) };
-    Ok(Resolved::Simple(format!("{value}{unit}")))
+        }) => Ok(Resolved::Percent(clamp(value))),
+        Err(Issue::Limit) => Err(limited("EPUB CSS calc exceeds its expression budget")),
+        _ => Err(unsupported("unsupported EPUB CSS calc expression")),
+    }
 }

@@ -59,7 +59,8 @@
 - [x] Render bounded native SVG blend and component transfer and retain searchable text, links and fragments through provable alpha and offset chains.
 - [x] Render bounded native morphology and preserve PDF source attribution through provable erosion, dilation and erosion-to-offset chains.
 - [x] Resolve mixed length and percentage calculations for supported box geometry against the native containing box and preserve indefinite percentage sizing.
-- [ ] Extend the supported EPUB CSS and fixed-layout rendering profile, including intrinsic sizing keywords, additional math functions, and calculations in grid tracks.
+- [x] Resolve calculated grid rows and columns, intrinsic tracks, minmax, fit-content and bounded counted repetition.
+- [ ] Extend the EPUB CSS profile with intrinsic box sizing, more math functions, grid automatic repetition, named lines and subgrids.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, nested length owners and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.

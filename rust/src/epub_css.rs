@@ -12,6 +12,8 @@ use crate::EngineError;
 
 #[path = "epub_css_calc.rs"]
 mod calc;
+#[path = "epub_css_grid.rs"]
+pub(super) mod grid;
 pub(super) use calc::MixedLength;
 #[path = "epub_html_direction.rs"]
 mod html_direction;
@@ -1227,6 +1229,9 @@ fn valid_literal(
                         value.to_ascii_lowercase().as_str(),
                         "inherit" | "initial" | "unset" | "revert" | "revert-layer"
                     )
+        }
+        "grid-template-columns" | "grid-template-rows" => {
+            css_wide(value) || grid::valid(value, components)
         }
         "font-family" => font_family_value(components).is_some(),
         "font-variation-settings" => axis_value(components).is_some(),
