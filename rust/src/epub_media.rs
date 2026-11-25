@@ -9,7 +9,7 @@ pub(super) enum AudioCodec {
     Mpeg,
     Aac,
     Opus,
-    WebmOpus,
+    Webm,
     Wave,
 }
 
@@ -20,7 +20,7 @@ pub(super) fn audio_codec(media: &str) -> Option<AudioCodec> {
         "audio/ogg" | "audio/opus" | "audio/ogg; codecs=opus" | "application/ogg" | "video/ogg" => {
             Some(AudioCodec::Opus)
         }
-        "audio/webm" | "video/webm" => Some(AudioCodec::WebmOpus),
+        "audio/webm" | "video/webm" => Some(AudioCodec::Webm),
         "audio/wav" | "audio/wave" | "audio/x-wav" | "audio/vnd.wave" => Some(AudioCodec::Wave),
         _ => None,
     }
@@ -43,7 +43,10 @@ fn supported_audio_hint(hint: &str) -> bool {
     };
     let codecs = codec_hint(hint);
     codecs.is_none_or(|name| match codec {
-        AudioCodec::Opus | AudioCodec::WebmOpus => name.eq_ignore_ascii_case("opus"),
+        AudioCodec::Opus => name.eq_ignore_ascii_case("opus"),
+        AudioCodec::Webm => {
+            name.eq_ignore_ascii_case("opus") || name.eq_ignore_ascii_case("vorbis")
+        }
         AudioCodec::Mpeg => name.eq_ignore_ascii_case("mp3"),
         AudioCodec::Aac => matches!(name.to_ascii_lowercase().as_str(), "mp4a.40.2" | "mp4a.67"),
         AudioCodec::Wave => name == "1" || name.eq_ignore_ascii_case("pcm"),
@@ -136,7 +139,8 @@ fn source(
     let playable_audio =
         (kind == "audio" && audio_codec(media).is_some() && hint.is_none_or(supported_audio_hint))
             || (kind == "video" && media == "video/mp4")
-            || ((ogg_video || webm_video) && advertises("opus"));
+            || ((ogg_video || webm_video) && advertises("opus"))
+            || (webm_video && advertises("vorbis"));
     let playable_video = kind == "video" && media == "video/mp4"
         || (ogg_video && advertises("theora"))
         || (webm_video && ["vp8", "vp9", "vp09"].into_iter().any(advertises));

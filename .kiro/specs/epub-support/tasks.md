@@ -65,7 +65,8 @@
 - [x] Apply local normal-play-time fragments to embedded audio, video and synchronized captions.
 - [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments.
 - [x] Stream VP8 and SDR VP9 video, Opus soundtracks, and synchronized local captions from packaged WebM sources.
-- [ ] Extend WebM to AV1, Vorbis, high dynamic range, alpha, and concurrent tracks. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and media fragment dimensions.
+- [x] Stream mono and stereo WebM Vorbis audio on the original presentation clock, including audio-only resources and soundtracks synchronized with video and captions.
+- [ ] Extend WebM to AV1, surround Vorbis, high dynamic range, alpha, and concurrent tracks. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and media fragment dimensions.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.

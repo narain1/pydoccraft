@@ -2455,6 +2455,96 @@ first
             with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "truncated WebM element"):
                 next(book.epub_embedded_video(0, 0))
 
+    def test_embedded_webm_vorbis_keeps_the_presentation_clock(self) -> None:
+        path = "OEBPS/vorbis.webm"
+        resource = (Path(__file__).parent / "fixtures" / "epub-video-vp8-vorbis.webm").read_bytes()
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Vorbis</title></head>
+          <body><video><source src="vorbis.webm" type="video/webm; codecs=&quot;vp8, vorbis&quot;"/>
+          <track kind="captions" srclang="en" src="captions.vtt"/>Transcript</video></body></html>"""
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Vorbis", chapter, "OEBPS/clip.xhtml")],
+                resources={path: doc_ex.EpubResource("video/webm", resource),
+                           "OEBPS/captions.vtt": doc_ex.EpubResource(
+                               "text/vtt", b"WEBVTT\n\n00:00:00.500 --> 00:00:00.650\nRed frame\n")},
+            )
+
+        def pcm(book: doc_ex.Document, chunk_frames: int, **clip: int) -> bytes:
+            output = bytearray()
+            for audio in book.epub_embedded_audio(0, 0, chunk_frames=chunk_frames, **clip):
+                self.assertEqual((audio.sample_rate, audio.channels), (44_100, 2))
+                with wave.open(io.BytesIO(audio.wave), "rb") as wave_file:
+                    output.extend(wave_file.readframes(audio.frame_count))
+            return bytes(output)
+
+        with doc_ex.open(data) as book:
+            source, = book.epub_embedded_media(0)[0].sources
+            self.assertTrue(source.playable_audio)
+            self.assertTrue(source.playable_video)
+            full = pcm(book, 701)
+            self.assertEqual(len(full), 50_884 * 4)
+            self.assertEqual(full[:132 * 4], bytes(132 * 4))
+            tones = list(struct.iter_unpack("<hh", full[4_410 * 4:48_510 * 4]))
+            for channel, frequency in enumerate((340, 560)):
+                crossings = sum(a[channel] < 0 <= b[channel] for a, b in zip(tones, tones[1:]))
+                self.assertAlmostEqual(crossings, frequency, delta=2)
+            self.assertEqual(pcm(book, 4_093, start_us=480_000, end_us=860_000),
+                             full[21_168 * 4:37_926 * 4])
+            video = list(book.epub_embedded_video(0, 0))
+            self.assertEqual([frame.start_us for frame in video], [3_000 + i * 125_000 for i in range(12)])
+            clipped = list(book.epub_embedded_video(0, 0, start_us=480_000, end_us=860_000, text_track=0))
+            self.assertEqual(clipped[0].start_us, 480_000)
+            self.assertEqual(clipped[-1].start_us + clipped[-1].duration_us, 860_000)
+            self.assertEqual({cue.text for frame in clipped for cue in frame.text_cues}, {"Red frame"})
+            revised = book.edit_epub_chapters({0: chapter.replace("vorbis.webm", "vorbis.webm#t=0.48,0.86")})
+        with doc_ex.open(revised) as book:
+            self.assertEqual(book.read_epub_resource(path), resource)
+            self.assertEqual(pcm(book, 283), full[21_168 * 4:37_926 * 4])
+            self.assertEqual(list(book.epub_embedded_video(0, 0, text_track=0)), clipped)
+
+        # The first setup codebook has a byte-aligned 24-bit entry count after its dimensions.
+        huge = bytearray(resource)
+        count = huge.index(b"\x05vorbis") + 7 + 1 + 3 + 2
+        huge[count:count + 3] = b"\xff\xff\xff"
+        with doc_ex.open(rewrite_epub(data, {path: bytes(huge)})) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "Vorbis codebook entries"):
+                next(book.epub_embedded_audio(0, 0))
+
+    def test_laced_webm_vorbis_audio_and_narration_share_trimmed_pcm(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        video_path = "OEBPS/clip.webm"
+        audio_path = "OEBPS/voice.webm"
+        chapter_path = "OEBPS/clip.xhtml"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Vorbis</title></head>
+          <body><p id="voice">Read this</p><video src="clip.webm"/>
+          <audio><source src="voice.webm" type="audio/webm; codecs=vorbis"/></audio></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Vorbis narration", chapter, chapter_path)],
+                resources={
+                    video_path: doc_ex.EpubResource(
+                        "video/webm", (fixtures / "epub-video-vp8-vorbis.webm").read_bytes()),
+                    audio_path: doc_ex.EpubResource(
+                        "audio/webm", (fixtures / "epub-audio-laced-vorbis.webm").read_bytes()),
+                },
+                overlays={chapter_path: [doc_ex.EpubOverlayCue("voice", audio_path, 0, 1_143_832)]},
+            )
+
+        def pcm(clip: doc_ex.EpubAudioClip | None) -> bytes:
+            assert clip is not None
+            self.assertEqual((clip.sample_rate, clip.channels), (44_100, 2))
+            with wave.open(io.BytesIO(clip.wave), "rb") as samples:
+                return samples.readframes(clip.frame_count)
+
+        with doc_ex.open(data) as book:
+            self.assertTrue(book.epub_embedded_media(0)[1].sources[0].playable_audio)
+            video = b"".join(pcm(clip) for clip in book.epub_embedded_audio(0, 0, chunk_frames=8_192))
+            audio = b"".join(pcm(clip) for clip in book.epub_embedded_audio(0, 1, chunk_frames=603))
+            narration = b"".join(pcm(cue.audio) for cue in book.epub_narration(0, chunk_frames=1_201))
+            self.assertEqual(len(audio), 50_443 * 4)
+            self.assertEqual(audio, video[:-441 * 4])
+            self.assertEqual(narration, audio)
+
     def test_embedded_webm_vp9_retains_colour_and_depth(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         for filename, codecs, geometry, fps, count in (

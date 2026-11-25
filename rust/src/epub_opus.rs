@@ -2,7 +2,7 @@
 use std::ops::Range;
 
 use hound::{SampleFormat, WavSpec};
-use oxideav_core::{Demuxer, MediaType};
+use oxideav_core::Demuxer;
 use oxideav_opus::{
     framing_self_delim::parse_self_delimited, output_samples_per_channel, MultistreamDecoder,
     OpusHead, OpusPacket, OUTPUT_SAMPLE_RATE_HZ,
@@ -106,13 +106,8 @@ impl Track {
         Ok(Self::from_links(links, frames))
     }
 
-    pub(super) fn open_webm(file: Vec<u8>) -> Result<Self, EngineError> {
-        let mut reader = webm::Reader::open(file)?;
-        let index = reader.track(MediaType::Audio)?;
+    pub(super) fn open_webm(mut reader: webm::Reader, index: u32) -> Result<Self, EngineError> {
         let stream = &reader.demux.streams()[index as usize];
-        if stream.params.codec_id.as_str() != "opus" {
-            return Err(unsupported("WebM audio requires an Opus track"));
-        }
         if stream.params.extradata.len() > 1024 {
             return Err(limited("WebM Opus identification header exceeds 1 KiB"));
         }

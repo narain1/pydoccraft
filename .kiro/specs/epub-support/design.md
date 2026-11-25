@@ -82,6 +82,8 @@ For DOCX, the adapter replaces supported `mpadded` boxes with native WordCraft e
 
 The Opus adapter derives playable samples from each coded packet. It verifies the codec delay against the pre-skip and checks physical block timestamps against cumulative decoded duration within a container tick. De-laced packets use their coded sample counts. Initial delay and final discard padding are removed and a later audio start leaves leading silence. Existing Opus gain and speaker-channel mapping apply to embedded WebM audio. [Matroska codec mappings](https://www.matroska.org/technical/codec_specs.html)
 
+`epub_vorbis.rs` reads the three Xiph-laced codec headers, bounds codebook expansion and reference costs, and indexes each packet's sample count from the adjacent Vorbis block sizes. The first packet primes the overlap window. The first audible block places samples on the WebM timeline, with leading silence when needed. Physical block timestamps are checked against the cumulative sample counts, including laces. Final discard padding trims the last block. A seek primes the immediately preceding packet and reuses the decoder for successive chunks. The decoder emits bounded mono or stereo PCM at the authored sample rate. [Matroska laced frame timestamps](https://www.rfc-editor.org/rfc/rfc9559.html#section-10.3.5), [Vorbis I specification](https://xiph.org/vorbis/doc/Vorbis_I_spec.pdf)
+
 ## Resource removal and media overlay authoring
 
 Chapter edits derive the EPUB 3 `mathml` and `svg` declarations from element namespaces in the new XHTML. Replacement splices only the affected manifest attributes into the original OPF. Insertion uses the same scanner when adding new manifest entries. EPUB 2 retains its existing package vocabulary.

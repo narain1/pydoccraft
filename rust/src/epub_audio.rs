@@ -14,6 +14,8 @@ use crate::EngineError;
 mod aac;
 #[path = "epub_opus.rs"]
 pub(super) mod opus;
+#[path = "epub_vorbis.rs"]
+mod vorbis;
 
 pub(super) const MAX_ENCODED_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CLIP_SAMPLES: usize = 8 * 1024 * 1024;
@@ -40,6 +42,7 @@ enum Decoder {
     Mp3(Box<Mp3>),
     Aac(Box<aac::Track>),
     Opus(Box<opus::Track>),
+    Vorbis(Box<vorbis::Track>),
 }
 
 pub(crate) struct AudioClip {
@@ -87,11 +90,27 @@ impl AudioSource {
                 .map_err(|_| invalid("malformed Ogg Opus audio"))??;
                 Decoder::Opus(Box::new(track))
             }
-            Some(AudioCodec::WebmOpus) => {
+            Some(AudioCodec::Webm) => {
                 let bytes = load()?;
-                let track = std::panic::catch_unwind(|| opus::Track::open_webm(bytes))
-                    .map_err(|_| invalid("malformed WebM Opus audio"))??;
-                Decoder::Opus(Box::new(track))
+                std::panic::catch_unwind(|| {
+                    let reader = super::webm::Reader::open(bytes)?;
+                    let index = reader.track(oxideav_core::MediaType::Audio)?;
+                    use oxideav_core::Demuxer;
+                    match reader.demux.streams()[index as usize]
+                        .params
+                        .codec_id
+                        .as_str()
+                    {
+                        "opus" => Ok(Decoder::Opus(Box::new(opus::Track::open_webm(
+                            reader, index,
+                        )?))),
+                        "vorbis" => Ok(Decoder::Vorbis(Box::new(vorbis::Track::open(
+                            reader, index,
+                        )?))),
+                        _ => Err(unsupported("WebM audio requires an Opus or Vorbis track")),
+                    }
+                })
+                .map_err(|_| invalid("malformed WebM audio"))??
             }
             Some(AudioCodec::Mpeg) => {
                 let bytes = load()?;
@@ -224,6 +243,7 @@ impl AudioSource {
             Decoder::Wave(reader) => (wav_spec(reader)?, Some(reader.duration() as usize)),
             Decoder::Aac(track) => (track.spec(), Some(track.frames())),
             Decoder::Opus(track) => (track.spec(), Some(track.frames())),
+            Decoder::Vorbis(track) => (track.spec(), Some(track.frames())),
             Decoder::Mp3(reader) => {
                 std::panic::catch_unwind(AssertUnwindSafe(|| reader.geometry()))
                     .map_err(|_| invalid("malformed MPEG Layer III audio"))??
@@ -249,6 +269,11 @@ impl AudioSource {
                 let end = known_end()?;
                 std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(start, end)))
                     .map_err(|_| invalid("malformed Opus audio"))?
+            }
+            Decoder::Vorbis(track) => {
+                let end = known_end()?;
+                std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(start, end)))
+                    .map_err(|_| invalid("malformed Vorbis audio"))?
             }
             Decoder::Mp3(reader) => {
                 std::panic::catch_unwind(AssertUnwindSafe(|| reader.samples(start, end, allow_eof)))

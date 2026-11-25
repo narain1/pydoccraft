@@ -87,8 +87,8 @@ Crate: mp3dec 0.1.0. Used to decode MPEG Layer III narration. It is a Rust port 
 OxideAV
 Copyright (c) 2026 Karpelès Lab Inc.
 Licensed under the MIT License.
-Sources: https://github.com/OxideAV/oxideav-core, https://github.com/OxideAV/oxideav-aac, https://github.com/OxideAV/oxideav-mp4, https://github.com/OxideAV/oxideav-opus, https://github.com/OxideAV/oxideav-h264, https://github.com/OxideAV/oxideav-theora, https://github.com/OxideAV/oxideav-mkv, https://github.com/OxideAV/oxideav-vp8, https://github.com/OxideAV/oxideav-vp9
-Crates: oxideav-core 0.1.43, oxideav-aac 0.1.7, oxideav-mp4 0.0.11, oxideav-opus 0.0.15, oxideav-h264 0.1.12, oxideav-theora 0.0.13, oxideav-mkv 0.0.12, oxideav-vp8 0.2.9, and oxideav-vp9 0.0.15. Used to demux local MP4 and WebM media and decode AAC-LC, Opus, AVC, Theora, VP8, and VP9.
+Sources: https://github.com/OxideAV/oxideav-core, https://github.com/OxideAV/oxideav-aac, https://github.com/OxideAV/oxideav-mp4, https://github.com/OxideAV/oxideav-opus, https://github.com/OxideAV/oxideav-h264, https://github.com/OxideAV/oxideav-theora, https://github.com/OxideAV/oxideav-mkv, https://github.com/OxideAV/oxideav-vp8, https://github.com/OxideAV/oxideav-vp9, https://github.com/OxideAV/oxideav-vorbis, https://github.com/OxideAV/oxideav-ogg
+Crates: oxideav-core 0.1.43, oxideav-aac 0.1.7, oxideav-mp4 0.0.11, oxideav-opus 0.0.15, oxideav-h264 0.1.12, oxideav-theora 0.0.13, oxideav-mkv 0.0.12, oxideav-vp8 0.2.9, oxideav-vp9 0.0.15, oxideav-vorbis 0.0.12, and oxideav-ogg 0.1.9. Used to demux local MP4 and WebM media and decode AAC-LC, Opus, AVC, Theora, VP8, VP9, and Vorbis.
 
 RustAudio Ogg
 Copyright (c) 2016-2017 est31 <MTest31@outlook.com> and contributors.
