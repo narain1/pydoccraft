@@ -75,7 +75,8 @@
 - [x] Resolve stepped and sign-related CSS math and finite numeric constants in supported geometry, including deferred scalar factors and inherited lengths.
 - [x] Expand grid-template and grid, including area rows and shared named boundaries. Apply implicit track size cycles and row/column dense placement.
 - [x] Resolve typed CSS trigonometry with degree, radian, gradian and turn inputs, inverse functions, and bounded containing-box operands.
-- [ ] Extend the EPUB CSS profile with intrinsic minimum and maximum constraints, contain-fit sizing, exponential and other math functions, automatic grid repetition and subgrids.
+- [x] Resolve CSS powers, roots, logarithms and Euclidean norms in bounded geometry and grid calculations.
+- [ ] Extend the EPUB CSS profile with intrinsic minimum and maximum constraints, contain-fit sizing, additional math and typed division, automatic grid repetition and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, nested length owners and glyph positioning.

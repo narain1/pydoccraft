@@ -1578,6 +1578,71 @@ class EpubTests(unittest.TestCase):
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"):
                         book.render_page(0, dpi=96)
 
+    def test_epub_css_exponential_math_keeps_fixed_pdf_geometry(self) -> None:
+        original = fixed_spread_fixture([("", "white", 310, 125)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Exponential values</title>
+          <meta name="viewport" content="width=310,height=125"/><style>
+          html,body,p{{margin:0;font-size:10px}} #holder{{position:absolute;left:10px;top:9px;
+          width:{width}px;height:{holder_height}px;background:#263a4d}}
+          #panel{{position:absolute;background:#96ba75}} #jump{{position:absolute;top:100px}}
+          {css}</style></head><body><div id="holder"><p id="panel">
+          <a href="https://example.org/power">Report</a></p></div>
+          <p id="jump"><a href="#panel">Destination</a></p></body></html>"""
+        computed = """
+          #panel{left:hypot(9px,12px);top:calc(2px + pow(2,3) * 1px);
+            width:calc(50px + round(10px * log(2 + sign(50% - 100px),2),1px));
+            height:calc(23px + exp(log(4)) * 1px + round(exp(sign(50% - 35px)) * 5px,1px));
+            padding-left:calc(2px + sqrt(pow(2 + sign(50% - 100px),2)) * 1px);
+            width:calc(4px * sqrt(9px))}
+          #jump{left:calc(10px + sqrt(-1) * 1px)}
+        """
+        for width, holder_height, panel, height, padding in (
+            (160, 60, 50, 29, 3), (200, 70, 60, 32, 4), (240, 80, 66, 41, 5),
+        ):
+            with self.subTest(width=width):
+                literal = (f"#panel{{left:15px;top:10px;width:{panel}px;height:{height}px;padding-left:{padding}px}}"
+                           "#jump{left:0}")
+                captures = []
+                for css in (computed, literal):
+                    xhtml = template.format(width=width, holder_height=holder_height, css=css)
+                    with doc_ex.open(rewrite_epub(original, {"OEBPS/s0.xhtml": xhtml})) as book:
+                        preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                        pdf_bytes = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(pdf_bytes) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                        hit = pdf[0].search_for("Report")
+                        self.assertEqual(len(hit), 1)
+                        external, internal = pdf[0].get_links()
+                        self.assertEqual(external.uri, "https://example.org/power")
+                        self.assertEqual(internal.metadata["target_page"], 0)
+                        captures.append((preview, hit, external.bbox, internal.bbox))
+                self.assertTrue(captures[0] == captures[1], "exponential and explicit CSS geometry differ")
+
+    def test_epub_css_exponential_grid_types_and_deferred_bounds(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Power grid</title><style>
+          body,p{margin:0} section{display:grid;width:220px;gap:4px;grid-template-columns:TRACKS}
+          p:nth-child(odd){background:#286d7c} p:nth-child(even){background:#bc8252}
+          </style></head><body><section><p>One</p><p>Two</p><p>Three</p></section></body></html>"""
+        outputs = []
+        for tracks in (
+            "hypot(30%,40%) calc(10px + 4px * pow(2 + sign(50% - 100px),2)) 1fr",
+            "110px 46px 1fr",
+            "calc(110px * sin(hypot(54deg,0.2turn))) 46px 1fr",
+        ):
+            with doc_ex.open(epub_fixture(chapter_one=chapter.replace("TRACKS", tracks))) as book:
+                outputs.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertTrue(all(item == outputs[1] for item in outputs), "typed hypot or power tracks differ")
+        cases = (
+            ("calc(1px * pow(sign(50% - 100px),-1))", doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"),
+            ("calc(1px * log(2, 1 + sign(50% - 100px)))", doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"),
+            ("calc(1px * exp(50))", doc_ex.UnsafeArchiveError, "CSS calc exceeds"),
+        )
+        for tracks, error, message in cases:
+            with self.subTest(tracks=tracks):
+                with doc_ex.open(epub_fixture(chapter_one=chapter.replace("TRACKS", tracks))) as book:
+                    with self.assertRaisesRegex(error, message):
+                        book.render_page(0, dpi=96)
+
     def test_epub_css_calc_rejects_unsupported_operations_and_excess_geometry(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
           <style>div {background:green; CSS}</style></head><body><div>Panel</div></body></html>"""

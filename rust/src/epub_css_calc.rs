@@ -17,6 +17,9 @@ use crate::{
 #[path = "epub_css_trig.rs"]
 mod trigonometry;
 use trigonometry::{Input, Trig};
+#[path = "epub_css_exp.rs"]
+mod exponential;
+use exponential::{Interval, Operation};
 
 const MAX_EXPRESSION_BYTES: usize = 512;
 const MAX_RESULT: f32 = 25_000.0;
@@ -102,6 +105,8 @@ enum Expression {
     Step(Step, Box<Expression>, Box<Expression>),
     Trig(Trig, Box<Expression>),
     Atan2(Box<Expression>, Box<Expression>),
+    Exponential(Operation, Box<Expression>, Box<Expression>, Interval),
+    Hypot(Vec<Expression>),
 }
 
 impl Expression {
@@ -123,7 +128,66 @@ impl Expression {
             Self::Step(step, value, interval) => step.evaluate(value.at(basis), interval.at(basis)),
             Self::Trig(operation, value) => operation.evaluate(value.at(basis)),
             Self::Atan2(y, x) => trigonometry::atan2(y.at(basis), x.at(basis)),
+            Self::Exponential(operation, value, parameter, _) => {
+                operation.evaluate(value.at(basis), parameter.at(basis))
+            }
+            Self::Hypot(values) => exponential::hypot(values.iter().map(|value| value.at(basis))),
         }
+    }
+
+    fn scalar_bounds(&self) -> Option<Interval> {
+        Some(match self {
+            Self::Linear(value, None) => {
+                Interval::point(value.filter(|value| !value.is_nan()).unwrap_or_default())
+            }
+            Self::Linear(_, Some(_)) => return None,
+            Self::Sum(one, other) => {
+                let one = one.scalar_bounds()?;
+                let other = other.scalar_bounds()?;
+                Interval {
+                    low: one.low + other.low,
+                    high: one.high + other.high,
+                }
+            }
+            Self::Scale(value, factor) => value.scalar_bounds()?.product(Interval::point(*factor)),
+            Self::Compare(operation, values) => {
+                let mut values = values.iter();
+                let mut result = values.next()?.scalar_bounds()?;
+                for value in values {
+                    let value = value.scalar_bounds()?;
+                    result.low = operation.choose(result.low, value.low);
+                    result.high = operation.choose(result.high, value.high);
+                }
+                result
+            }
+            Self::Abs(value) => value.scalar_bounds()?.absolute(),
+            Self::Sign(_) => Interval::signed(1.0),
+            Self::Product(one, other) => one.scalar_bounds()?.product(other.scalar_bounds()?),
+            Self::Step(operation, value, interval) => {
+                let bound = interval.scalar_bounds()?.absolute().high;
+                match operation {
+                    Step::Round(_) => {
+                        Interval::signed(bound + value.scalar_bounds()?.absolute().high)
+                    }
+                    Step::Mod | Step::Rem => Interval::signed(bound),
+                }
+            }
+            Self::Trig(operation, value) => {
+                Interval::signed(operation.bound(value.scalar_bounds()?.absolute().high)?)
+            }
+            Self::Atan2(_, _) => Interval::signed(180.0),
+            Self::Exponential(_, _, _, bounds) => *bounds,
+            Self::Hypot(values) => {
+                let values = values
+                    .iter()
+                    .map(|value| value.scalar_bounds().map(Interval::absolute))
+                    .collect::<Option<Vec<_>>>()?;
+                Interval {
+                    low: exponential::hypot(values.iter().map(|value| value.low)),
+                    high: exponential::hypot(values.iter().map(|value| value.high)),
+                }
+            }
+        })
     }
 }
 
@@ -433,7 +497,7 @@ pub(super) fn is_math(value: &str) -> bool {
     value.split_once('(').is_some_and(|(name, _)| {
         [
             "calc", "min", "max", "clamp", "round", "mod", "rem", "abs", "sign", "sin", "cos",
-            "tan", "asin", "acos", "atan", "atan2",
+            "tan", "asin", "acos", "atan", "atan2", "pow", "sqrt", "exp", "log", "hypot",
         ]
         .iter()
         .any(|keyword| name.eq_ignore_ascii_case(keyword))
@@ -591,6 +655,12 @@ fn evaluate_function(
     {
         return evaluate_trig(&name.to_ascii_lowercase(), args, parse);
     }
+    if ["pow", "sqrt", "exp", "log", "hypot"]
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    {
+        return evaluate_exponential(&name.to_ascii_lowercase(), args, parse);
+    }
     if name.eq_ignore_ascii_case("clamp") {
         let [lower, first, center, second, upper] = args else {
             return Err(Issue::Invalid);
@@ -618,6 +688,13 @@ fn evaluate_function(
     } else {
         return Err(Issue::Unsupported);
     };
+    Value::compare(comparison, comma_arguments(args, parse)?)
+}
+
+fn comma_arguments(
+    args: &[ComponentValue<'_>],
+    parse: impl Fn(&ComponentValue<'_>) -> Result<Value, Issue>,
+) -> Result<Vec<Value>, Issue> {
     let [first, tail @ ..] = args else {
         return Err(Issue::Invalid);
     };
@@ -632,7 +709,7 @@ fn evaluate_function(
         }
         values.push(parse(argument)?);
     }
-    Value::compare(comparison, values)
+    Ok(values)
 }
 
 fn stepped_function(
@@ -733,6 +810,95 @@ fn evaluate_trig(
         relative_scalar: true,
         nodes: value.nodes + 1,
     }))
+}
+
+fn evaluate_exponential(
+    name: &str,
+    args: &[ComponentValue<'_>],
+    parse: impl Fn(&ComponentValue<'_>) -> Result<Value, Issue>,
+) -> Result<Value, Issue> {
+    let arguments = comma_arguments(args, parse)?;
+    if name == "hypot" {
+        return evaluate_hypot(arguments);
+    }
+    let operation = match (name, arguments.len()) {
+        ("pow", 2) => Operation::Power,
+        ("sqrt", 1) => Operation::Root,
+        ("exp", 1) => Operation::Exp,
+        ("log", 1) => Operation::Ln,
+        ("log", 2) => Operation::Log,
+        _ => return Err(Issue::Invalid),
+    };
+    let mut arguments = arguments.into_iter();
+    let Some(Value::Number(value)) = arguments.next() else {
+        return Err(Issue::Invalid);
+    };
+    let parameter = match arguments.next() {
+        None => Calculation::constant(0.0),
+        Some(Value::Number(parameter)) => parameter,
+        _ => return Err(Issue::Invalid),
+    };
+    if let (Some(value), Some(parameter)) = (value.fixed(), parameter.fixed()) {
+        let result = operation.evaluate(value, parameter);
+        if result.is_infinite() {
+            return Err(Issue::Unsupported);
+        }
+        return Ok(Value::number(result));
+    }
+    let bounds = |value: &Calculation| {
+        value
+            .expression
+            .scalar_bounds()
+            .unwrap_or_else(|| Interval::signed(value.point_bound.unwrap_or_default()))
+    };
+    let range = operation
+        .bounds(bounds(&value), bounds(&parameter))
+        .ok_or(Issue::Unsupported)?;
+    Ok(Value::Number(Calculation {
+        expression: Expression::Exponential(
+            operation,
+            Box::new(value.expression),
+            Box::new(parameter.expression),
+            range,
+        ),
+        point_bound: Some(range.absolute().high),
+        percent_bound: None,
+        relative_scalar: true,
+        nodes: value.nodes + parameter.nodes + 1,
+    }))
+}
+
+fn evaluate_hypot(arguments: Vec<Value>) -> Result<Value, Issue> {
+    let mut arguments = arguments.into_iter().map(Value::split);
+    let (kind, first) = arguments.next().ok_or(Issue::Invalid)?;
+    let mut points = Vec::new();
+    let mut percentages = Vec::new();
+    let mut expressions = Vec::new();
+    let mut relative_scalar = false;
+    let mut nodes = 1;
+    for (other, value) in std::iter::once((kind, first)).chain(arguments) {
+        if other != kind {
+            return Err(Issue::Invalid);
+        }
+        points.extend(value.point_bound);
+        percentages.extend(value.percent_bound);
+        relative_scalar |= value.relative_scalar;
+        nodes += value.nodes;
+        expressions.push(value.expression);
+    }
+    let norm = |values: Vec<f32>| (!values.is_empty()).then(|| exponential::hypot(values));
+    let calculation = Calculation {
+        expression: Expression::Hypot(expressions),
+        point_bound: norm(points),
+        percent_bound: norm(percentages),
+        relative_scalar,
+        nodes,
+    };
+    Ok(kind.supply(
+        calculation
+            .fixed()
+            .map_or(calculation, Calculation::constant),
+    ))
 }
 
 fn used_length(value: f32, signed: bool) -> f32 {
