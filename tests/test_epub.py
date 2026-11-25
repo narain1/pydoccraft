@@ -12409,6 +12409,91 @@ Middle cue
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently measurable label"):
                         operation()
 
+    def test_mathml_labeled_fit_measures_an_absolute_label_width_and_inset(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML fixed label advance</title><meta name="viewport" content="width=500,height=330"/>
+            <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">
+            <m:mtable width="320pt" columnwidth="42pt fit" columnspacing="8pt"
+                      side="right" minlabelspacing="6pt" columnalign="left">
+              <m:mlabeledtr>
+                <m:mtd><m:mpadded width="64pt" lspace="4pt"><m:mtext>InsetTag</m:mtext></m:mpadded></m:mtd>
+                <m:mtd><m:mtext>Guard</m:mtext></m:mtd>
+                <m:mtd><m:mtable width="INNER" columnwidth="50% fit" columnspacing="4pt" columnalign="left">
+                  <m:mtr><m:mtd><m:mtext>Near</m:mtext></m:mtd><m:mtd><m:mtext>Far</m:mtext></m:mtd></m:mtr>
+                </m:mtable><m:mtext>Tail</m:mtext></m:mtd>
+              </m:mlabeledtr>
+            </m:mtable>
+          </m:math></p></body></html>"""
+        terms = ("InsetTag", "Guard", "Near", "Far", "Tail")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 330)])
+
+        def boxes(doc: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            matches = {}
+            for term in terms:
+                matches[term], = doc[0].search_for(term)
+            return matches
+
+        # Half of the remainder after the fixed column, the gutter, and
+        # both 64pt label margins with 6pt clearance is 65pt.
+        absolute = source.replace("INNER", "65pt")
+        unshifted = absolute.replace(' lspace="4pt"', "")
+        with doc_ex.open(epub_fixture(chapter_one=unshifted)) as book, doc_ex.open(book.convert("pdf")) as pdf:
+            reference = boxes(pdf)
+
+        results = []
+        for chapter in (absolute, source.replace("INNER", "50%")):
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                preview = book.render_page(0, dpi=96)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    self.assertFalse(pdf[0].get_images())
+                    vector = boxes(pdf)
+                    self.assertAlmostEqual(vector["InsetTag"][0] - reference["InsetTag"][0], 4.0, places=3)
+                    self.assertAlmostEqual(vector["Far"][0] - vector["Near"][0], 36.5, places=3)
+                    self.assertAlmostEqual(vector["Tail"][0] - vector["Near"][0], 65.0, places=3)
+                editable = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            matrix = xml.find(".//m:oMath//m:m", ns)
+            self.assertIsNotNone(matrix)
+            self.assertIsNotNone(matrix.find(".//m:m", ns))
+            padded, = [p for p in matrix.findall(".//m:phant", ns)
+                       if any(t.text == "InsetTag" for t in p.findall("m:e/m:r/m:t", ns))]
+            self.assertIsNotNone(padded.find("m:phantPr/m:zeroWid", ns))
+            with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                native = boxes(pdf)
+                text = word[0].get_text()
+                self.assertNotIn("⟡H", text)
+                for term in terms:
+                    self.assertEqual(text.count(term), 1)
+                    for expected, actual in zip(vector[term], native[term]):
+                        self.assertAlmostEqual(expected, actual, delta=0.35)
+            with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter})) as book:
+                fixed_preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), fixed_preview)
+                    fixed_vector = boxes(pdf)
+            results.append((preview, vector, native, fixed_preview, fixed_vector))
+        self.assertEqual(results[0], results[1])
+
+        relative = source.replace("INNER", "50%")
+        no_inset = relative.replace(' lspace="4pt"', "")
+        with doc_ex.open(epub_fixture(chapter_one=no_inset)) as book, doc_ex.open(book.convert("pdf")) as pdf:
+            self.assertEqual(boxes(pdf), reference)
+
+        for chapter, message in (
+            (relative.replace('width="64pt"', 'width="+64pt"'), "independently measurable label"),
+            (relative.replace('width="64pt"', 'width="64.1pt"'), "width differs for the editable label"),
+            (relative.replace('lspace="4pt"', 'lspace="4.1pt"'), "inset differs for the editable label"),
+            (relative.replace('lspace="4pt"', 'lspace="-4pt"'), "independently measurable label"),
+            (relative.replace('lspace="4pt"', 'lspace="70pt"'), "independently measurable label"),
+            (relative.replace('lspace="4pt"', 'lspace="10%width"'), "independently measurable label"),
+        ):
+            with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        operation()
+
     def test_mathml_ruled_overlap_labels_stay_outside_the_native_frame(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Ruled overflow labels</title><meta name="viewport" content="width=500,height=340"/>

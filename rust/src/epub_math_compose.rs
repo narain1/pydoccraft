@@ -154,19 +154,45 @@ impl Extras {
         document: &Document,
         format: &CharProps,
     ) -> Result<f32, EngineError> {
+        const ADVANCE_EPSILON: f32 = 0.0001;
         let unresolved =
             || unsupported("MathML fitted track width requires an independently measurable label");
         let resolved = document.styles.resolve_char(None, format);
         let measurements = Measurements::default();
-        let layout = |equation| measurements.layout(equation, "", &resolved, false, MAX_GEOMETRY);
+        let layout =
+            |equation: &Math| measurements.layout(equation, "", &resolved, false, MAX_GEOMETRY);
         match self.nodes.get(prior_boxes..).ok_or_else(unresolved)? {
             [] if math.nodes.is_empty() => Ok(0.0),
             [] => Ok(layout(math)?.width),
             [Extra::Padded(padding)] if matches!(math.nodes.as_slice(), [marker] if box_index(marker) == Some(prior_boxes)) =>
             {
                 let [width, _, _, left, shift] = padding.lengths;
-                if width.is_some() || left.is_some() || shift.is_some() {
+                if shift.is_some()
+                    || width.is_some_and(|width| {
+                        width.relative || width.basis.is_some() || width.value <= 0.0
+                    })
+                    || left.is_some_and(|left| {
+                        left.basis.is_some()
+                            || left.value < 0.0
+                            || width.is_none_or(|width| left.value > width.value)
+                    })
+                {
                     return Err(unresolved());
+                }
+                if let Some(left) = left.filter(|left| left.value != 0.0) {
+                    // Leading spaces are transparent to the native shaper.
+                    // Verify their advance before sizing any data tracks.
+                    let native_gap = layout(&Math {
+                        nodes: editable_gap(left.value)?.into_iter().collect(),
+                        ..Default::default()
+                    })?;
+                    if !native_gap.width.is_finite()
+                        || (left.value - native_gap.width).abs() > ADVANCE_EPSILON
+                    {
+                        return Err(unsupported(
+                            "MathML fitted track inset differs for the editable label",
+                        ));
+                    }
                 }
                 // The only composed box belongs to this label. Its native
                 // operands cannot reference the fitted track or another box.
@@ -181,8 +207,9 @@ impl Extras {
                 .width;
                 // The visual placeholder has a 0.4pt minimum positive
                 // advance. An exact shared width must survive both paths.
-                if (visual.width > 0.0 && visual.width < 0.4)
-                    || (visual.width - native_width).abs() > 0.0001
+                if !native_width.is_finite()
+                    || (visual.width > 0.0 && visual.width < 0.4)
+                    || (visual.width - native_width).abs() > ADVANCE_EPSILON
                 {
                     return Err(unsupported(
                         "MathML fitted track width differs for the editable label",

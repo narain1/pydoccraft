@@ -114,6 +114,7 @@
 - [x] Pass definite containing widths through vertical-only MathML padding, including inside independently sized grids used as editable equation operands.
 - [x] Resolve nested relative MathML widths in the sole fitted data track of a definite-width, non-overlap labeled grid with fixed remaining tracks and independent native label equations.
 - [x] Resolve a labeled fitted track when a label uses one independently measured height or depth padding box with equal preview and editable widths.
+- [x] Resolve a labeled fitted track from a single label padding box with an absolute width and a representable nonnegative leading inset. Reject changes to its native editable geometry.
 - [ ] Resolve other relative widths when equation operands, label-dependent tracks or other intrinsically sized containers acquire an independent width after measurement.
 - [x] Draw MathML solid and dashed table rules and frames, respect span interruptions and frame spacing, and preserve standalone rules as editable Word table borders.
 - [x] Preserve tight column spacing in editable DOCX matrix projections and recover their logical rows during extraction.
