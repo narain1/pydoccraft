@@ -6,13 +6,13 @@ use std::{
 
 use roxmltree::Node;
 
-use super::{Cue, FontStyle, StyledText, TextStyle, Track, MAX_STYLE_LABEL};
+use super::{Cue, StyledText, TextStyle, Track, MAX_STYLE_LABEL};
 use crate::{
     epub::{
         charge, invalid, limited, parse_xml,
         ttml_clock::{Clock, Instant, Timing},
-        ttml_regions::{self, Definition, Region},
-        ttml_styles::{self, Patch, STYLING, TT},
+        ttml_regions::{self, Region, Regions, Selection},
+        ttml_styles::{self, StylePatch, STYLING, TT},
         unsupported, XML,
     },
     EngineError,
@@ -49,11 +49,10 @@ pub(super) fn parse(bytes: &[u8], track: &mut Track) -> Result<(), EngineError> 
         style_work: 0,
         animation_work: 0,
         styles: ttml_styles::definitions(root)?,
-        regions: regions.named,
-        implicit_region: regions.implicit,
+        regions,
     };
     let format = reader.format(
-        Format::default(),
+        Format::new(reader.regions.initial),
         root,
         Timing {
             begin: 0,
@@ -128,107 +127,11 @@ impl Children {
     }
 }
 
-// A declaration is separate from inherited style so explicit resets survive
-// merging style references and inline properties before application.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-struct StylePatch {
-    bold: Option<bool>,
-    font_style: Option<FontStyle>,
-    decoration: Option<[Option<bool>; 3]>,
-    color: Option<[u8; 4]>,
-}
-
-impl StylePatch {
-    fn merge(self, later: Self) -> Self {
-        Self {
-            bold: later.bold.or(self.bold),
-            font_style: later.font_style.or(self.font_style),
-            decoration: later.decoration.or(self.decoration),
-            color: later.color.or(self.color),
-        }
-    }
-
-    fn conflicts(self, other: Self) -> bool {
-        (self.bold.is_some() && other.bold.is_some())
-            || (self.font_style.is_some() && other.font_style.is_some())
-            || (self.decoration.is_some() && other.decoration.is_some())
-            || (self.color.is_some() && other.color.is_some())
-    }
-
-    fn inline(self, node: Node<'_, '_>) -> Result<Self, EngineError> {
-        let opt = |name| node.attribute((STYLING, name));
-        let later = Self {
-            bold: opt("fontWeight")
-                .map(|value| match value {
-                    "normal" => Ok(false),
-                    "bold" => Ok(true),
-                    _ => Err(invalid("invalid TTML fontWeight")),
-                })
-                .transpose()?,
-            font_style: opt("fontStyle")
-                .map(|value| match value {
-                    "normal" => Ok(FontStyle::Normal),
-                    "italic" => Ok(FontStyle::Italic),
-                    "oblique" => Ok(FontStyle::Oblique),
-                    _ => Err(invalid("invalid TTML fontStyle")),
-                })
-                .transpose()?,
-            decoration: opt("textDecoration").map(decoration).transpose()?,
-            color: opt("color").map(ttml_styles::color).transpose()?,
-        };
-        Ok(self.merge(later))
-    }
-
-    fn apply(self, style: &mut TextStyle) {
-        style.bold = self.bold.unwrap_or(style.bold);
-        style.font_style = self.font_style.unwrap_or(style.font_style);
-        style.color = self.color.or(style.color);
-        if let Some([underline, line_through, overline]) = self.decoration {
-            style.underline = underline.unwrap_or(style.underline);
-            style.line_through = line_through.unwrap_or(style.line_through);
-            style.overline = overline.unwrap_or(style.overline);
-        }
-    }
-}
-
-impl<'n> Patch<'n> for StylePatch {
-    fn merge(self, later: Self) -> Self {
-        self.merge(later)
-    }
-
-    fn inline(self, node: Node<'n, '_>) -> Result<Self, EngineError> {
-        self.inline(node)
-    }
-}
-
-fn decoration(value: &str) -> Result<[Option<bool>; 3], EngineError> {
-    if value == "none" {
-        return Ok([Some(false); 3]);
-    }
-    let mut flags = [None; 3];
-    let malformed = || invalid("invalid TTML textDecoration");
-    for word in value.split_ascii_whitespace() {
-        let (slot, enabled) = match word {
-            "underline" => (0, true),
-            "noUnderline" => (0, false),
-            "lineThrough" => (1, true),
-            "noLineThrough" => (1, false),
-            "overline" => (2, true),
-            "noOverline" => (2, false),
-            _ => return Err(malformed()),
-        };
-        if flags[slot].replace(enabled).is_some() {
-            return Err(malformed());
-        }
-    }
-    if flags == [None; 3] {
-        return Err(malformed());
-    }
-    Ok(flags)
-}
-
 struct StylePoint {
     start: Instant,
+    // Preserve explicit resets through an ancestor whose current region
+    // already has the same default. A descendant can select another region.
+    authored: StylePatch,
     style: Arc<TextStyle>,
 }
 
@@ -276,26 +179,27 @@ impl StyleSet {
 #[derive(Clone)]
 struct Format<'a> {
     preserve: bool,
-    region: Option<&'a str>,
+    region: Option<Selection<'a>>,
     styles: Arc<[StylePoint]>,
     animation_end: Option<Instant>,
 }
 
-impl Default for Format<'_> {
-    fn default() -> Self {
+impl Format<'_> {
+    fn new(initial: StylePatch) -> Self {
+        let mut style = TextStyle::default();
+        initial.apply(&mut style);
         Self {
             preserve: false,
             region: None,
             styles: Arc::new([StylePoint {
                 start: 0,
-                style: Arc::default(),
+                authored: StylePatch::default(),
+                style: Arc::new(style),
             }]),
             animation_end: Some(0),
         }
     }
-}
 
-impl Format<'_> {
     fn style_at(&self, time: Instant) -> usize {
         self.styles
             .partition_point(|point| point.start <= time)
@@ -313,7 +217,6 @@ struct Piece<'a> {
 
 struct Paragraph<'a> {
     id: Option<&'a str>,
-    region: Option<&'a str>,
     first_cue: usize,
     region_layout: Option<Arc<Region>>,
     region_timing: Option<Timing>,
@@ -326,12 +229,11 @@ struct Reader<'a, 'n> {
     style_work: usize,
     animation_work: usize,
     styles: HashMap<&'n str, StylePatch>,
-    regions: HashMap<&'n str, Definition>,
-    implicit_region: Option<Arc<Region>>,
+    regions: Regions<'n>,
 }
 
-impl Reader<'_, '_> {
-    fn format<'n>(
+impl<'n> Reader<'_, 'n> {
+    fn format(
         &mut self,
         mut format: Format<'n>,
         node: Node<'n, '_>,
@@ -343,7 +245,9 @@ impl Reader<'_, '_> {
             None => {}
             _ => return Err(invalid("invalid TTML xml:space value")),
         }
-        format.region = node.attribute("region").or(format.region);
+        let selected = self.regions.select(node, format.region);
+        let region_changed = selected != format.region;
+        format.region = selected;
         let patch = ttml_styles::local(node, |name| {
             self.styles
                 .get(name)
@@ -378,7 +282,11 @@ impl Reader<'_, '_> {
                 sets.push(set);
             }
         }
-        if sets.is_empty() && language.is_none() && patch == StylePatch::default() {
+        if !region_changed
+            && sets.is_empty()
+            && language.is_none()
+            && patch == StylePatch::default()
+        {
             return Ok(format);
         }
         format.styles = self.style_points(&format, timing, patch, language, &sets)?;
@@ -410,12 +318,16 @@ impl Reader<'_, '_> {
         points.sort_unstable();
         points.dedup();
         let mut output = Vec::<StylePoint>::with_capacity(points.len());
+        let region = self
+            .regions
+            .get(inherited.region)
+            .map_or(self.regions.initial, |definition| definition.style);
         for start in points {
-            let style = &inherited.styles[inherited.style_at(start)].style;
+            let parent = &inherited.styles[inherited.style_at(start)];
             if !sets.is_empty() || inherited.styles.len() > 1 {
                 charge(
                     &mut self.animation_work,
-                    1 + sets.len() + style.bytes() + language.map_or(0, str::len),
+                    1 + sets.len() + parent.style.bytes() + language.map_or(0, str::len),
                     MAX_ANIMATION_WORK,
                     "TTML animation exceeds its style work budget",
                 )?;
@@ -431,14 +343,22 @@ impl Reader<'_, '_> {
                 }
                 active = active.merge(set.patch);
             }
-            let mut style = (**style).clone();
-            patch.merge(active).apply(&mut style);
-            if let Some(language) = language {
-                style.language = (!language.is_empty()).then(|| language.to_owned());
-            }
-            if output.last().is_none_or(|point| *point.style != style) {
+            let authored = parent.authored.inherit(patch.merge(active));
+            let mut style = TextStyle {
+                language: match language {
+                    Some(language) => (!language.is_empty()).then(|| language.to_owned()),
+                    None => parent.style.language.clone(),
+                },
+                ..TextStyle::default()
+            };
+            region.inherit(authored).apply(&mut style);
+            if output
+                .last()
+                .is_none_or(|point| point.authored != authored || *point.style != style)
+            {
                 output.push(StylePoint {
                     start,
+                    authored,
                     style: Arc::new(style),
                 });
             }
@@ -446,7 +366,7 @@ impl Reader<'_, '_> {
         Ok(output.into())
     }
 
-    fn block<'n>(
+    fn block(
         &mut self,
         node: Node<'n, '_>,
         base: Instant,
@@ -471,7 +391,9 @@ impl Reader<'_, '_> {
         for child in node.children().filter(Node::is_element) {
             let Some(base) = children.base() else { break };
             let end = match child.tag_name() {
-                name if name.namespace() != Some(TT) || name.name() == "set" => continue,
+                name if name.namespace() != Some(TT) || matches!(name.name(), "set" | "region") => {
+                    continue;
+                }
                 name if matches!(name.name(), "div" | "p") => {
                     self.block(child, base, timing.end, format.clone(), depth + 1)?
                 }
@@ -482,7 +404,7 @@ impl Reader<'_, '_> {
         Ok(timing.finish(children.end))
     }
 
-    fn inline_children<'n>(
+    fn inline_children(
         &mut self,
         node: Node<'n, '_>,
         timing: Timing,
@@ -495,7 +417,7 @@ impl Reader<'_, '_> {
         children.include(format.animation_end);
         for child in node.children() {
             let Some(base) = children.base() else { break };
-            let end = if child.has_tag_name((TT, "set")) {
+            let end = if child.has_tag_name((TT, "set")) || child.has_tag_name((TT, "region")) {
                 continue;
             } else if let Some(text) = child.text().filter(|_| child.is_text()) {
                 if children.sequential {
@@ -544,20 +466,18 @@ impl Reader<'_, '_> {
     fn emit(
         &mut self,
         node: Node<'_, '_>,
-        region: Option<&str>,
+        region: Option<Selection<'n>>,
         pieces: &[Piece<'_>],
     ) -> Result<(), EngineError> {
-        let (region_layout, region_timing) =
-            region.and_then(|id| self.regions.get(id)).map_or_else(
-                || (self.implicit_region.clone(), None),
-                |region| (Some(region.region.clone()), region.timing),
-            );
+        let definition = self.regions.get(region);
         let paragraph = Paragraph {
             id: node.attribute((XML, "id")),
-            region,
             first_cue: self.track.cues.len(),
-            region_layout,
-            region_timing,
+            region_layout: definition.map_or_else(
+                || self.regions.implicit.clone(),
+                |region| Some(region.region.clone()),
+            ),
+            region_timing: definition.and_then(|region| region.timing),
         };
         let mut events = Vec::with_capacity(pieces.len() * 2);
         for (index, piece) in pieces.iter().enumerate() {
@@ -640,7 +560,10 @@ impl Reader<'_, '_> {
             text,
             id: paragraph.id.map(str::to_owned),
             settings: None,
-            region: paragraph.region.map(str::to_owned),
+            region: paragraph
+                .region_layout
+                .as_ref()
+                .and_then(|region| region.id.clone()),
             markup: None,
             runs,
             background_color: None,

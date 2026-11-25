@@ -4716,6 +4716,117 @@ overlay
             self.assertEqual(reopened.read_epub_resource("OEBPS/regions.ttml"), ttml)
             self.assertEqual(reopened.epub_embedded_text(0, 0)[0].ttml_region_layout, timed)
 
+    def test_ttml_region_typography_follows_content_precedence_and_the_source_clock(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        ttml = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xml:lang="en" ttp:tickRate="1000">
+          <head><styling>
+            <initial tts:color="red" tts:fontWeight="bold"/>
+            <initial tts:color="#008000" tts:fontStyle="oblique" tts:textDecoration="lineThrough"/>
+            <style xml:id="base" tts:color="yellow" tts:fontStyle="italic"/>
+            <style xml:id="derived" style="base" tts:color="red"/>
+          </styling><layout>
+            <region xml:id="lower" style="derived" begin="170t" end="190t"
+              tts:color="blue" tts:backgroundColor="black">
+              <style tts:color="yellow" tts:textDecoration="underline overline"/>
+            </region>
+            <region xml:id="alternate" tts:color="red" tts:fontWeight="normal"/>
+            <region xml:id="defaults"/>
+          </layout></head>
+          <body><div region="lower" tts:fontWeight="normal">
+            <set begin="175t" dur="5t" tts:color="blue"/>
+            <p xml:id="lead" begin="160t" end="200t">A<span tts:fontWeight="bold"
+              tts:fontStyle="normal" tts:textDecoration="noUnderline">mark</span></p>
+            <p xml:id="switch" region="alternate" begin="168t" end="186t">Switch</p>
+            <p xml:id="default" region="defaults" begin="195t" end="198t">Default</p>
+          </div><div begin="180t" end="184t" tts:fontStyle="normal">
+            <region xml:id="inset" begin="ignored" style="derived" tts:origin="10% 20%" tts:extent="60% 50%"/>
+            <p xml:id="inline" xml:lang="fr">Inset</p>
+          </div><p xml:id="priority" region="defaults" begin="188t" end="192t">
+            <region style="ignored"/>Winner
+          </p><p xml:id="anonymous" begin="192t" end="195t">
+            <region tts:color="yellow"/>Anonymous
+          </p></body>
+        </tt>'''
+        implicit = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
+          <head><styling><initial tts:color="#008000" tts:textDecoration="lineThrough"/></styling></head>
+          <body><p dur="1s">Full <span tts:textDecoration="overline">viewport</span></p></body></tt>'''
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>TTML region styles</title></head>
+          <body><video src="clip.mp4#t=0.169,0.189&amp;xywh=1,1,6,4">
+          <track src="regions.ttml" kind="captions" srclang="en"/>
+          <track src="implicit.ttml" kind="captions" srclang="en"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("TTML region styles", chapter, "OEBPS/regions.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/regions.ttml": doc_ex.EpubResource("application/ttml+xml", ttml),
+                    "OEBPS/implicit.ttml": doc_ex.EpubResource("application/ttml+xml", implicit),
+                },
+            )
+
+        blue, red, green, yellow = (0, 0, 255, 255), (255, 0, 0, 255), (0, 128, 0, 255), (255, 255, 0, 255)
+        with doc_ex.open(data) as book:
+            cues = book.epub_embedded_text(0, 0)
+            self.assertEqual([(cue.id, cue.start_us, cue.end_us) for cue in cues],
+                             [("switch", 168_000, 175_000), ("lead", 170_000, 190_000),
+                              ("switch", 175_000, 180_000), ("switch", 180_000, 186_000),
+                              ("inline", 180_000, 184_000), ("priority", 188_000, 192_000),
+                              ("anonymous", 192_000, 195_000), ("default", 195_000, 198_000)])
+            switch, lead, changed, reverted, inline, priority, anonymous, default = cues
+            self.assertEqual([cue.runs[0].style.color for cue in (switch, changed, reverted)], [red, blue, red])
+            self.assertEqual(switch.runs[0].style, doc_ex.EpubTextStyle(
+                font_style="oblique", line_through=True, color=red, language="en",
+            ))
+            self.assertEqual(lead.runs, (
+                doc_ex.EpubTextRun("A", doc_ex.EpubTextStyle(
+                    font_style="italic", underline=True, overline=True, color=blue, language="en",
+                )),
+                doc_ex.EpubTextRun("mark", doc_ex.EpubTextStyle(
+                    bold=True, overline=True, color=blue, language="en",
+                )),
+            ))
+            assert lead.ttml_region_layout is not None
+            self.assertEqual(lead.ttml_region_layout.background_color, (0, 0, 0, 255))
+            self.assertIsNone(lead.background_color)
+            self.assertEqual(inline.region, "inset")
+            self.assertEqual(inline.ttml_region_layout, doc_ex.EpubTtmlRegion("inset", (10, 20), (60, 50)))
+            self.assertEqual(inline.runs[0].style, doc_ex.EpubTextStyle(bold=True, line_through=True,
+                                                                    color=red, language="fr"))
+            self.assertEqual((priority.text, priority.region), ("Winner", "defaults"))
+            self.assertEqual(priority.runs[0].style, doc_ex.EpubTextStyle(
+                bold=True, font_style="oblique", line_through=True, color=green, language="en",
+            ))
+            self.assertIsNone(anonymous.region)
+            self.assertEqual(anonymous.ttml_region_layout, doc_ex.EpubTtmlRegion())
+            self.assertEqual(anonymous.runs[0].style.color, yellow)
+            self.assertEqual(default.runs[0].style, doc_ex.EpubTextStyle(
+                font_style="oblique", line_through=True, color=green, language="en",
+            ))
+            full, = book.epub_embedded_text(0, 0, track_index=1)
+            self.assertEqual(full.ttml_region_layout, doc_ex.EpubTtmlRegion())
+            self.assertEqual([run.style.color for run in full.runs], [green, green])
+            self.assertEqual([(run.style.line_through, run.style.overline) for run in full.runs],
+                             [(True, False), (True, True)])
+
+            sought = book.epub_embedded_text(0, 0, start_us=176_000, end_us=178_000)
+            self.assertEqual([(cue.id, cue.start_us, cue.end_us, cue.runs) for cue in sought],
+                             [(lead.id, 176_000, 178_000, lead.runs), (changed.id, 176_000, 178_000, changed.runs)])
+            frames = list(book.epub_embedded_video(0, 0, start_us=168_000, end_us=190_000, text_track=0))
+            self.assertEqual([(frame.start_us, frame.duration_us) for frame in frames],
+                             [(169_000, 1_000), (170_000, 5_000), (175_000, 5_000), (180_000, 4_000),
+                              (184_000, 2_000), (186_000, 2_000), (188_000, 1_000)])
+            self.assertTrue(all((f.width, f.height) == (6, 4) and f.rgb is frames[0].rgb for f in frames))
+            self.assertEqual([{cue.id: cue.runs[0].style.color for cue in frame.text_cues} for frame in frames],
+                             [{"switch": red}, {"switch": red, "lead": blue}, {"lead": blue, "switch": blue},
+                              {"lead": blue, "switch": red, "inline": red}, {"lead": blue, "switch": red},
+                              {"lead": blue}, {"lead": blue, "priority": green}])
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("TTML region styles", "Revised")})
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened.read_epub_resource("OEBPS/regions.ttml"), ttml)
+            self.assertEqual([cue.runs for cue in reopened.epub_embedded_text(0, 0)], [cue.runs for cue in cues])
+
     def test_ttml_region_edits_and_playback_validate_references_and_geometry(self) -> None:
         header = b'<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">'
         body = b'<body region="r"><div><p begin="0s" end="1s">Text</p></div></body></tt>'
@@ -4737,6 +4848,19 @@ overlay
             (track(b'<region xml:id="r"/><region xml:id="r"/>'), doc_ex.MalformedDocumentError, "duplicate TTML region"),
             (track(b'<region xml:id="x"/>'), doc_ex.MalformedDocumentError, "missing TTML region reference"),
             (track(b'<region xml:id="r" style="missing"/>'), doc_ex.MalformedDocumentError, "missing TTML style"),
+            (track(b'<region xml:id="r" tts:fontWeight="heavy"/>'),
+             doc_ex.MalformedDocumentError, "invalid TTML fontWeight"),
+            (track(b'<region xml:id="r"/>', b'<body><p dur="1s"><region/><region/>Text</p></body></tt>'),
+             doc_ex.MalformedDocumentError, "multiple inline TTML regions"),
+            (track(b'<region xml:id="r"/>',
+                   b'<body><p dur="1s"><region xml:id="r"/>Text</p></body></tt>'),
+             doc_ex.MalformedDocumentError, "duplicate TTML region ID"),
+            (track(b'<region xml:id="r"/>',
+                   b'<body region="inline"><p dur="1s"><region xml:id="inline"/>Text</p></body></tt>'),
+             doc_ex.MalformedDocumentError, "missing TTML region reference"),
+            (track(b'<region xml:id="r"/>',
+                   b'<body><p dur="1s"><region><style tts:textDecoration="misspelled"/></region>Text</p></body></tt>'),
+             doc_ex.MalformedDocumentError, "invalid TTML textDecoration"),
             (track(b'<region xml:id="r" tts:extent="-1% 5%"/>'), doc_ex.MalformedDocumentError, "negative TTML region extent"),
             (track(b'<region xml:id="r" tts:origin="10px 0px"/>'), doc_ex.UnsupportedFormatError, "pixel root extent"),
             (track(b'<region xml:id="r" tts:origin="10em 0%"/>'), doc_ex.UnsupportedFormatError, "region length unit"),

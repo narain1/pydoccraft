@@ -9,6 +9,8 @@ use super::{
 };
 use crate::EngineError;
 
+pub(crate) use super::ttml_styles::FontStyle;
+
 #[path = "epub_ttml.rs"]
 mod ttml;
 #[path = "epub_webvtt_css.rs"]
@@ -24,24 +26,6 @@ const MAX_TRACK_RUNS: usize = 50_000;
 const MAX_TIMED_CUE_NODES: usize = 50_000;
 const MAX_TIMED_CUE_BOUNDARIES: usize = 4096;
 const MAX_TIMED_WEBVTT_WORK: usize = 8 * 1024 * 1024;
-
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum FontStyle {
-    #[default]
-    Normal,
-    Italic,
-    Oblique,
-}
-
-impl FontStyle {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Normal => "normal",
-            Self::Italic => "italic",
-            Self::Oblique => "oblique",
-        }
-    }
-}
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(crate) struct TextStyle {

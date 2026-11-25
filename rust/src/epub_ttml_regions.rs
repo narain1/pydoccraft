@@ -1,13 +1,16 @@
-//! Bounded TTML out-of-line regions and their root-relative rectangle.
-use std::{collections::HashMap, sync::Arc};
+//! Bounded TTML regions, their root-relative rectangles and inherited text styles.
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
-use roxmltree::Node;
+use roxmltree::{Node, NodeId};
 
 use super::{
     invalid, limited,
     media::integer,
     ttml_clock::{Clock, Timing},
-    ttml_styles::{self, Patch, PARAM, STYLING, TT},
+    ttml_styles::{self, Patch, StylePatch, PARAM, STYLING, TT},
     unsupported, XML,
 };
 use crate::EngineError;
@@ -35,6 +38,7 @@ pub(crate) struct Region {
 pub(super) struct Definition {
     pub region: Arc<Region>,
     pub timing: Option<Timing>,
+    pub style: StylePatch,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -49,6 +53,7 @@ struct RegionPatch<'n> {
     color: Option<&'n str>,
     show_background: Option<&'n str>,
     z_index: Option<&'n str>,
+    text_style: StylePatch,
     unsupported: bool,
 }
 
@@ -65,6 +70,7 @@ impl<'n> Patch<'n> for RegionPatch<'n> {
             color: later.color.or(self.color),
             show_background: later.show_background.or(self.show_background),
             z_index: later.z_index.or(self.z_index),
+            text_style: self.text_style.merge(later.text_style),
             unsupported: self.unsupported || later.unsupported,
         }
     }
@@ -82,6 +88,7 @@ impl<'n> Patch<'n> for RegionPatch<'n> {
             color: get("backgroundColor"),
             show_background: get("showBackground"),
             z_index: get("zIndex"),
+            text_style: StylePatch::default().inline(node)?,
             unsupported: node.has_attribute("condition")
                 || get("display").is_some_and(|value| value != "auto")
                 || get("visibility").is_some_and(|value| value != "visible")
@@ -160,10 +167,43 @@ impl RegionPatch<'_> {
     }
 }
 
+#[cfg(feature = "python")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Selection<'n> {
+    Named(&'n str),
+    Inline(NodeId),
+}
+
 #[cfg_attr(not(feature = "python"), allow(dead_code))]
 pub(super) struct Regions<'n> {
-    pub named: HashMap<&'n str, Definition>,
+    named: HashMap<&'n str, Definition>,
+    inline: HashMap<NodeId, Definition>,
     pub implicit: Option<Arc<Region>>,
+    pub initial: StylePatch,
+}
+
+#[cfg(feature = "python")]
+impl<'n> Regions<'n> {
+    pub fn select(
+        &self,
+        node: Node<'n, '_>,
+        inherited: Option<Selection<'n>>,
+    ) -> Option<Selection<'n>> {
+        if let Some(id) = node.attribute("region") {
+            Some(Selection::Named(id))
+        } else if self.inline.contains_key(&node.id()) {
+            Some(Selection::Inline(node.id()))
+        } else {
+            inherited
+        }
+    }
+
+    pub fn get(&self, selection: Option<Selection<'n>>) -> Option<&Definition> {
+        match selection? {
+            Selection::Named(id) => self.named.get(id),
+            Selection::Inline(node) => self.inline.get(&node),
+        }
+    }
 }
 
 pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
@@ -173,53 +213,57 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
     let viewport = Viewport::new(root)?;
     let mut initial = RegionPatch::default();
     let mut definitions = Vec::new();
+    let mut inline_parents = HashSet::new();
     for node in root.descendants().filter(Node::is_element) {
         if node.has_tag_name((TT, "initial"))
-            && node
-                .parent_element()
-                .is_some_and(|parent| parent.has_tag_name((TT, "styling")))
+            && node.parent_element().is_some_and(|parent| {
+                parent.has_tag_name((TT, "styling"))
+                    && parent.parent_element().is_some_and(|head| {
+                        head.has_tag_name((TT, "head")) && head.parent_element() == Some(root)
+                    })
+            })
         {
             initial = initial.inline(node)?;
         }
         if !node.has_tag_name((TT, "region")) {
             continue;
         }
-        let parent = node
-            .parent_element()
-            .filter(|parent| parent.has_tag_name((TT, "layout")))
-            .ok_or_else(|| unsupported("inline TTML regions"))?;
-        if !parent.parent_element().is_some_and(|head| {
-            head.has_tag_name((TT, "head")) && head.parent_element() == Some(root)
-        }) {
-            return Err(invalid("TTML region requires a head layout"));
-        }
-        if parent.has_attribute("condition")
-            || ["begin", "end", "dur", "timeContainer"]
-                .into_iter()
-                .any(|key| parent.has_attribute(key))
-            || node
-                .attribute("timeContainer")
-                .is_some_and(|value| value != "par")
-        {
-            return Err(unsupported("conditional or nonparallel TTML region layout"));
-        }
         if definitions.len() == MAX_REGIONS {
             return Err(limited("TTML exceeds 256 region definitions"));
         }
-        definitions.push(node);
+        let parent = node
+            .parent_element()
+            .ok_or_else(|| invalid("TTML region requires a parent"))?;
+        let inline = if parent.has_tag_name((TT, "layout")) {
+            if !parent.parent_element().is_some_and(|head| {
+                head.has_tag_name((TT, "head")) && head.parent_element() == Some(root)
+            }) {
+                return Err(invalid("TTML region requires a head layout"));
+            }
+            if parent.has_attribute("condition")
+                || ["begin", "end", "dur", "timeContainer"]
+                    .into_iter()
+                    .any(|key| parent.has_attribute(key))
+            {
+                return Err(unsupported("conditional or nonparallel TTML region layout"));
+            }
+            None
+        } else if parent.has_tag_name((TT, "div")) || parent.has_tag_name((TT, "p")) {
+            if !inline_parents.insert(parent.id()) {
+                return Err(invalid("multiple inline TTML regions on one block"));
+            }
+            Some(parent)
+        } else {
+            return Err(unsupported(
+                "TTML inline regions require a division or paragraph",
+            ));
+        };
+        definitions.push((node, inline));
     }
 
-    let mut regions = HashMap::new();
+    let mut named = HashMap::new();
+    let mut inline = HashMap::new();
     if !definitions.is_empty() {
-        let clock = definitions
-            .iter()
-            .any(|node| {
-                ["begin", "end", "dur"]
-                    .iter()
-                    .any(|&key| node.has_attribute(key))
-            })
-            .then(|| Clock::new(root))
-            .transpose()?;
         let styles: HashMap<&str, RegionPatch<'_>> = ttml_styles::definitions(root)?;
         let lookup = |name: &str| {
             styles
@@ -227,13 +271,25 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
                 .copied()
                 .ok_or_else(|| invalid("missing TTML style reference"))
         };
-        for node in definitions {
-            let id = node
-                .attribute((XML, "id"))
-                .ok_or_else(|| invalid("missing TTML region ID"))?;
-            check_id(id)?;
-            if regions.contains_key(id) {
-                return Err(invalid("duplicate TTML region ID"));
+        let mut ids = HashSet::new();
+        let mut clock = None;
+        for (node, parent) in definitions {
+            // An explicit region attribute wins over a child region.
+            if parent.is_some_and(|parent| parent.has_attribute("region")) {
+                continue;
+            }
+            if node
+                .attribute("timeContainer")
+                .is_some_and(|value| value != "par")
+            {
+                return Err(unsupported("conditional or nonparallel TTML region layout"));
+            }
+            let id = node.attribute((XML, "id"));
+            if let Some(id) = id {
+                check_id(id)?;
+                if !ids.insert(id) {
+                    return Err(invalid("duplicate TTML region ID"));
+                }
             }
             let mut style = initial.merge(ttml_styles::references(node, lookup)?);
             let mut nested = 0;
@@ -250,16 +306,29 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
                 nested += 1;
                 style = style.merge(ttml_styles::local(child, lookup)?);
             }
-            let style = style.inline(node)?.compute(Some(id.to_owned()), viewport)?;
-            regions.insert(
-                id,
-                Definition {
-                    region: Arc::new(style),
-                    timing: clock
-                        .map(|clock| Timing::new(node, 0, None, clock))
-                        .transpose()?,
-                },
-            );
+            let style = style.inline(node)?;
+            let mut definition = Definition {
+                region: Arc::new(style.compute(id.map(str::to_owned), viewport)?),
+                timing: None,
+                style: style.text_style,
+            };
+            if let Some(parent) = parent {
+                // A child region is active with its parent content block.
+                inline.insert(parent.id(), definition);
+            } else {
+                let id = id.ok_or_else(|| invalid("missing TTML region ID"))?;
+                if ["begin", "end", "dur"]
+                    .iter()
+                    .any(|&name| node.has_attribute(name))
+                {
+                    let clock = match clock {
+                        Some(clock) => clock,
+                        None => *clock.insert(Clock::new(root)?),
+                    };
+                    definition.timing = Some(Timing::new(node, 0, None, clock)?);
+                }
+                named.insert(id, definition);
+            }
         }
     }
     for node in root.descendants().filter(Node::is_element) {
@@ -268,19 +337,21 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
         }
         if let Some(id) = node.attribute("region") {
             check_id(id)?;
-            if !regions.contains_key(id) {
+            if !named.contains_key(id) {
                 return Err(invalid("missing TTML region reference"));
             }
         }
     }
-    let default = if regions.is_empty() {
+    let implicit = if named.is_empty() {
         Some(Arc::new(RegionPatch::default().compute(None, viewport)?))
     } else {
         None
     };
     Ok(Regions {
-        named: regions,
-        implicit: default,
+        named,
+        inline,
+        implicit,
+        initial: initial.text_style,
     })
 }
 
