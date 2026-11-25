@@ -2767,6 +2767,43 @@ first
                              [(700_000, 35_000, False), (735_000, 15_000, True),
                               (750_000, 20_000, True), (770_000, 30_000, False)])
 
+    def test_webm_selects_video_tracks_with_clipped_captions(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        markup = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Video tracks</title></head>
+          <body><video><source src="fallback.ogv" type="video/ogg"/>
+          <source src="tracks.webm" type="video/webm"/>
+          <track kind="captions" srclang="en" src="captions.vtt"/></video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Tracks", markup, "OEBPS/video.xhtml")],
+                resources={
+                    "OEBPS/fallback.ogv": doc_ex.EpubResource("video/ogg", (
+                        fixtures / "epub-theora-vorbis-short-audio.ogv").read_bytes()),
+                    "OEBPS/tracks.webm": doc_ex.EpubResource("video/webm", (
+                        fixtures / "epub-video-webm-selected-video.webm").read_bytes()),
+                    "OEBPS/captions.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00:00.180 --> 00:00:00.230\nCaption\n"),
+                },
+            )
+        with doc_ex.open(data) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "multiple WebM tracks"):
+                next(book.epub_embedded_video(0, 0, source_index=1))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "WebM video track selection"):
+                next(book.epub_embedded_video(0, 0, source_index=0, video_track=0))
+            with self.assertRaisesRegex(ValueError, "WebM video track 2 is absent"):
+                next(book.epub_embedded_video(0, 0, video_track=2))
+            for track, size, channel in ((0, (48, 32), 0), (1, (64, 40), 2)):
+                with self.subTest(track=track):
+                    frames = list(book.epub_embedded_video(0, 0, video_track=track, start_us=150_000,
+                                                          end_us=250_000, text_track=0))
+                    self.assertEqual([(f.start_us, f.duration_us, bool(f.text_cues)) for f in frames],
+                                     [(150_000, 30_000, False), (180_000, 20_000, True),
+                                      (200_000, 30_000, True), (230_000, 20_000, False)])
+                    for frame in frames:
+                        self.assertEqual((frame.width, frame.height), size)
+                        self.assertGreater(frame.rgb[channel], 245)
+                        self.assertLess(frame.rgb[2 - channel], 10)
+
     def test_embedded_webm_vp8_opus_and_captions_share_the_presentation_clock(self) -> None:
         resource = (Path(__file__).parent / "fixtures" / "epub-video-vp8-opus.webm").read_bytes()
         path = "OEBPS/clip.webm"

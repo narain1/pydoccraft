@@ -41,9 +41,14 @@ pub(crate) struct WebmSource {
 }
 
 impl WebmSource {
-    pub(super) fn open(bytes: Vec<u8>, start: u64, end: Option<u64>) -> Result<Self, EngineError> {
+    pub(super) fn open(
+        bytes: Vec<u8>,
+        start: u64,
+        end: Option<u64>,
+        video_track: Option<usize>,
+    ) -> Result<Self, EngineError> {
         let mut reader = webm::Reader::open(bytes)?;
-        let index = reader.track(MediaType::Video, None)?;
+        let index = reader.track(MediaType::Video, video_track)?;
         let stream = &reader.demux.streams()[index as usize];
         let mut codec = match stream.params.codec_id.as_str() {
             "vp8" => Codec::Vp8,

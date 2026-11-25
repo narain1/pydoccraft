@@ -85,7 +85,13 @@ impl VideoSource {
         media: &str,
         start_us: u64,
         end_us: Option<u64>,
+        video_track: Option<usize>,
     ) -> Result<Self, EngineError> {
+        if video_track.is_some() && media != "video/webm" {
+            return Err(unsupported(
+                "WebM video track selection requires a local WebM source",
+            ));
+        }
         validate_archive_path(path)?;
         let bytes = Book::open(epub)?.read(path, MAX_ENCODED_BYTES)?;
         match media {
@@ -97,11 +103,11 @@ impl VideoSource {
                     .map_err(|_| invalid("malformed embedded Ogg video"))?
                     .map(|source| Self::Theora(Box::new(source)))
             }
-            "video/webm" => {
-                std::panic::catch_unwind(|| webm::WebmSource::open(bytes, start_us, end_us))
-                    .map_err(|_| invalid("malformed embedded WebM video"))?
-                    .map(|source| Self::Webm(Box::new(source)))
-            }
+            "video/webm" => std::panic::catch_unwind(|| {
+                webm::WebmSource::open(bytes, start_us, end_us, video_track)
+            })
+            .map_err(|_| invalid("malformed embedded WebM video"))?
+            .map(|source| Self::Webm(Box::new(source))),
             _ => Err(unsupported("unsupported EPUB video media type")),
         }
     }

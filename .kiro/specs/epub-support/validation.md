@@ -693,3 +693,7 @@ The regression selects tracks by audio declaration order in a VP8 video and an a
 The synthetic FFmpeg 8.0.1 fixtures contain a green VP8 picture, a 340 Hz mono Opus track and a stereo Vorbis track with 420 Hz left and 630 Hz right tones. The audio-only fixture remuxes both audio tracks. Their SHA-256 values are `5cfb0a6c0ed6b2e80bcacaae77d98adb05e91e5629fc943fcfcebdfe2d2376c5` and `e516bae247d5b60cb072a9a4c65ed5dd0a22e71a2d7227c5469bc077ba32f526`.
 
 The isolated Linux x86-64 CPython 3.11.15 wheel passed all 134 installed EPUB tests. It measured 24,698,996 bytes with a 57,425,992-byte native extension. Its SHA-256 is `6e86f53bd20317370effcf8543e91d47f34d62645230120f9caf2f93136fc02b`. Formatting, locked all-target Clippy with warnings denied and the static public typing check passed. Lockfiles and all three wheel attribution files match the preceding checkpoint.
+
+## 2026-11-24 WebM video track selection
+
+The installed fixture carries two VP8 tracks with different colors and dimensions. The public selector returns the chosen track even when the XHTML lists an Ogg fallback first. It preserves the clipped picture intervals and exact caption transitions. An ambiguous unselected WebM source, an absent ordinal, and an Ogg source with a WebM selector return explicit errors. Both installed track-selection tests, Rust formatting, locked release Clippy and public typing passed. FFmpeg 8.0.1 generated the synthetic two-color fixture for validation. SHA-256 is `9fd44a6eea2460aedddf7b332cff2dce681917a2dbe8c3c2cbad7f80df63d737`.

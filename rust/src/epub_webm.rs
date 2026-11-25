@@ -76,9 +76,14 @@ impl Reader {
             .streams()
             .iter()
             .filter(|stream| stream.params.media_type == kind);
+        let label = if kind == MediaType::Video {
+            "video"
+        } else {
+            "audio"
+        };
         let stream = if let Some(ordinal) = selection {
             streams.nth(ordinal).ok_or_else(|| {
-                EngineError::InvalidArgument(format!("WebM audio track {ordinal} is absent"))
+                EngineError::InvalidArgument(format!("WebM {label} track {ordinal} is absent"))
             })?
         } else {
             let stream = streams.next().ok_or_else(|| {

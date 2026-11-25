@@ -481,7 +481,7 @@ impl NativeEpubVideo {
 }
 
 #[pyfunction]
-#[pyo3(signature = (data, path, media, start, end))]
+#[pyo3(signature = (data, path, media, start, end, video_track=None))]
 fn _open_epub_video(
     py: Python<'_>,
     data: &[u8],
@@ -489,9 +489,19 @@ fn _open_epub_video(
     media: &str,
     start: u64,
     end: Option<u64>,
+    video_track: Option<u32>,
 ) -> Result<NativeEpubVideo, EngineError> {
-    py.allow_threads(|| crate::epub::video::VideoSource::open(data, path, media, start, end))
-        .map(NativeEpubVideo)
+    py.allow_threads(|| {
+        crate::epub::video::VideoSource::open(
+            data,
+            path,
+            media,
+            start,
+            end,
+            video_track.map(|index| index as usize),
+        )
+    })
+    .map(NativeEpubVideo)
 }
 
 type TimedTextCue = (
