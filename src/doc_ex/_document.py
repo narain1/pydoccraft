@@ -1111,7 +1111,8 @@ class Document:
         """Stage chapter replacements by original index alongside spine, resource and narration edits.
 
         To replace a packaged EPUB 3 navigation document outside the spine, pass
-        its archive path and an XHTML resource in `resources`.
+        its archive path and an XHTML resource in `resources`. A spine-linked
+        NCX uses its archive path and an NCX resource in the same mapping.
         """
         self._ensure_open()
         if self._filetype != "epub":

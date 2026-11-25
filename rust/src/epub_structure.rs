@@ -159,20 +159,17 @@ pub(crate) fn update_structure<'a>(
         .filter_map(|node| node.attribute("idref"))
         .filter_map(|id| manifest.get(id))
         .collect();
-    let mut nav_edits = resources
-        .iter()
-        .filter(|(path, _, _)| existing_toc.as_ref() == Some(path));
-    let authored_nav = nav_edits.next();
-    if nav_edits.next().is_some() {
-        return Err(argument("duplicate EPUB navigation replacement"));
-    }
-    if (!epub3 && authored_nav.is_some())
-        || resources
-            .iter()
-            .any(|(path, _, _)| compatibility_ncx.as_ref() == Some(path))
-    {
-        return Err(unsupported("explicit EPUB NCX replacement"));
-    }
+    let authored_nav = if epub3 {
+        navigation_replacement(resources, existing_toc.as_deref())?
+    } else {
+        None
+    };
+    let ncx_path = if epub3 {
+        compatibility_ncx.as_deref()
+    } else {
+        existing_toc.as_deref()
+    };
+    let authored_ncx = navigation_replacement(resources, ncx_path)?;
     let mut plan = Plan {
         occupied,
         ids: xml
@@ -217,30 +214,44 @@ pub(crate) fn update_structure<'a>(
         );
         svg_chapters.extend(replacement.svg_paths.into_iter().map(str::to_owned));
     }
-    if let Some(((path, media, data), original)) = authored_nav.zip(original.as_ref()) {
+    for (authored, expected) in [
+        (authored_nav, "application/xhtml+xml"),
+        (authored_ncx, "application/x-dtbncx+xml"),
+    ] {
+        let Some((path, media, data)) = authored else {
+            continue;
+        };
         check_path(path)?;
         if spine_paths.contains(path)
-            || original
-                .pages
-                .iter()
-                .any(|page| page.metadata["chapter_path"].as_str() == Some(path))
+            || original.as_ref().is_some_and(|original| {
+                original
+                    .pages
+                    .iter()
+                    .any(|page| page.metadata["chapter_path"].as_str() == Some(path))
+            })
         {
             return Err(argument(
                 "replace a spine navigation chapter through replacements",
             ));
         }
-        if media != "application/xhtml+xml"
-            || paths.get(path) != Some(&media.as_str())
+        if media != expected
+            || paths.get(path) != Some(&expected)
             || book.archive.index_for_name(path).is_none()
         {
-            return Err(argument(
-                "EPUB navigation replacement requires its packaged XHTML manifest entry",
-            ));
+            let reason = if expected == "application/xhtml+xml" {
+                "EPUB navigation replacement requires its packaged XHTML manifest entry"
+            } else {
+                "EPUB navigation replacement requires its packaged NCX manifest entry"
+            };
+            return Err(argument(reason));
         }
         if data.len() > XML_BYTES {
             return Err(limited(
                 "EPUB navigation replacement exceeds its XML byte budget",
             ));
+        }
+        if expected == "application/x-dtbncx+xml" {
+            toc::ncx_replacement_xml(data)?;
         }
         plan.files.insert(path.clone(), Cow::Borrowed(data));
     }
@@ -431,16 +442,7 @@ pub(crate) fn update_structure<'a>(
                 })
                 .collect();
             if let Some(path) = &existing_toc {
-                let original;
-                let source = if let Some(replacement) = plan.files.get(path) {
-                    replacement.as_ref()
-                } else {
-                    original = book.read(path, XML_BYTES)?;
-                    &original
-                };
-                let nav = toc::edit(source, path, epub3, &selected, &old_paths)?;
-                plan.files
-                    .insert(path.clone(), Cow::Owned(nav.into_bytes()));
+                reorder_navigation(&mut plan, &mut book, path, epub3, &selected, &old_paths)?;
             } else {
                 let (extension, media, properties) = if epub3 {
                     ("xhtml", "application/xhtml+xml", " properties=\"nav\"")
@@ -470,27 +472,35 @@ pub(crate) fn update_structure<'a>(
                 let nav = toc::create(&path, epub3, title, uid, &selected)?;
                 plan.files.insert(path, Cow::Owned(nav.into_bytes()));
             }
-            if let Some(path) = compatibility_ncx {
-                let bytes = book.read(&path, XML_BYTES)?;
-                let ncx = toc::edit(&bytes, &path, false, &selected, &old_paths)?;
-                plan.files.insert(path, Cow::Owned(ncx.into_bytes()));
+            if let Some(path) = compatibility_ncx.as_deref() {
+                reorder_navigation(&mut plan, &mut book, path, false, &selected, &old_paths)?;
             }
         }
     }
-    if let Some((path, _, authored)) = authored_nav {
+    for (authored, epub3_nav) in [(authored_nav, true), (authored_ncx, false)] {
+        let Some((path, _, authored)) = authored else {
+            continue;
+        };
         let data = plan
             .files
             .get(path)
             .ok_or_else(|| invalid("missing staged EPUB navigation"))?;
-        let xml = toc::replacement_xml(data)?;
-        let properties = editor::xhtml_properties(xml.root_element());
-        editor::chapter_property_edits(
-            package_source,
-            &package_path,
-            manifest_node,
-            &HashMap::from([(path.as_str(), properties)]),
-            &mut edits,
-        )?;
+        let parse = if epub3_nav {
+            toc::xhtml_replacement_xml
+        } else {
+            toc::ncx_replacement_xml
+        };
+        let xml = parse(data)?;
+        if epub3_nav {
+            let properties = editor::xhtml_properties(xml.root_element());
+            editor::chapter_property_edits(
+                package_source,
+                &package_path,
+                manifest_node,
+                &HashMap::from([(path.as_str(), properties)]),
+                &mut edits,
+            )?;
+        }
         editor::collect_removed_anchors(
             &mut book,
             path,
@@ -500,7 +510,7 @@ pub(crate) fn update_structure<'a>(
             &mut anchor_bytes,
         )?;
         if authored.as_slice() != data.as_ref() {
-            let authored = toc::replacement_xml(authored)?;
+            let authored = parse(authored)?;
             editor::collect_removed_xml_anchors(
                 path,
                 &authored,
@@ -511,7 +521,11 @@ pub(crate) fn update_structure<'a>(
         }
     }
     for (path, media, data) in resources {
-        if authored_nav.is_some_and(|(nav_path, _, _)| nav_path == path) {
+        if [authored_nav, authored_ncx]
+            .into_iter()
+            .flatten()
+            .any(|(nav_path, _, _)| nav_path == path)
+        {
             continue;
         }
         check_path(path)?;
@@ -688,11 +702,51 @@ pub(crate) fn update_structure<'a>(
         &removals,
     )?;
     let extracted = extract(&updated, None)?;
-    if authored_nav.is_some() {
-        toc::validate_replacement(&updated, &extracted.metadata)?;
+    if authored_nav.is_some() || authored_ncx.is_some() {
+        toc::validate_replacement(
+            &updated,
+            &extracted.metadata,
+            authored_nav.is_some(),
+            authored_ncx.map(|(path, _, _)| path.as_str()),
+        )?;
     }
     editor::validate_svg_chapters(&updated, svg_chapters.iter().map(String::as_str))?;
     Ok(updated)
+}
+
+fn navigation_replacement<'a>(
+    resources: &'a [ResourceEdit],
+    path: Option<&str>,
+) -> Result<Option<&'a ResourceEdit>, EngineError> {
+    let mut edits = resources
+        .iter()
+        .filter(|(resource, _, _)| path == Some(resource.as_str()));
+    let replacement = edits.next();
+    if edits.next().is_some() {
+        return Err(argument("duplicate EPUB navigation replacement"));
+    }
+    Ok(replacement)
+}
+
+fn reorder_navigation(
+    plan: &mut Plan<'_>,
+    book: &mut Book<'_>,
+    path: &str,
+    epub3: bool,
+    selected: &[toc::Chapter],
+    old_paths: &HashSet<&str>,
+) -> Result<(), EngineError> {
+    let original;
+    let source = if let Some(replacement) = plan.files.get(path) {
+        replacement.as_ref()
+    } else {
+        original = book.read(path, XML_BYTES)?;
+        &original
+    };
+    let revised = toc::edit(source, path, epub3, selected, old_paths)?;
+    plan.files
+        .insert(path.to_owned(), Cow::Owned(revised.into_bytes()));
+    Ok(())
 }
 
 fn remove_font_declarations(

@@ -17,7 +17,7 @@ pub(super) struct Chapter {
     pub inserted: bool,
 }
 
-pub(super) fn replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {
+pub(super) fn xhtml_replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {
     let xml = parse_xml(data)?;
     let root = xml.root_element();
     if !name(root, XHTML, "html") || child(root, XHTML, "body").is_none() {
@@ -28,26 +28,79 @@ pub(super) fn replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineError> 
     Ok(xml)
 }
 
+pub(super) fn ncx_replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {
+    let xml = parse_xml(data)?;
+    let root = xml.root_element();
+    if !name(root, NCX, "ncx") {
+        return Err(invalid("invalid NCX navigation root"));
+    }
+    let mut maps = root.children().filter(|node| name(*node, NCX, "navMap"));
+    let has_items = maps
+        .next()
+        .is_some_and(|map| map.children().any(|node| name(node, NCX, "navPoint")));
+    if !has_items || maps.next().is_some() {
+        return Err(invalid(
+            "replacement EPUB NCX requires one nonempty table of contents",
+        ));
+    }
+    for node in root.descendants().filter(|node| {
+        [Kind::NcxPoint, Kind::NcxPage, Kind::NcxTarget]
+            .into_iter()
+            .any(|kind| kind.accepts(*node))
+    }) {
+        let mut targets = node.children().filter(|node| name(*node, NCX, "content"));
+        if targets
+            .next()
+            .and_then(|target| target.attribute("src"))
+            .is_none_or(|src| src.trim().is_empty())
+            || targets.next().is_some()
+        {
+            return Err(invalid("NCX navigation item must have one target"));
+        }
+    }
+    Ok(xml)
+}
+
 pub(super) fn validate_replacement(
     data: &[u8],
     metadata: &Map<String, Value>,
+    xhtml: bool,
+    ncx: Option<&str>,
 ) -> Result<(), EngineError> {
-    let groups = metadata["navigation"]
-        .as_array()
-        .ok_or_else(|| invalid("missing replacement EPUB navigation"))?;
     let manifest: HashMap<_, _> = metadata["manifest"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|item| Some((item["path"].as_str()?, item["media_type"].as_str()?)))
         .collect();
-    let mut has_toc = false;
     let mut book = Book::open(data)?;
+    if xhtml {
+        let groups = metadata["navigation"]
+            .as_array()
+            .ok_or_else(|| invalid("missing replacement EPUB navigation"))?;
+        validate_targets(&mut book, &manifest, groups, false)?;
+    }
+    if let Some(path) = ncx {
+        let source = book.read(path, XML_BYTES)?;
+        let xml = ncx_replacement_xml(&source)?;
+        let groups = super::super::read_ncx(xml.root_element(), path)?;
+        validate_targets(&mut book, &manifest, &groups, true)?;
+    }
+    Ok(())
+}
+
+fn validate_targets(
+    book: &mut Book<'_>,
+    manifest: &HashMap<&str, &str>,
+    groups: &[Value],
+    ncx: bool,
+) -> Result<(), EngineError> {
+    let mut has_toc = false;
     let mut fragments = HashMap::<&str, HashSet<&str>>::new();
     for group in groups {
         let kinds = group["kind"].as_str().unwrap_or_default();
         let kind = |name| kinds.split_ascii_whitespace().any(|kind| kind == name);
-        let local_content = kind("toc") || kind("landmarks") || kind("page-list");
+        let local_content = ncx || kind("toc") || kind("landmarks") || kind("page-list");
         let mut items = group["items"]
             .as_array()
             .into_iter()
