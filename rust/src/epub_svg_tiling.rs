@@ -76,7 +76,7 @@ pub(super) fn validate(
                 }
                 result.srgb = true;
             }
-            Kind::Flood(_) => result.srgb = true,
+            Kind::Flood(_) | Kind::Image(_) => result.srgb = true,
             Kind::Offset(offset) => {
                 if let Some(input) = seed(offset.input()) {
                     result = input;

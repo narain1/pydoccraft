@@ -11,12 +11,24 @@ import warnings
 import wave
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 
 import doc_ex
 from fixtures import PNG, docx_fixture
-from test_pdf_underlays import solid
+from test_pdf_text_boxes import quadrant_png
+from test_pdf_underlays import JPEG, solid
 from test_rendering import png_chunks
 from test_render_geometry import rgba_pixels
+
+
+def rgba_fixture(width: int, height: int, data: bytes) -> bytes:
+    def chunk(kind: bytes, content: bytes) -> bytes:
+        return struct.pack(">I", len(content)) + kind + content + struct.pack(">I", zlib.crc32(kind + content))
+
+    stride = width * 4
+    rows = b"".join(b"\0" + data[offset:offset + stride] for offset in range(0, len(data), stride))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows, 1)) + chunk(b"IEND", b""))
 
 
 def epub_fixture(*, encrypted: bool = False, version: str = "3.0", chapter_one: str | None = None) -> bytes:
@@ -12145,6 +12157,187 @@ Trailing
         for data, error, reason in books:
             with self.subTest(reason=reason), doc_ex.open(data) as book, self.assertRaisesRegex(error, reason):
                 book.render_page(0, dpi=96)
+
+    def test_svg_filter_images_fit_clip_and_preserve_proven_pdf_attribution(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+                      viewBox="0 0 184 110" image-rendering="pixelated">
+          <defs>
+            <filter id="meet" filterUnits="userSpaceOnUse" x="4" y="4" width="58" height="40">
+              <feImage href="Art/caf%C3%A9.png" x="8" y="10" width="44" height="20"
+                       preserveAspectRatio="xMaxYMid meet"/>
+            </filter>
+            <filter id="slice" filterUnits="userSpaceOnUse" x="66" y="10" width="46" height="20">
+              <feImage xlink:href="Art/caf%C3%A9.png" x="64" y="6" width="46" height="24"
+                       preserveAspectRatio="xMidYMid slice"/>
+            </filter>
+            <filter id="jpeg" filterUnits="userSpaceOnUse" x="114" y="6" width="48" height="34">
+              <feImage href="Art/sample.jpg" x="118" y="10" width="40" height="20" preserveAspectRatio="none"/>
+            </filter>
+            <filter id="mask" filterUnits="userSpaceOnUse" x="102" y="46" width="74" height="50">
+              <feImage href="Art/mask.png" x="128" y="54" width="24" height="24"
+                       preserveAspectRatio="none" image-rendering="pixelated" result="stencil"/>
+              <feComposite in="SourceGraphic" in2="stencil" operator="in"/>
+            </filter>
+            <filter id="caption" filterUnits="userSpaceOnUse" x="0" y="48" width="98" height="48">
+              <feImage href="Art/caf%C3%A9.png" x="12" y="56" width="64" height="32"
+                       preserveAspectRatio="none" result="background"/>
+              <feMerge><feMergeNode in="background"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <rect x="8" y="10" width="46" height="20" filter="url(#meet)"/>
+          <rect x="68" y="12" width="38" height="18" filter="url(#slice)"/>
+          <rect x="118" y="10" width="40" height="20" filter="url(#jpeg)"/>
+          <a href="https://example.org/stenciled">
+            <g id="marker" filter="url(#mask)"><rect x="110" y="56" width="56" height="20" fill="orange"/></g>
+          </a>
+          <a href="#marker"><rect x="168" y="12" width="8" height="8" fill="purple"/></a>
+          <g filter="url(#caption)"><text x="15" y="82" font-weight="900" font-size="27">
+            <a href="https://example.org/image">Café</a>
+          </text></g>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 184, 110)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Raster effects</title>
+          <meta name="viewport" content="width=184,height=110"/></head><body style="margin:0">{}</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"</manifest>", """
+                <item id="pattern" href="Art/caf%C3%A9.png" media-type="image/png"/>
+                <item id="photo" href="Art/sample.jpg" media-type="image/jpeg"/>
+                <item id="stencil" href="Art/mask.png" media-type="image/png"/>
+                </manifest>""".encode())
+        pattern = quadrant_png()
+        mask = rgba_fixture(2, 1, bytes((0, 0, 0, 0, 0, 0, 0, 255)))
+
+        def open_book(markup: str, inline: bool = False) -> doc_ex.Document:
+            entry = b'href="s0.xhtml" media-type="application/xhtml+xml"'
+            if inline:
+                members = {
+                    "OEBPS/content.opf": package.replace(entry, entry + b' properties="svg"'),
+                    "OEBPS/s0.xhtml": template.format(markup),
+                }
+            else:
+                members = {
+                    "OEBPS/content.opf": package.replace(entry, b'href="Svg/s0.svg" media-type="image/svg+xml"'),
+                    "OEBPS/Svg/s0.svg": markup.replace('"Art/', '"../Art/'),
+                }
+            return doc_ex.open(rewrite_epub(fixture, {
+                **members, "OEBPS/Art/café.png": pattern, "OEBPS/Art/mask.png": mask, "OEBPS/Art/sample.jpg": JPEG,
+            }))
+
+        control = svg.replace('filter="url(#caption)"', "").replace(
+            '<rect x="118" y="10" width="40" height="20" filter="url(#jpeg)"/>',
+            '<image x="118" y="10" width="40" height="20" href="Art/sample.jpg"/>',
+        )
+        for inline in (False, True):
+            for dpi, scale in ((96, 1), (144, 1.5)):
+                with self.subTest(inline=inline, dpi=dpi), open_book(svg, inline) as book:
+                    self.assertEqual(book.read_epub_resource("OEBPS/Art/café.png"), pattern)
+                    if dpi == 96:
+                        with self.assertRaisesRegex(ValueError, "still referenced"):
+                            book.edit_epub_structure(remove_resources=["OEBPS/Art/café.png"])
+                        css = svg.replace('image-rendering="pixelated" result="stencil"',
+                                          'style="image-rendering:pixelated" result="stencil"')
+                        with open_book(css, inline) as styled:
+                            self.assertEqual(styled.render_page(0, dpi=dpi), book.render_page(0, dpi=dpi))
+                    width, pixels = preview = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+
+                    def pixel(x: int, y: int, rgba: bytes = pixels) -> tuple[int, ...]:
+                        start = 4 * (int(y * scale) * width + int(x * scale))
+                        return tuple(rgba[start:start + 4])
+
+                    expected = {
+                        (29, 15): (255, 255, 255), (34, 15): (255, 0, 0), (47, 15): (0, 255, 0),
+                        (34, 25): (0, 0, 255), (47, 25): (255, 255, 0), (53, 25): (255, 255, 255),
+                        (65, 14): (255, 255, 255), (70, 8): (255, 255, 255), (70, 14): (255, 0, 0),
+                        (96, 14): (0, 255, 0), (70, 25): (0, 0, 255), (96, 25): (255, 255, 0),
+                        (110, 25): (255, 255, 255), (136, 66): (255, 255, 255), (145, 66): (255, 165, 0),
+                    }
+                    for (x, y), rgb in expected.items():
+                        self.assertEqual(pixel(x, y), (*rgb, 255), (x, y))
+                    output = book.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                    with (open_book(control, inline) as plain, doc_ex.open(output) as pdf,
+                          doc_ex.open(plain.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as reference,
+                          pdf.edit() as edit):
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))), preview)
+                        _, direct = rgba_pixels(png_chunks(plain.render_page(0, dpi=dpi)))
+                        self.assertEqual(pixel(130, 19), pixel(130, 19, direct))
+                        self.assertNotEqual(pixel(130, 19), (255, 255, 255, 255))
+                        self.assertEqual(pdf[0].get_text(), "Café")
+                        self.assertEqual(pdf[0].search_for("Café"), reference[0].search_for("Café"))
+                        self.assertEqual(pdf[0].get_links(), reference[0].get_links())
+                        stenciled, = [link for link in pdf[0].get_links() if link.uri == "https://example.org/stenciled"]
+                        for actual, projected in zip(stenciled.bbox, (105, 42, 114, 57)):
+                            self.assertAlmostEqual(actual, projected, delta=.01)
+                        destination, = re.findall(rb"/XYZ[ ]+(105[.]?[0-9]*)[ ]+([0-9.]+)[ ]+null",
+                                                  edit.to_bytes(object_streams=False))
+                        self.assertAlmostEqual(float(destination[1]), 40.5)
+
+        tiled = svg.replace('preserveAspectRatio="xMaxYMid meet"/>',
+                            'preserveAspectRatio="xMaxYMid meet" result="sprite"/><feTile in="sprite"/>')
+        with open_book(tiled) as book:
+            width, pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            for x, y in ((34, 15), (34, 35)):
+                start = 4 * (y * width + x)
+                self.assertEqual(tuple(pixels[start:start + 4]), (255, 0, 0, 255))
+
+        merge = '<feMerge><feMergeNode in="background"/><feMergeNode in="SourceGraphic"/></feMerge>'
+        for result in ("", '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="background"/></feMerge>',
+                       '<feComposite in="background" in2="SourceGraphic" operator="in"/>'):
+            with self.subTest(result=result), open_book(svg.replace(merge, result)) as book:
+                self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                    book.export_epub_fixed_pdf(dpi=96, searchable=True)
+        visual = svg.replace(merge, "").replace('<a href="https://example.org/image">Café</a>', "Café")
+        with open_book(visual) as book, doc_ex.open(book.export_epub_fixed_pdf(dpi=96)) as pdf:
+            self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))),
+                             rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+
+    def test_svg_filter_images_reject_nonarchive_inputs_and_bound_expanded_decode_work(self) -> None:
+        def svg(attrs: str, *, extra: str = "") -> str:
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+              <defs><filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="12" height="12">
+                <feImage {attrs}/></filter>
+                <rect id="item" x="2" y="2" width="8" height="8" filter="url(#f)"/>
+              </defs><use href="#item"/>{extra}</svg>"""
+
+        invalid = (
+            ("", doc_ex.MalformedDocumentError, "has no href"),
+            ('href="https://example.invalid/art.png"', doc_ex.UnsupportedFormatError, "relative archive paths"),
+            ('href="//example.invalid/art.png"', doc_ex.UnsupportedFormatError, "relative archive paths"),
+            ('href="file:///external-artwork.png"', doc_ex.UnsupportedFormatError, "relative archive paths"),
+            ('href="data:image/png;base64,QQ=="', doc_ex.UnsupportedFormatError, "relative archive paths"),
+            ('href="#item"', doc_ex.UnsupportedFormatError, "relative archive paths"),
+            ('href="image.png?name=other"', doc_ex.UnsupportedFormatError, "relative archive paths"),
+            ('href="/image.png"', doc_ex.UnsafeArchiveError, "unsafe EPUB resource URI"),
+            ('href="%2e%2e/image.png"', doc_ex.UnsafeArchiveError, "encoded EPUB parent directory"),
+            ('href="../../image.png"', doc_ex.UnsafeArchiveError, "escapes its container"),
+            ('href="missing.png"', doc_ex.MalformedDocumentError, "missing.png"),
+            ('href="one.xhtml"', doc_ex.UnsupportedFormatError, "requires a PNG or JPEG"),
+            ('href="broken.png"', doc_ex.MalformedDocumentError, "raster image dimensions"),
+            ('href="image.png" in="SourceGraphic"', doc_ex.MalformedDocumentError, "unexpected SVG filter input"),
+            ('href="image.png" preserveAspectRatio="xMiddleYMiddle"',
+             doc_ex.MalformedDocumentError, "invalid SVG filter image aspect ratio"),
+        )
+        with doc_ex.open(epub_fixture()) as book:
+            for attrs, error, reason in invalid:
+                with self.subTest(attrs=attrs), self.assertRaisesRegex(error, reason):
+                    book.edit_epub_structure([
+                        doc_ex.EpubSvgChapterSource("Raster effect", svg(attrs), "OEBPS/art.svg"), 0,
+                    ], resources={
+                        "OEBPS/broken.png": doc_ex.EpubResource("image/png", b"\x89PNG\r\n\x1a\n"),
+                    })
+
+            pixels = rgba_fixture(1024, 1024, bytes((28, 95, 156, 255)) * (1024 * 1024))
+            def asset(uses: int) -> bytes:
+                page = svg('href="large.png"', extra='<use href="#item" x="14"/>' * uses)
+                return book.edit_epub_structure([
+                    doc_ex.EpubSvgChapterSource("Decode work", page, "OEBPS/art.svg"), 0,
+                ], resources={"OEBPS/large.png": doc_ex.EpubResource("image/png", pixels)})
+
+            small, excessive = asset(0), asset(16)
+        with doc_ex.open(small) as book:
+            self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+        with doc_ex.open(excessive) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "filter work exceeds"):
+            book.render_page(0, dpi=96)
 
     def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
         def svg(primitives: str, attrs: str = "", rect: str = "") -> str:

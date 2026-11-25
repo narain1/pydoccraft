@@ -1056,13 +1056,17 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
         {
             return Err(unsupported("SVG contains unsupported or active elements"));
         }
-        if tag == "image" && super::svg::image_href(node).is_none() {
+        if tag == "feImage" && base.is_none() {
+            return Err(unsupported("SVG filter images require an EPUB archive"));
+        }
+        let raster_reference = matches!(tag, "image" | "feImage");
+        if raster_reference && super::svg::image_href(node).is_none() {
             return Err(invalid("EPUB SVG image has no href"));
         }
         for attribute in node.attributes() {
             let key = attribute.name();
             let value = attribute.value();
-            if tag == "image"
+            if raster_reference
                 && key == "href"
                 && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
             {

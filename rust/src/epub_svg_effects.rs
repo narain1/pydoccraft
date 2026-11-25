@@ -57,6 +57,7 @@ pub(in crate::epub) fn is_filter_primitive(tag: &str) -> bool {
             | "feMorphology"
             | "feConvolveMatrix"
             | "feTile"
+            | "feImage"
             | "feTurbulence"
             | "feDisplacementMap"
     )
@@ -196,7 +197,7 @@ fn validate_chain(node: Node<'_, '_>) -> Result<(), EngineError> {
             return Err(unsupported("unsupported SVG filter primitive"));
         }
         match child.tag_name().name() {
-            "feFlood" | "feMerge" | "feTurbulence" if child.has_attribute("in") => {
+            "feFlood" | "feMerge" | "feTurbulence" | "feImage" if child.has_attribute("in") => {
                 return Err(invalid("unexpected SVG filter input"));
             }
             "feMerge" => {
@@ -307,6 +308,7 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
     validate_region(node)?;
     match node.tag_name().name() {
         "feColorMatrix" => return validate_color_matrix(node),
+        "feImage" => return validate_image_aspect(node),
         "feComposite" => return validate_composite(node),
         "feComponentTransfer" => return transfer::validate_channels(node),
         "feMorphology" => return morphology::validate(node),
@@ -424,6 +426,37 @@ fn validate_composite(node: Node<'_, '_>) -> Result<(), EngineError> {
                 return Err(limited("SVG filter composite coefficient exceeds 1024"));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_image_aspect(node: Node<'_, '_>) -> Result<(), EngineError> {
+    let Some(raw) = node.attribute("preserveAspectRatio") else {
+        return Ok(());
+    };
+    let mut tokens = raw.split_ascii_whitespace();
+    let alignment = match tokens.next() {
+        Some("defer") => tokens.next(),
+        value => value,
+    };
+    if !matches!(
+        alignment,
+        Some(
+            "none"
+                | "xMinYMin"
+                | "xMidYMin"
+                | "xMaxYMin"
+                | "xMinYMid"
+                | "xMidYMid"
+                | "xMaxYMid"
+                | "xMinYMax"
+                | "xMidYMax"
+                | "xMaxYMax"
+        )
+    ) || !matches!(tokens.next(), None | Some("meet" | "slice"))
+        || tokens.next().is_some()
+    {
+        return Err(invalid("invalid SVG filter image aspect ratio"));
     }
     Ok(())
 }
@@ -563,7 +596,7 @@ struct Support {
     retains_source: bool,
     within_source: bool,
     procedural: bool,
-    copied_source: bool,
+    unattributed_paint: bool,
 }
 
 impl Support {
@@ -572,13 +605,14 @@ impl Support {
             retains_source: self.retains_source || other.retains_source,
             within_source: self.within_source && other.within_source,
             procedural: self.procedural || other.procedural,
-            copied_source: self.copied_source || other.copied_source,
+            unattributed_paint: self.unattributed_paint || other.unattributed_paint,
         }
     }
 
     fn over(self, below: Self) -> Self {
         Self {
-            copied_source: self.copied_source || (!self.retains_source && below.copied_source),
+            unattributed_paint: self.unattributed_paint
+                || (!self.retains_source && below.unattributed_paint),
             ..self.union(below)
         }
     }
@@ -654,7 +688,7 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
             Kind::DisplacementMap(map) if map.scale() == 0.0 => get(map.input1()),
             Kind::DisplacementMap(map) => Support {
                 procedural: true,
-                copied_source: get(map.input1()).copied_source,
+                unattributed_paint: get(map.input1()).unattributed_paint,
                 ..Support::default()
             },
             Kind::Tile(tile) if tiling::passes_input(tile, filter, &primitives[..index]) => {
@@ -663,9 +697,9 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                     ..get(tile.input())
                 }
             }
-            Kind::Tile(_) => Support {
+            Kind::Tile(_) | Kind::Image(_) => Support {
                 procedural: true,
-                copied_source: true,
+                unattributed_paint: true,
                 ..Support::default()
             },
             Kind::Offset(offset) => Support {
@@ -729,14 +763,14 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                         Support::subset(k4 <= 0.0 && first.within_source && second.within_source)
                     }
                 };
-                let copied_source = match composite.operator() {
-                    CompositeOperator::Over => support.copied_source,
-                    CompositeOperator::In | CompositeOperator::Out => first.copied_source,
-                    _ => first.copied_source || second.copied_source,
+                let unattributed_paint = match composite.operator() {
+                    CompositeOperator::Over => support.unattributed_paint,
+                    CompositeOperator::In | CompositeOperator::Out => first.unattributed_paint,
+                    _ => first.unattributed_paint || second.unattributed_paint,
                 };
                 Support {
                     procedural: first.procedural || second.procedural,
-                    copied_source,
+                    unattributed_paint,
                     ..support
                 }
             }
@@ -841,7 +875,7 @@ fn filter_geometry(group: &usvg::Group, additive_input: bool) -> (FilterGeometry
         return (FilterGeometry::Unproven, true, false);
     };
     let output = filter_support(filter, bounds);
-    let filter = if output.copied_source {
+    let filter = if output.unattributed_paint {
         FilterGeometry::Unproven
     } else if output.retains_source {
         FilterGeometry::Retained
@@ -1042,6 +1076,23 @@ pub(super) fn geometry_error() -> EngineError {
     )
 }
 
+pub(super) fn image_decode_work(image: &usvg::filter::Image) -> Result<usize, EngineError> {
+    // The resolver supplies one normalized PNG. The native image fitter
+    // wraps it in groups for alignment and optional slice clipping.
+    let mut group = image.root();
+    loop {
+        match group.children() {
+            [usvg::Node::Group(child)] => group = child,
+            [usvg::Node::Image(raster)] if matches!(raster.kind(), usvg::ImageKind::PNG(_)) => {
+                let size = raster.size();
+                let pixels = size.width() as usize * size.height() as usize;
+                return Ok(pixels * 2);
+            }
+            _ => return Err(unsupported("unsupported native SVG filter image")),
+        }
+    }
+}
+
 fn groups(root: &usvg::Group) -> impl Iterator<Item = &usvg::Group> {
     root.children().iter().filter_map(|node| match node {
         usvg::Node::Group(group) => Some(group.as_ref()),
@@ -1141,6 +1192,10 @@ fn measure_group(
                     // Charge the cropped seed copy, pattern sampling, output
                     // canvas, input copies and the final primitive crop.
                     usvg::filter::Kind::Tile(_) => 12,
+                    usvg::filter::Kind::Image(image) => {
+                        charge_work(pixels, image_decode_work(image)?, 1)?;
+                        16
+                    }
                     usvg::filter::Kind::Morphology(morphology) => morphology::work(
                         [
                             morphology.radius_x().get() * sx,

@@ -752,12 +752,18 @@ fn apply_styles(
             style.push_str(&encoded);
             style.push(';');
         }
-        if effects::has_flood_paint(node.tag_name().name()) {
-            for property in ["flood-color", "flood-opacity"] {
-                if !props.iter().any(|(key, _)| key == property) {
-                    if let Some(value) = node.attribute(property) {
-                        props.push((property.to_owned(), value.to_owned()));
-                    }
+        let presentation_fallbacks: &[&str] = if effects::has_flood_paint(node.tag_name().name()) {
+            &["flood-color", "flood-opacity"]
+        } else if node.has_tag_name((NS, "feImage")) {
+            // The native parser accepts modern image-rendering values in CSS.
+            &["image-rendering"]
+        } else {
+            &[]
+        };
+        for &property in presentation_fallbacks {
+            if !props.iter().any(|(key, _)| key == property) {
+                if let Some(value) = node.attribute(property) {
+                    props.push((property.to_owned(), value.to_owned()));
                 }
             }
         }
@@ -935,7 +941,7 @@ fn raster_images<'a>(
     let mut encoded = 0;
     let links = root
         .descendants()
-        .filter(|node| node.has_tag_name((NS, "image")))
+        .filter(|node| node.has_tag_name((NS, "image")) || node.has_tag_name((NS, "feImage")))
         .filter_map(image_href);
     for (index, href) in links.enumerate() {
         if index >= 256 {

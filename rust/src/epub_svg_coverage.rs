@@ -343,6 +343,22 @@ impl<'tree> Coverage<'tree> {
             MAX_DRAW_VISITS,
             "EPUB SVG coverage exceeds its drawing budget",
         )?;
+        if let usvg::Node::Group(group) = node {
+            for primitive in group
+                .filters()
+                .iter()
+                .flat_map(|filter| filter.primitives())
+            {
+                if let usvg::filter::Kind::Image(image) = primitive.kind() {
+                    charge(
+                        &mut self.work,
+                        effects::image_decode_work(image)?,
+                        MAX_COVERAGE_WORK,
+                        "EPUB SVG coverage exceeds its raster image budget",
+                    )?;
+                }
+            }
+        }
         let mut measure_children = |group: &usvg::Group| {
             group
                 .children()
