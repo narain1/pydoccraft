@@ -199,6 +199,11 @@ impl Extras {
                 .next()
                 .ok_or_else(|| limited("MathML guide color budget"))?;
             let color = Rgb(r, g, b);
+            let vertical_limit = if matches!(extra, Extra::Fraction(_)) {
+                "MathML fraction rule or operands exceed the native vertical extent"
+            } else {
+                "MathML composed box exceeds the native vertical extent"
+            };
             let mut layout = match extra {
                 Extra::Table(table, local) => {
                     let style = CharProps {
@@ -231,7 +236,7 @@ impl Extras {
                 MAX_SAVED_DRAW_UNITS,
                 "MathML composed drawing exceeds its item budget",
             )?;
-            let placeholder = placeholder(&layout, color, top, bottom)?;
+            let placeholder = placeholder(&layout, color, top, bottom, vertical_limit)?;
             measurements
                 .markers
                 .insert([r, g, b], measurements.boxes.len());
@@ -855,6 +860,7 @@ fn placeholder(
     color: Rgb,
     ascent_ratio: f32,
     descent_ratio: f32,
+    vertical_limit: &str,
 ) -> Result<MNode, EngineError> {
     let mut nodes = vec![phantom(
         guide("H", GUIDE_SIZE, Some(color)),
@@ -881,9 +887,7 @@ fn placeholder(
         if dimension > 0.0 {
             let size = dimension / ratio;
             if !size.is_finite() || size > 1638.0 {
-                return Err(limited(
-                    "MathML composed box exceeds the native vertical extent",
-                ));
+                return Err(limited(vertical_limit));
             }
             nodes.push(phantom(
                 guide(glyph, size.max(1.0), None),
