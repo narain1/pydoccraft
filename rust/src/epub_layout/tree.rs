@@ -912,13 +912,13 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 return Err(unproven_grid());
             };
             let slow = node.style.grid_auto_flow.primary_axis().other_axis();
-            if let Some(items) = subgrid::clamp_terminal_auto(details, slow, terminal) {
+            if let Some(items) = subgrid::clamp_auto_overflow(details, slow, terminal) {
                 let children = self.grid_items(index).collect::<Vec<_>>();
                 if children.len() != items.len() {
                     return Err(unproven_grid());
                 }
-                // Pin all probed rectangles. Making only the overflow item
-                // definite would claim its edge cell before other auto items.
+                // Pin all probed rectangles. Making only overflow items
+                // definite would claim their edge cells before other auto items.
                 for (child, item) in children.into_iter().zip(items) {
                     let style = &mut self.nodes[child].style;
                     style.grid_column = Line {

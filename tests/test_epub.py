@@ -3754,6 +3754,72 @@ class EpubTests(unittest.TestCase):
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "implicit tracks on an inherited subgrid axis"):
                         document.render_page(0, dpi=96)
 
+    def test_css_subgrid_clamps_repeated_automatic_items_with_one_scan_track(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 372, 372)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Repeated overflow</title>
+          <meta name="viewport" content="width=372,height=372"/><style>
+          html,body,p{margin:0;font-size:9px}
+          #outer{position:absolute;left:10px;top:10px;width:200px;height:180px;display:grid;
+            grid-template-columns:90px 110px;grid-template-rows:80px 100px}
+          #sub{display:grid;align-content:start;justify-content:start}
+          p{width:16px;height:12px;align-self:start;justify-self:start}
+          #a{background:#884466}#b{background:#996622}#c{background:#337788}
+          #d{background:#447744}#e{background:#a865b5}#f{background:#7f5144}
+          RULES</style></head><body><div id="outer"><div id="sub">ITEMS</div></div></body></html>"""
+        labels = {
+            label: f'<p id="{label.lower()}">{label}</p>' for label in "ABDE"
+        }
+        for label in "CF":
+            suffix = label.lower()
+            labels[label] = f'<p id="{suffix}"><a href="https://example.org/{suffix}">{label}</a></p>'
+
+        def book(rules: str, items: str) -> doc_ex.Document:
+            chapter = source.replace("RULES", rules).replace("ITEMS", items)
+            return doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter}))
+
+        def preview(document: doc_ex.Document) -> tuple[tuple[int, bytes], list[object], dict]:
+            image = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+            with doc_ex.open(document.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertTrue(image == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                page = pdf[0]
+                boxes = [page.search_for(label) for label in "ABCDEF"]
+                self.assertTrue(all(boxes))
+                links = {link.uri: link.bbox for link in page.get_links()}
+                self.assertEqual(set(links), {"https://example.org/c", "https://example.org/f"})
+                return image, boxes, links
+
+        items = "".join(labels[label] for label in "ABCDEF")
+        for flow, fast, slow, area, fixed, fast_size, edge, margin in (
+            ("row", "column", "row", "1/1/3/2", "grid-template-columns:90px;grid-template-rows:80px 100px",
+             "width:90px;grid-template-columns:90px", "2/1", "margin-top"),
+            ("column", "row", "column", "1/1/2/3", "grid-template-columns:90px 110px;grid-template-rows:80px",
+             "height:80px;grid-template-rows:80px", "1/2", "margin-inline-start"),
+        ):
+            offsets = "".join(f"#{label}{{{margin}:{offset}px}}" for label, offset in
+                              zip("bcdef", (2, 18, 34, 50, 66)))
+            clamped = f"#a{{grid-area:1/1}}#b,#c,#d,#e,#f{{grid-area:{edge}}}"
+            for direction, packing in (("ltr", ""), ("rtl", ""), ("ltr", " dense"), ("rtl", " dense")):
+                common = f"#sub{{grid-area:{area};grid-auto-flow:{flow}{packing};direction:{direction}}}" + offsets
+                fixed_tracks = fixed.replace("90px 110px", "110px 90px") if direction == "rtl" else fixed
+                with book(common + f"#sub{{{fixed_tracks}}}" + clamped, items) as reference:
+                    expected = preview(reference)
+                for inherited in (
+                    f"grid-template-{fast}s:subgrid;grid-template-{slow}s:subgrid",
+                    f"{fast_size};grid-template-{slow}s:subgrid",
+                ):
+                    with (self.subTest(flow=flow, direction=direction, packing=packing, inherited=inherited),
+                          book(common + f"#sub{{{inherited}}}", items) as document):
+                        self.assertTrue(preview(document) == expected)
+
+            inherited = common + "#sub{grid-template-columns:subgrid;grid-template-rows:subgrid}"
+            for case, css, children in (
+                ("mixed phase", f"#a{{grid-{slow}:1}}", items),
+                ("probe limit", "", "<p>Q</p>" * 35),
+            ):
+                with (self.subTest(flow=flow, case=case), book(inherited + css, children) as document):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "implicit tracks on an inherited subgrid axis"):
+                        document.render_page(0, dpi=96)
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}

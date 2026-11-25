@@ -45,6 +45,16 @@ pub(super) fn implicit(tracks: &DetailedGridTracksInfo<String>) -> bool {
     tracks.negative_implicit_tracks != 0 || tracks.positive_implicit_tracks != 0
 }
 
+fn auto_overflow_limit(fast_tracks: u16) -> u16 {
+    // Repeated overflow is unambiguous when there is only one track in the
+    // scan direction. Browser cursors differ with more than one edge cell.
+    if fast_tracks == 1 {
+        MAX_TRACKS as u16
+    } else {
+        1
+    }
+}
+
 pub(super) fn terminal_auto_slot<'a>(
     style: &Style,
     inherited: Size<bool>,
@@ -72,10 +82,15 @@ pub(super) fn terminal_auto_slot<'a>(
         areas.map_or(0, |areas| areas.row_count),
     )?;
     let capacity = usize::from(columns) * usize::from(rows);
+    let fast_tracks = match slow {
+        AbsoluteAxis::Horizontal => rows,
+        AbsoluteAxis::Vertical => columns,
+    };
+    let items_limit = capacity + usize::from(auto_overflow_limit(fast_tracks));
     let mut used = 0;
     let mut terminal = None;
     for (slot, item) in items.enumerate() {
-        if slot > capacity
+        if slot >= items_limit
             || [&item.grid_column, &item.grid_row]
                 .into_iter()
                 .any(|placement| {
@@ -119,7 +134,7 @@ pub(super) fn terminal_auto_slot<'a>(
     terminal
 }
 
-pub(super) fn clamp_terminal_auto(
+pub(super) fn clamp_auto_overflow(
     details: &DetailedGridInfo,
     slow: AbsoluteAxis,
     terminal: usize,
@@ -130,29 +145,48 @@ pub(super) fn clamp_terminal_auto(
     };
     if implicit(fast_tracks)
         || slow_tracks.negative_implicit_tracks != 0
-        || slow_tracks.positive_implicit_tracks != 1
+        || !(1..=auto_overflow_limit(fast_tracks.explicit_tracks))
+            .contains(&slow_tracks.positive_implicit_tracks)
     {
         return None;
     }
     let columns = details.columns.explicit_tracks + 1;
     let rows = details.rows.explicit_tracks + 1;
-    for (slot, item) in details.items.iter().enumerate() {
-        if slot != terminal && (item.column_end > columns || item.row_end > rows) {
+    let mut items = details.items.clone();
+    let mut overflow = 0;
+    let mut last = None;
+    for (slot, item) in items.iter_mut().enumerate() {
+        let (start, end, limit, fast_end, fast_limit) = match slow {
+            AbsoluteAxis::Horizontal => (
+                &mut item.column_start,
+                &mut item.column_end,
+                columns,
+                item.row_end,
+                rows,
+            ),
+            AbsoluteAxis::Vertical => (
+                &mut item.row_start,
+                &mut item.row_end,
+                rows,
+                item.column_end,
+                columns,
+            ),
+        };
+        if fast_end > fast_limit {
             return None;
         }
+        if *end > limit {
+            let next = limit + overflow;
+            if *start != next || *end != next + 1 {
+                return None;
+            }
+            *start = limit - 1;
+            *end = limit;
+            overflow += 1;
+            last = Some(slot);
+        }
     }
-    let mut items = details.items.clone();
-    let item = items.get_mut(terminal)?;
-    let (start, end, limit) = match slow {
-        AbsoluteAxis::Horizontal => (&mut item.column_start, &mut item.column_end, columns),
-        AbsoluteAxis::Vertical => (&mut item.row_start, &mut item.row_end, rows),
-    };
-    if *start != limit || *end != limit + 1 {
-        return None;
-    }
-    *start = limit - 1;
-    *end = limit;
-    Some(items)
+    (last == Some(terminal) && overflow == slow_tracks.positive_implicit_tracks).then_some(items)
 }
 
 pub(super) fn inherit_areas(
