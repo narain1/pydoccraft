@@ -9,6 +9,7 @@
 - [x] Update locked dependencies, license inventories, and format and authoring documentation.
 - [x] Accept inert XHTML and selected legacy doctypes. Reopen and edit the original W3C Accessible EPUB 3 sample.
 - [ ] Expand the public EPUB conformance corpus.
+- [ ] Render clipped regions of long chapters with packaged fonts within the outline budget. Reproduce with the public Children’s Literature EPUB.
 - [x] Open the unmodified math-heavy *Linear Algebra* sample within the semantic output budget and exercise its spine previews.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
 - [x] Replace existing XHTML and SVG chapters transactionally and preserve targeted navigation and overlay anchors.
@@ -68,6 +69,7 @@
 - [x] Stream mono and stereo Ogg Vorbis for embedded audio and SMIL narration. Preserve page granule timing across same-format chains and synchronize a Vorbis soundtrack with chained Theora and captions.
 - [x] Stream VP8 and SDR VP9 video, Opus soundtracks, and synchronized local captions from packaged WebM sources.
 - [x] Stream mono and stereo WebM Vorbis audio on the original presentation clock, including audio-only resources and soundtracks synchronized with video and captions.
+- [ ] Handle the Vorbis timestamp discontinuities in the public Shared Culture WebM sources.
 - [ ] Extend WebM to AV1, surround Vorbis, high dynamic range, alpha, and concurrent tracks. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and media fragment dimensions.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.

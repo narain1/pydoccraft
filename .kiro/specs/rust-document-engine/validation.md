@@ -2919,3 +2919,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 715 installed tests, including 120
 ## 2026-11-24 Fixed-layout PDF pixel grid
 
 The Linux x86-64 CPython 3.11.15 wheel passed 716 installed tests, including 121 EPUB tests. It measured 24,551,725 bytes with a 57,076,120-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-fixed-layout-pdf-pixel-grid) covers fractional DPI, reopened page geometry and preview pixel alignment.
+
+## 2026-11-24 Integrated EPUB authoring, rendering and playback
+
+The Linux x86-64 CPython 3.11.15 wheel passed 727 installed tests, including 132 EPUB tests. It measured 24,700,585 bytes with a 57,448,584-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-integrated-epub-authoring-rendering-and-playback) covers editable MathML, revised archive anchors, fixed-layout links, fractional XHTML oblique, Vorbis playback and the remaining corpus gaps.
