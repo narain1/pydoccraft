@@ -6742,6 +6742,114 @@ overlay
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing line width"):
                         operation()
 
+    def test_mathml_table_aligns_editable_numbers_at_decimal_points(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Aligned MathML decimals</title><meta name="viewport" content="width=440,height=340"/>
+          <style>body {margin:0}</style></head><body><p>
+            <m:math mathsize="16pt">
+              <m:mtable groupalign="{decimalpoint} {right}" columnalign="center"
+                  columnwidth="140pt 100pt" rowspacing="8pt">
+                <m:mtr><m:mtd><m:mtext>Amount</m:mtext></m:mtd><m:mtd><m:mtext>Label</m:mtext></m:mtd></m:mtr>
+                <m:mtr>
+                  <m:mtd><m:maligngroup/><m:mn mathcolor="#bf222d">12.345</m:mn></m:mtd>
+                  <m:mtd><m:maligngroup/><m:mtext>Short</m:mtext></m:mtd>
+                </m:mtr>
+                <m:mtr groupalign="{decimalpoint} {left}">
+                  <m:mtd><m:mstyle decimalpoint=","><m:mrow>
+                    <m:maligngroup/><m:mn mathcolor="#198144">7,89</m:mn>
+                  </m:mrow></m:mstyle></m:mtd>
+                  <m:mtd groupalign="right"><m:maligngroup/><m:mtext>Much Longer</m:mtext></m:mtd>
+                </m:mtr>
+                <m:mtr>
+                  <m:mtd><m:maligngroup/><m:mn mathcolor="#1644df">401</m:mn></m:mtd>
+                  <m:mtd groupalign="left"><m:maligngroup groupalign="right"/><m:mtext>Final</m:mtext></m:mtd>
+                </m:mtr>
+              </m:mtable>
+            </m:math>
+          </p></body></html>"""
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        labels = ("Amount", "Label", "12.345", "7,89", "401", "Short", "Much Longer", "Final")
+
+        def boxes(doc: doc_ex.Document, terms: tuple[str, ...]) -> dict[str, tuple[float, float, float, float]]:
+            page = doc[0]
+            rects = {}
+            for text in terms:
+                rects[text], = page.search_for(text)
+            return rects
+
+        def geometry(doc: doc_ex.Document, tolerance: float) -> dict[str, tuple[float, float, float, float]]:
+            rects = boxes(doc, (*labels, "12", "7"))
+            for numeric in ("12", "7"):
+                self.assertAlmostEqual(rects[numeric][2], rects["401"][2], delta=tolerance)
+            self.assertGreater(rects["12.345"][2], rects["401"][2] + 20)
+            self.assertGreater(rects["7,89"][2], rects["401"][2] + 10)
+            self.assertAlmostEqual(rects["Short"][2], rects["Much Longer"][2], delta=tolerance)
+            self.assertAlmostEqual(rects["Final"][2], rects["Much Longer"][2], delta=tolerance)
+            self.assertGreater(rects["Label"][0], rects["Amount"][0] + 100)
+            return rects
+
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            with doc_ex.open(book.convert("pdf")) as reopened:
+                self.assertFalse(reopened[0].get_images())
+                reference = geometry(reopened, 0.05)
+            exported = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            matrix = xml.find(".//m:oMath//m:m", ns)
+            self.assertIsNotNone(matrix)
+            tokens = [run.text for run in matrix.findall(".//m:t", ns)]
+            for text in labels:
+                self.assertEqual(tokens.count(text), 1, tokens)
+            with doc_ex.open(exported) as reopened:
+                text = reopened[0].get_text()
+                for label in labels:
+                    self.assertEqual(text.count(label), 1, text)
+                self.assertNotIn("⟡H", text)
+                with doc_ex.open(reopened.convert("pdf")) as pdf:
+                    native = geometry(pdf, 0.25)
+                    for label in labels:
+                        for expected, actual in zip(reference[label], native[label]):
+                            self.assertAlmostEqual(actual, expected, delta=0.35)
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 440, 340)])
+        with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": source})) as book:
+            original = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as reopened:
+                self.assertEqual(rgba_pixels(png_chunks(reopened.render_page(0, dpi=96))), original)
+                fixed_boxes = boxes(reopened, labels)
+                for label in labels:
+                    for coordinate in (0, 2):
+                        self.assertAlmostEqual(
+                            fixed_boxes[label][coordinate] - fixed_boxes["Amount"][0],
+                            reference[label][coordinate] - reference["Amount"][0],
+                            delta=0.65,
+                        )
+
+        for alignment in ("left", "center"):
+            variant = source.replace("{right}", "{" + alignment + "}")
+            variant = variant.replace('groupalign="right"', f'groupalign="{alignment}"')
+            with self.subTest(alignment=alignment), doc_ex.open(epub_fixture(chapter_one=variant)) as book:
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    rects = boxes(pdf, ("Short", "Much Longer", "Final"))
+                    starts = [rect[0] if alignment == "left" else (rect[0] + rect[2]) / 2
+                              for rect in rects.values()]
+                    self.assertLess(max(starts) - min(starts), 0.05)
+
+        for chapter, message in (
+            (source.replace('<m:mtable groupalign=', '<m:mtable alignmentscope="false" groupalign='),
+             "MathML alignment groups across table scopes"),
+            (source.replace('<m:maligngroup/><m:mn', '<m:maligngroup/><m:maligngroup/><m:mn', 1),
+             "MathML decimal alignment requires a single numeric token"),
+            (source.replace('<m:maligngroup/><m:mn', '<m:maligngroup/><m:mo>+</m:mo><m:mn', 1),
+             "MathML decimal alignment requires a single numeric token"),
+            (source.replace('columnwidth="140pt 100pt"', 'columnwidth="60pt 100pt"'),
+             "MathML cell exceeds fixed column widths"),
+        ):
+            with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        operation()
+
     def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Labeled MathML</title><meta name="viewport" content="width=440,height=320"/>

@@ -79,6 +79,8 @@
 - [x] Preserve tight column spacing in editable DOCX matrix projections and recover their logical rows during extraction.
 - [x] Render native MathML row labels outside auto-width data grids on the authored side, including minimum label spacing, searchable PDF and editable unruled DOCX.
 - [ ] Support MathML row-label overlap modes, authored whole-table widths with row labels, and editable Word borders for ruled labeled grids.
+- [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
+- [ ] Extend MathML alignment to multiple groups per cell, explicit alignment marks, compound numeric expressions, right-to-left groups and cross-table scopes.
 - [ ] Extend editable DOCX export to negative leading offsets and expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.

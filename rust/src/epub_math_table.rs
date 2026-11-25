@@ -17,8 +17,11 @@ use super::{
 };
 use crate::EngineError;
 
+#[path = "epub_math_table_alignment.rs"]
+mod alignment;
 #[path = "epub_math_table_rules.rs"]
 mod rules;
+use alignment::Anchor;
 use rules::{Occupancy, Rules};
 
 const MAX_ROWS: usize = 128;
@@ -49,6 +52,7 @@ struct Cell {
     columns: Range<usize>,
     horizontal: ColJc,
     vertical: Vertical,
+    anchor: Option<Anchor>,
     content: CellContent,
     format: CharProps,
 }
@@ -59,6 +63,7 @@ struct CellPlacement<'xml, 'input> {
     columns: Range<usize>,
     horizontal: ColJc,
     vertical: Vertical,
+    group: Option<(roxmltree::NodeId, Anchor)>,
     style: Presentation<'xml>,
 }
 
@@ -114,6 +119,7 @@ pub(super) fn has_authored_geometry(table: Node<'_, '_>) -> bool {
     let cell_alignment =
         |node: Node<'_, '_>| node.has_attribute("rowalign") || node.has_attribute("columnalign");
     rules::requested(table)
+        || alignment::table_has_groups(table)
         || [
             "align",
             "rowalign",
@@ -210,11 +216,12 @@ pub(super) fn project_group<'xml>(
     let table = wrappers
         .pop()
         .ok_or_else(|| invalid("missing MathML table"))?;
-    // A labeled grid uses editable equation tracks outside the data table.
-    // It cannot be represented by the standalone native Word table path.
+    // Labels and aligned groups need the exact offsets of editable equation
+    // tracks. The standalone Word table path positions native cell paragraphs.
     if table
         .children()
         .any(|row| row.has_tag_name((MATHML, "mlabeledtr")))
+        || alignment::table_has_groups(table)
     {
         return Ok(None);
     }
@@ -294,6 +301,19 @@ pub(super) fn project<'xml>(
             let style = projection.style(cell, row_style)?;
             let rows_spanned = span(cell, "rowspan")?;
             let columns_spanned = span(cell, "columnspan")?;
+            let group = alignment::leading_group(cell)
+                .map(|marker| {
+                    if label || columns_spanned != 1 {
+                        return Err(unsupported(
+                            "MathML alignment group without one data column",
+                        ));
+                    }
+                    Ok((
+                        marker.id(),
+                        alignment::read(table, row, cell, marker, column)?,
+                    ))
+                })
+                .transpose()?;
             if label {
                 if rows_spanned != 1 || columns_spanned != 1 {
                     return Err(unsupported("spanning MathML table row label"));
@@ -304,6 +324,7 @@ pub(super) fn project<'xml>(
                     columns: 0..0,
                     horizontal,
                     vertical,
+                    group,
                     style,
                 });
                 continue;
@@ -325,6 +346,7 @@ pub(super) fn project<'xml>(
                 columns: column..right,
                 horizontal,
                 vertical,
+                group,
                 style,
             });
             column = right;
@@ -374,19 +396,34 @@ pub(super) fn project<'xml>(
                 .map(|width| width + internal_gaps(&grid.column_gaps, &cell.columns))
         };
         let content = projection.with_cell_width(cell.node, content_width, |projection| {
-            if let Some(table) = project_group(projection, cell.node, depth + 2, cell.style)? {
-                return Ok(CellContent::Table(table));
+            if cell.group.is_none() {
+                if let Some(table) = project_group(projection, cell.node, depth + 2, cell.style)? {
+                    return Ok(CellContent::Table(table));
+                }
             }
-            Ok(CellContent::Equation(Math {
-                nodes: math::merge_runs(projection.elements(cell.node, depth + 2, cell.style)?),
-                ..Default::default()
-            }))
+            projection.with_alignment_group(cell.group.map(|(marker, _)| marker), |projection| {
+                let mut nodes =
+                    math::merge_runs(projection.elements(cell.node, depth + 2, cell.style)?);
+                if matches!(cell.group, Some((_, Anchor::Decimal(_)))) {
+                    let [MNode::Run(run)] = nodes.as_mut_slice() else {
+                        return Err(invalid("MathML decimal alignment token projection differs"));
+                    };
+                    // A separator inside a number is part of the token. Keep
+                    // its text and metrics together through native shaping and OMML.
+                    run.lit = true;
+                }
+                Ok(CellContent::Equation(Math {
+                    nodes,
+                    ..Default::default()
+                }))
+            })
         })?;
         grid.cells.push(Cell {
             rows: cell.rows,
             columns: cell.columns,
             horizontal: cell.horizontal,
             vertical: cell.vertical,
+            anchor: cell.group.map(|(_, anchor)| anchor),
             content,
             format: CharProps {
                 size: Some(cell.style.font_size()),
@@ -657,6 +694,22 @@ impl Layout {
 pub(in crate::epub) enum CellDrawing {
     Equation(MathLayout),
     Table(Layout),
+}
+
+struct MeasuredCell {
+    drawing: CellDrawing,
+    baseline_offset: Option<f32>,
+    anchor: Option<f32>,
+}
+
+impl MeasuredCell {
+    fn width(&self, column: usize, anchors: &[[f32; 2]]) -> f32 {
+        if self.anchor.is_some() {
+            anchors[column].iter().sum()
+        } else {
+            self.drawing.size().0
+        }
+    }
 }
 
 impl CellDrawing {
@@ -980,6 +1033,7 @@ impl Table {
         let mut row_baselines = vec![false; row_count];
         let mut heights = vec![0.0; row_count];
         let mut measures = Vec::with_capacity(self.cells.len());
+        let mut anchors = vec![[0.0f32; 2]; widths.len()];
         let mut label_width = 0.0f32;
         for cell in &self.cells {
             let chars = CharProps {
@@ -1007,6 +1061,18 @@ impl Table {
                 )?),
             };
             let (cell_width, cell_ascent, cell_descent) = measure.size();
+            let anchor = if let Some(anchor) = cell.anchor {
+                let CellDrawing::Equation(equation) = &measure else {
+                    return Err(invalid("MathML alignment group has no equation"));
+                };
+                let anchor = anchor.measure(equation)?;
+                let [left, right] = &mut anchors[cell.columns.start];
+                *left = left.max(anchor);
+                *right = right.max(cell_width - anchor);
+                Some(anchor)
+            } else {
+                None
+            };
             if cell.columns.is_empty() {
                 label_width = label_width.max(cell_width);
             }
@@ -1023,7 +1089,11 @@ impl Table {
                     descent[row] = descent[row].max(cell_descent + offset);
                 }
             }
-            measures.push((measure, offset));
+            measures.push(MeasuredCell {
+                drawing: measure,
+                baseline_offset: offset,
+                anchor,
+            });
         }
         for row in 0..row_count {
             heights[row] = ascent[row] + descent[row];
@@ -1042,8 +1112,9 @@ impl Table {
                 .iter()
                 .zip(&measures)
                 .filter(|(cell, _)| !cell.columns.is_empty())
-                .map(|(cell, (measure, _))| {
-                    equal_track_size(&self.column_gaps, &cell.columns, measure.size().0)
+                .map(|(cell, measure)| {
+                    let width = measure.width(cell.columns.start, &anchors);
+                    equal_track_size(&self.column_gaps, &cell.columns, width)
                 })
                 .fold(0.0, f32::max);
             widths.fill(self.equal_column_width(common_width, declared)?);
@@ -1065,14 +1136,19 @@ impl Table {
                     fitted.push(index);
                     continue;
                 }
-                self.grow_columns(&mut widths, span, measures[index].0.size().0)?;
+                self.grow_columns(
+                    &mut widths,
+                    span,
+                    measures[index].width(span.start, &anchors),
+                )?;
             }
             if let Some(total) = declared {
                 self.fill_width(&mut widths, total)?;
             }
             for index in fitted {
-                let room = extent(&widths, &self.column_gaps, &self.cells[index].columns);
-                if measures[index].0.size().0 > room + TABLE_WIDTH_EPSILON {
+                let span = &self.cells[index].columns;
+                let room = extent(&widths, &self.column_gaps, span);
+                if measures[index].width(span.start, &anchors) > room + TABLE_WIDTH_EPSILON {
                     return Err(unsupported("MathML cell exceeds fitted column widths"));
                 }
             }
@@ -1080,9 +1156,11 @@ impl Table {
         let mut common_height = heights.iter().copied().fold(0.0, f32::max);
         for index in ordered(|cell| cell.rows.len()) {
             let cell = &self.cells[index];
-            let (measure, offset) = &measures[index];
-            let (_, cell_ascent, cell_descent) = measure.size();
-            let top = offset.map_or(0.0, |offset| ascent[cell.rows.start] + offset - cell_ascent);
+            let measure = &measures[index];
+            let (_, cell_ascent, cell_descent) = measure.drawing.size();
+            let top = measure
+                .baseline_offset
+                .map_or(0.0, |offset| ascent[cell.rows.start] + offset - cell_ascent);
             let needed = top + cell_ascent + cell_descent;
             if self.equal_rows {
                 common_height =
@@ -1114,8 +1192,9 @@ impl Table {
             .cells
             .iter()
             .zip(measures)
-            .map(|(cell, (measure, offset))| {
-                let (cell_width, cell_ascent, cell_descent) = measure.size();
+            .map(|(cell, measure)| {
+                let cell_width = measure.width(cell.columns.start, &anchors);
+                let (_, cell_ascent, cell_descent) = measure.drawing.size();
                 let (left, track_width) = match &self.labels {
                     Some(labels) if cell.columns.is_empty() => (
                         if labels.left {
@@ -1131,9 +1210,13 @@ impl Table {
                     ),
                 };
                 let horizontal_room = track_width - cell_width;
+                let anchor_shift = measure
+                    .anchor
+                    .map_or(0.0, |anchor| anchors[cell.columns.start][0] - anchor);
                 let vertical_room =
                     extent(&heights, &self.row_gaps, &cell.rows) - cell_ascent - cell_descent;
                 let left = left
+                    + anchor_shift
                     + match cell.horizontal {
                         ColJc::Left => 0.0,
                         ColJc::Center => horizontal_room / 2.0,
@@ -1146,10 +1229,11 @@ impl Table {
                         Vertical::Bottom => vertical_room,
                         Vertical::Center => vertical_room / 2.0,
                         Vertical::Baseline | Vertical::Axis => {
-                            ascent[cell.rows.start] + offset.unwrap_or_default() - cell_ascent
+                            ascent[cell.rows.start] + measure.baseline_offset.unwrap_or_default()
+                                - cell_ascent
                         }
                     };
-                (left, top, measure)
+                (left, top, measure.drawing)
             })
             .collect();
         let (top, bottom, row_baseline) = self.alignment_row.map_or((0.0, height, None), |row| {

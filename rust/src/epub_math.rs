@@ -218,6 +218,7 @@ pub(super) fn equation(
             root: root.id().get(),
             width: Some(line_width),
         },
+        alignment_group: None,
         remaining,
         extras: compose::Extras::default(),
     };
@@ -351,6 +352,7 @@ struct Projection<'a, 'xml> {
     root_id: u32,
     stylesheet: Option<&'a FormulaCss>,
     width_scope: WidthScope,
+    alignment_group: Option<roxmltree::NodeId>,
     remaining: &'a mut usize,
     extras: compose::Extras,
 }
@@ -385,6 +387,17 @@ impl<'xml> Projection<'_, 'xml> {
         );
         let result = project(self);
         self.width_scope = outer;
+        result
+    }
+
+    fn with_alignment_group<T>(
+        &mut self,
+        marker: Option<roxmltree::NodeId>,
+        project: impl FnOnce(&mut Self) -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
+        let outer = std::mem::replace(&mut self.alignment_group, marker);
+        let result = project(self);
+        self.alignment_group = outer;
         result
     }
 
@@ -450,6 +463,9 @@ impl<'xml> Projection<'_, 'xml> {
         inherited: Presentation<'xml>,
     ) -> Result<Arg, EngineError> {
         self.charge(depth)?;
+        if self.alignment_group == Some(node.id()) {
+            return Ok(Vec::new());
+        }
         if node.tag_name().namespace() != Some(MATHML) {
             return Err(unsupported("foreign elements in MathML equations"));
         }
