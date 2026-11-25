@@ -204,7 +204,17 @@ impl RegionPatch<'_> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Selection<'n> {
     Named(&'n str),
-    Inline(NodeId),
+    Inline(NodeId, Instant),
+}
+
+#[cfg(feature = "python")]
+impl Selection<'_> {
+    pub fn origin(self) -> Instant {
+        match self {
+            Self::Named(_) => 0,
+            Self::Inline(_, begin) => begin,
+        }
+    }
 }
 
 #[cfg_attr(not(feature = "python"), allow(dead_code))]
@@ -220,12 +230,13 @@ impl<'n> Regions<'n> {
     pub fn select(
         &self,
         node: Node<'n, '_>,
+        begin: Instant,
         inherited: Option<Selection<'n>>,
     ) -> Option<Selection<'n>> {
         if let Some(id) = node.attribute("region") {
             Some(Selection::Named(id))
         } else if self.inline.contains_key(&node.id()) {
-            Some(Selection::Inline(node.id()))
+            Some(Selection::Inline(node.id(), begin))
         } else {
             inherited
         }
@@ -234,7 +245,7 @@ impl<'n> Regions<'n> {
     pub fn get(&self, selection: Option<Selection<'n>>) -> Option<&Definition> {
         match selection? {
             Selection::Named(id) => self.named.get(id),
-            Selection::Inline(node) => self.inline.get(&node),
+            Selection::Inline(node, _) => self.inline.get(&node),
         }
     }
 }
@@ -320,7 +331,7 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
             }
             let sequential = match node.attribute("timeContainer") {
                 None | Some("par") => false,
-                Some("seq") if parent.is_none() => true,
+                Some("seq") => true,
                 _ => return Err(unsupported("unsupported TTML region time container")),
             };
             if node.has_attribute("animate") {
@@ -343,9 +354,6 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
                     continue;
                 }
                 if child.has_tag_name((TT, "set")) {
-                    if parent.is_some() {
-                        return Err(unsupported("TTML animation of a content-inline region"));
-                    }
                     if children.len() == MAX_REGION_SETS {
                         return Err(limited("TTML region exceeds 32 set elements"));
                     }
@@ -368,54 +376,61 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
                 timing: None,
                 style: style.text_style,
             };
+            let timed = ["begin", "end", "dur"]
+                .iter()
+                .any(|&name| node.has_attribute(name));
+            if !children.is_empty() && timed && parent.is_some() {
+                return Err(unsupported(
+                    "animated inline TTML regions use the containing block's timing",
+                ));
+            }
+            if !children.is_empty()
+                && parent.is_some_and(|block| {
+                    block
+                        .ancestors()
+                        .any(|node| node.has_attribute("condition"))
+                })
+            {
+                return Err(unsupported("conditional TTML inline region ownership"));
+            }
+            if sequential && children.is_empty() {
+                return Err(unsupported("unsupported TTML region time container"));
+            }
+            if !children.is_empty() || (timed && parent.is_none()) {
+                let clock = match clock {
+                    Some(clock) => clock,
+                    None => *clock.insert(Clock::new(root)?),
+                };
+                let timing = Timing::new(node, 0, None, clock)?;
+                let mut cursor = timing.begin;
+                let mut sets = Vec::with_capacity(children.len());
+                for child in children {
+                    ttml_styles::validate_set(child, ANIMATED_PROPERTIES)?;
+                    let patch = RegionPatch::default().inline(child)?;
+                    // Validate values that could be capped out or hidden by position.
+                    patch.compute(None, viewport)?;
+                    let mut set = Timing::new(child, cursor, timing.end, clock)?;
+                    if sequential {
+                        // In a sequence, an explicit end can replace the implicit zero
+                        // duration only when no repetition count was specified.
+                        let has_duration = child.has_attribute("dur")
+                            || (child.has_attribute("end") && !child.has_attribute("repeatCount"));
+                        if !has_duration {
+                            set.end = Some(set.end.map_or(set.begin, |end| end.min(set.begin)));
+                        }
+                        cursor = set.end.unwrap_or(set.begin);
+                    }
+                    sets.push((set, patch));
+                }
+                definition.layouts =
+                    region_layouts(&definition.region, style, &sets, viewport, &mut region_work)?;
+                // Inline layouts are resolved on the containing block's clock.
+                definition.timing = parent.is_none().then_some(timing);
+            }
             if let Some(parent) = parent {
-                // A child region is active with its parent content block.
                 inline.insert(parent.id(), definition);
             } else {
                 let id = id.ok_or_else(|| invalid("missing TTML region ID"))?;
-                if sequential && children.is_empty() {
-                    return Err(unsupported("unsupported TTML region time container"));
-                }
-                if !children.is_empty()
-                    || ["begin", "end", "dur"]
-                        .iter()
-                        .any(|&name| node.has_attribute(name))
-                {
-                    let clock = match clock {
-                        Some(clock) => clock,
-                        None => *clock.insert(Clock::new(root)?),
-                    };
-                    let timing = Timing::new(node, 0, None, clock)?;
-                    let mut cursor = timing.begin;
-                    let mut sets = Vec::with_capacity(children.len());
-                    for child in children {
-                        ttml_styles::validate_set(child, ANIMATED_PROPERTIES)?;
-                        let patch = RegionPatch::default().inline(child)?;
-                        // Validate values that could be capped out or hidden by position.
-                        patch.compute(None, viewport)?;
-                        let mut set = Timing::new(child, cursor, timing.end, clock)?;
-                        if sequential {
-                            // In a sequence, an explicit end can replace the implicit zero
-                            // duration only when no repetition count was specified.
-                            let has_duration = child.has_attribute("dur")
-                                || (child.has_attribute("end")
-                                    && !child.has_attribute("repeatCount"));
-                            if !has_duration {
-                                set.end = Some(set.end.map_or(set.begin, |end| end.min(set.begin)));
-                            }
-                            cursor = set.end.unwrap_or(set.begin);
-                        }
-                        sets.push((set, patch));
-                    }
-                    definition.layouts = region_layouts(
-                        &definition.region,
-                        style,
-                        &sets,
-                        viewport,
-                        &mut region_work,
-                    )?;
-                    definition.timing = Some(timing);
-                }
                 named.insert(id, definition);
             }
         }

@@ -200,6 +200,7 @@ struct Paragraph<'a> {
     id: Option<&'a str>,
     first_cue: usize,
     region: Option<Definition>,
+    region_origin: Instant,
     implicit_region: Option<Arc<Region>>,
 }
 
@@ -226,7 +227,7 @@ impl<'n> Reader<'_, 'n> {
             None => {}
             _ => return Err(invalid("invalid TTML xml:space value")),
         }
-        let selected = self.regions.select(node, format.region);
+        let selected = self.regions.select(node, timing.begin, format.region);
         let region_changed = selected != format.region;
         format.region = selected;
         let patch = ttml_styles::local(node, |name| {
@@ -458,26 +459,31 @@ impl<'n> Reader<'_, 'n> {
             id: node.attribute((XML, "id")),
             first_cue: self.track.cues.len(),
             region: self.regions.get(region).cloned(),
+            region_origin: region.map_or(0, Selection::origin),
             implicit_region: self.regions.implicit.clone(),
         };
         let mut events = Vec::with_capacity(pieces.len() * 2);
+        let mut piece_end = Some(timing.begin);
         for (index, piece) in pieces.iter().enumerate() {
+            piece_end = piece_end
+                .zip(piece.end)
+                .map(|(left, right)| left.max(right));
             events.push((piece.begin, Some((true, index))));
             if let Some(end) = piece.end {
                 events.push((end, Some((false, index))));
             }
         }
         if let Some(region) = &paragraph.region {
-            let first = region
-                .layouts
-                .partition_point(|point| point.start <= timing.begin);
-            events.extend(
-                region.layouts[first..]
-                    .iter()
-                    .map(|point| point.start)
-                    .take_while(|&start| timing.end.is_none_or(|end| start < end))
-                    .map(|start| (start, None)),
-            );
+            let offset = paragraph.region_origin;
+            let begin = timing.begin.saturating_sub(offset);
+            let end = piece_end.map(|end| end.saturating_sub(offset));
+            let first = region.layouts.partition_point(|point| point.start <= begin);
+            for point in region.layouts[first..]
+                .iter()
+                .take_while(|point| end.is_none_or(|end| point.start < end))
+            {
+                events.push((self.clock.add(offset, point.start)?, None));
+            }
         }
         events.sort_unstable();
         let mut active = BTreeSet::new();
@@ -522,7 +528,13 @@ impl<'n> Reader<'_, 'n> {
         }
         let region_layout = paragraph.region.as_ref().map_or_else(
             || paragraph.implicit_region.clone(),
-            |region| Some(region.layout_at(start).clone()),
+            |region| {
+                Some(
+                    region
+                        .layout_at(start.saturating_sub(paragraph.region_origin))
+                        .clone(),
+                )
+            },
         );
         let mut styled = StyledText::default();
         let mut pending = false;
