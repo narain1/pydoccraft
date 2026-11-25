@@ -6757,6 +6757,118 @@ overlay
                 with doc_ex.open(changed) as book, self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.epub_embedded_text(0, 0)
 
+    def test_ttml_forced_conditions_keep_excluded_intervals_on_the_source_clock(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        header = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:tickRate="1000" xml:lang="en">
+          <head><layout><region xml:id="lower" tts:origin="10% 65%" tts:extent="80% 30%"/></layout></head>
+          <body begin="140t"><div region="lower" timeContainer="seq">'''
+        footer = b"</div></body></tt>"
+        conditional = header + b'''<p dur="24t" condition="parameter('forced')">
+            Forced only<span condition="ignored &amp;&amp;">Does not override its parent</span>
+          </p>
+          <p xml:id="ordinary" dur="26t" condition="(!parameter( 'forced' ) &amp;&amp; true) != false">
+            <span dur="26t" condition="true || false &amp;&amp; false">Shown</span>
+            <span begin="7t" dur="11t" condition="parameter('forced') == true">Hidden</span>
+            <span begin="10t" dur="6t" condition="!parameter(&quot;forced&quot;)" tts:fontStyle="italic"> detail</span>
+          </p>
+          <p xml:id="later" dur="22t" timeContainer="seq" condition="true">
+            <span dur="10t" condition="parameter('forced') || false">Also hidden</span>
+            <span dur="12t" condition="parameter('forced') == false">Later</span>
+          </p>''' + footer
+        control = header + b'''<p dur="24t"/>
+          <p xml:id="ordinary" dur="26t">
+            <span dur="26t">Shown</span>
+            <span begin="7t" dur="11t"/>
+            <span begin="10t" dur="6t" tts:fontStyle="italic"> detail</span>
+          </p>
+          <p xml:id="later" dur="22t" timeContainer="seq">
+            <span dur="10t"/>
+            <span dur="12t">Later</span>
+          </p>''' + footer
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Conditional captions</title></head>
+          <body><video src="clip.mp4#t=0.15,0.21&amp;xywh=1,1,6,4">
+          <track src="conditional.ttml" kind="captions" srclang="en"/>
+          <track src="control.ttml" kind="subtitles" srclang="en"/>
+          </video></body></html>'''
+        path = "OEBPS/conditional.ttml"
+        with doc_ex.open(epub_fixture()) as source:
+            data = source.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Conditional captions", chapter, "OEBPS/chapter.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    path: doc_ex.EpubResource("application/ttml+xml", conditional),
+                    "OEBPS/control.ttml": doc_ex.EpubResource("application/ttml+xml", control),
+                },
+            )
+        with doc_ex.open(data) as book:
+            cues = book.epub_embedded_text(0, 0)
+            reference = book.epub_embedded_text(0, 0, track_index=1)
+            self.assertEqual(cues, reference)
+            self.assertEqual([cue.runs for cue in cues], [cue.runs for cue in reference])
+            self.assertEqual([(cue.start_us, cue.end_us, cue.text) for cue in cues], [
+                (164_000, 174_000, "Shown"), (174_000, 180_000, "Shown detail"),
+                (180_000, 190_000, "Shown"), (200_000, 212_000, "Later"),
+            ])
+            self.assertEqual(cues[1].runs[-1].style.font_style, "italic")
+            frames = list(book.epub_embedded_video(0, 0, text_track=0))
+            self.assertEqual(frames, list(book.epub_embedded_video(0, 0, text_track=1)))
+            self.assertTrue(all((frame.width, frame.height) == (6, 4) for frame in frames))
+            self.assertEqual((frames[0].start_us, frames[0].duration_us, frames[0].text_cues),
+                             (150_000, 14_000, ()))
+            self.assertEqual((frames[-1].start_us, frames[-1].duration_us, frames[-1].text_cues[0].text),
+                             (200_000, 10_000, "Later"))
+            sought, = book.epub_embedded_video(0, 0, start_us=175_123, end_us=178_002, text_track=0)
+            self.assertEqual((sought.start_us, sought.duration_us, sought.text_cues[0].text),
+                             (175_123, 2_879, "Shown detail"))
+            self.assertEqual(sought.text_cues[0].ttml_region_layout, cues[1].ttml_region_layout)
+            self.assertEqual(sought.text_cues[0].runs, cues[1].runs)
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("Conditional captions", "Revised")})
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened.read_epub_resource(path), conditional)
+            self.assertEqual(reopened.epub_embedded_text(0, 0), cues)
+
+    def test_ttml_forced_conditions_validate_in_staging_and_playback(self) -> None:
+        root = b'<tt xmlns="http://www.w3.org/ns/ttml"><body>'
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Conditions</title></head>
+          <body><video><track src="conditional.ttml" kind="captions" srclang="en"/></video></body></html>'''
+        path = "OEBPS/conditional.ttml"
+        valid = root + b'<p dur="1s" condition="true">Visible</p></body></tt>'
+        with doc_ex.open(epub_fixture()) as original:
+            publication = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Conditions", chapter, "OEBPS/chapter.xhtml")],
+                resources={path: doc_ex.EpubResource("application/ttml+xml", valid)},
+            )
+        for paragraph, error, message in (
+            (b'<p dur="1s" condition="true &amp;&amp;">Body</p>', doc_ex.MalformedDocumentError,
+             "invalid TTML condition expression"),
+            (b'<p dur="1s" condition="(false || true">Body</p>', doc_ex.MalformedDocumentError,
+             "invalid TTML condition expression"),
+            (b'<p dur="1s" condition="parameter (\'forced\')">Body</p>', doc_ex.MalformedDocumentError,
+             "invalid TTML condition expression"),
+            (b'<p dur="1s" condition="parameter(\'unknown\')">Body</p>', doc_ex.MalformedDocumentError,
+             "invalid TTML condition expression"),
+            (b'<p dur="1s" condition="parameter(\'userLanguage\')">Body</p>', doc_ex.UnsupportedFormatError,
+             "no EPUB playback binding"),
+            (b'<p dur="1s" condition="media(\'screen\')">Body</p>', doc_ex.UnsupportedFormatError,
+             "unsupported TTML condition context function"),
+            (b'<p condition="false">Implicit duration</p>', doc_ex.UnsupportedFormatError,
+             "requires an explicit end or duration"),
+            (b'<p dur="broken" condition="false">Bad duration</p>', doc_ex.MalformedDocumentError,
+             "invalid TTML time expression"),
+            (b'<p dur="1s" condition="' + b'!' * 30 + b'true">Body</p>', doc_ex.UnsafeArchiveError,
+             "expression nesting budget"),
+            (b'<p dur="1s" condition="' + b' ' * 1025 + b'true">Body</p>', doc_ex.UnsafeArchiveError,
+             "expression byte budget"),
+        ):
+            with self.subTest(message=message, input=paragraph[:90]):
+                changed = root + paragraph + b"</body></tt>"
+                with doc_ex.open(publication) as book, self.assertRaisesRegex(error, message):
+                    book.edit_epub_structure(resources={path: doc_ex.EpubResource("application/ttml+xml", changed)})
+                with doc_ex.open(rewrite_epub(publication, {path: changed})) as book:
+                    with self.assertRaisesRegex(error, message):
+                        book.epub_embedded_text(0, 0)
+
     def test_ttml_region_edits_and_playback_validate_references_and_geometry(self) -> None:
         header = b'<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">'
         body = b'<body region="r"><div><p begin="0s" end="1s">Text</p></div></body></tt>'

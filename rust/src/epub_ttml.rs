@@ -359,7 +359,7 @@ impl<'n> Reader<'_, 'n> {
     ) -> Result<Option<Instant>, EngineError> {
         check_depth(depth)?;
         let timing = Timing::new(node, base, cap, self.clock)?;
-        if timing.empty() {
+        if timing.empty() || self.regions.excluded_content.contains(&node.id()) {
             return Ok(timing.end);
         }
         let format = self.format(inherited, node, timing)?;
@@ -417,7 +417,7 @@ impl<'n> Reader<'_, 'n> {
                 timing.end
             } else if child.has_tag_name((TT, "span")) || child.has_tag_name((TT, "br")) {
                 let span = Timing::new(child, base, timing.end, self.clock)?;
-                if span.empty() {
+                if span.empty() || self.regions.excluded_content.contains(&child.id()) {
                     span.end
                 } else {
                     let style = self.format(format.clone(), child, span)?;

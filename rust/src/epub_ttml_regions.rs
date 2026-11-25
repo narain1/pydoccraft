@@ -10,6 +10,7 @@ use super::{
     charge, invalid, limited,
     media::integer,
     ttml_clock::{Clock, Instant, Timing},
+    ttml_condition,
     ttml_styles::{self, Patch, StylePatch, PARAM, STYLING, TT},
     unsupported, XML,
 };
@@ -223,6 +224,7 @@ pub(super) struct Regions<'n> {
     inline: HashMap<NodeId, Definition>,
     pub implicit: Option<Arc<Region>>,
     pub initial: StylePatch,
+    pub excluded_content: HashSet<NodeId>,
 }
 
 #[cfg(feature = "python")]
@@ -260,6 +262,7 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
     if !root.has_tag_name((TT, "tt")) {
         return Err(invalid("missing TTML tt root"));
     }
+    let excluded_content = ttml_condition::read(root)?;
     let viewport = Viewport::new(root)?;
     let mut initial = RegionPatch::default();
     let mut definitions = Vec::new();
@@ -456,6 +459,7 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
         inline,
         implicit,
         initial: initial.text_style,
+        excluded_content,
     })
 }
 

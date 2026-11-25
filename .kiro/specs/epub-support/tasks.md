@@ -147,6 +147,7 @@
 - [x] Apply parallel and sequential one-shot geometry and background sets to named TTML regions in standalone captions and synchronized video.
 - [x] Bind inline TTML region sets to their owning division or paragraph and preserve inherited layout through caption and video seeks.
 - [x] Project contiguous named-region span groups in unassigned TTML paragraphs with independent lexical layout, timing and video synchronization.
+- [x] Evaluate bounded TTML boolean forced-parameter conditions and preserve explicit timing for omitted content in captions and video.
 - [x] Apply local normal-play-time fragments to embedded audio, video and synchronized captions.
 - [x] Crop local video spatial fragments in pixel and percent units, including when combined with timed audio and captions.
 - [x] Resolve repeated named track fragments for WebM and Ogg and keep the selected picture and soundtrack on one presentation clock.
@@ -171,7 +172,7 @@
 - [ ] Support additional Ogg soundtrack codecs, mixed soundtracks with differing PCM layouts, simultaneous video tracks and more MP4 profiles.
 - [x] Apply bounded WebVTT region selectors and carry typed region paint and cue styles into standalone captions and synchronized video.
 - [x] Apply TTML initial and inherited region styles to typed runs, including bounded paragraph and division inline regions, content overrides and time-based restores.
-- [ ] Support WebVTT region scrolling, conditional TTML captions, interleaved or ambiguous region ownership, and advanced TTML animation, additional TTML typography and subtitle painting.
+- [ ] Support WebVTT region scrolling, additional TTML condition contexts and conditional layout, interleaved or ambiguous region ownership, and advanced TTML animation, additional TTML typography and subtitle painting.
 - [ ] Support more media fragment track combinations and ID fragments in additional containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.

@@ -60,6 +60,8 @@ mod svg;
 pub(crate) mod text_tracks;
 #[path = "epub_ttml_clock.rs"]
 mod ttml_clock;
+#[path = "epub_ttml_condition.rs"]
+mod ttml_condition;
 #[path = "epub_ttml_regions.rs"]
 mod ttml_regions;
 #[path = "epub_ttml_styles.rs"]
