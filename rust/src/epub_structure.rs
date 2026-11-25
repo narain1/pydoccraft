@@ -50,11 +50,11 @@ pub(crate) fn update_structure<'a>(
     modified: &str,
     removed: &[String],
     overlays: &[OverlayEdit],
+    chapters: &'a [(i64, String)],
 ) -> Result<Vec<u8>, EngineError> {
     let mut total = 0;
-    let mut inserted_svg = Vec::new();
-    let mut removed_anchors = editor::RemovedAnchors::new();
-    let mut anchor_bytes = 0;
+    let mut svg_chapters = Vec::new();
+    editor::charge_chapter_replacements(chapters, &mut total)?;
     validate_member_count(removed.len())?;
     narration::charge_edits(overlays, &mut total)?;
     let mut removals = HashSet::new();
@@ -96,7 +96,12 @@ pub(crate) fn update_structure<'a>(
         )?;
     }
     let mut book = editor::open_for_edit(data)?;
-    if order.is_none() && resources.is_empty() && removed.is_empty() && overlays.is_empty() {
+    if order.is_none()
+        && resources.is_empty()
+        && removed.is_empty()
+        && overlays.is_empty()
+        && chapters.is_empty()
+    {
         return Ok(data.to_vec());
     }
     let package_path = book.package_path()?;
@@ -161,12 +166,37 @@ pub(crate) fn update_structure<'a>(
         manifest_additions: String::new(),
         files: Files::new(),
     };
-    let original = if order.is_some() {
+    let original = if order.is_some() || !chapters.is_empty() {
         Some(extract(data, None)?)
     } else {
         None
     };
     let mut edits = Vec::new();
+    let mut removed_anchors = editor::RemovedAnchors::new();
+    let mut anchor_bytes = 0;
+    if let Some(original) = original.as_ref().filter(|_| !chapters.is_empty()) {
+        let replacement = editor::prepare_chapter_replacements(
+            &mut book,
+            original,
+            chapters,
+            &mut removed_anchors,
+            &mut anchor_bytes,
+        )?;
+        editor::chapter_property_edits(
+            package_source,
+            &package_path,
+            manifest_node,
+            &replacement.declarations,
+            &mut edits,
+        )?;
+        plan.files.extend(
+            replacement
+                .files
+                .into_iter()
+                .map(|(path, data)| (path.to_owned(), Cow::Borrowed(data))),
+        );
+        svg_chapters.extend(replacement.svg_paths.into_iter().map(str::to_owned));
+    }
     if let Some((order, original)) = order.zip(original.as_ref()) {
         let references: Vec<_> = spine
             .children()
@@ -277,7 +307,7 @@ pub(crate) fn update_structure<'a>(
                                 "a fixed-layout SVG chapter requires a numeric viewBox",
                             ));
                         }
-                        inserted_svg.push(path.clone());
+                        svg_chapters.push(path.clone());
                         " properties=\"rendition:layout-pre-paginated\""
                     } else if *fixed {
                         if !epub3 || super::layout::dimensions(root).is_none() {
@@ -354,8 +384,14 @@ pub(crate) fn update_structure<'a>(
                 })
                 .collect();
             if let Some(path) = &existing_toc {
-                let bytes = book.read(path, XML_BYTES)?;
-                let nav = toc::edit(&bytes, path, epub3, &selected, &old_paths)?;
+                let original;
+                let source = if let Some(replacement) = plan.files.get(path) {
+                    replacement.as_ref()
+                } else {
+                    original = book.read(path, XML_BYTES)?;
+                    &original
+                };
+                let nav = toc::edit(source, path, epub3, &selected, &old_paths)?;
                 plan.files
                     .insert(path.clone(), Cow::Owned(nav.into_bytes()));
             } else {
@@ -575,7 +611,7 @@ pub(crate) fn update_structure<'a>(
         &removals,
     )?;
     extract(&updated, None)?;
-    editor::validate_svg_chapters(&updated, inserted_svg.iter().map(String::as_str))?;
+    editor::validate_svg_chapters(&updated, svg_chapters.iter().map(String::as_str))?;
     Ok(updated)
 }
 

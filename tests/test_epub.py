@@ -4645,6 +4645,74 @@ first
             link, = edited[1].get_links()
             self.assertEqual(link.metadata["target_fragment"], "nouveau")
 
+    def test_structure_replaces_chapter_and_retargets_shared_narration_atomically(self) -> None:
+        source, audio = narrated_epub()
+        path = "OEBPS/one.xhtml"
+        voice = "OEBPS/Media/voice.wav"
+        markup = '''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Revised chapter</title></head><body id="new-chapter"><p id="new">Revised narration</p>
+          <p><m:math><m:mi>x</m:mi></m:math></p></body></html>'''
+        narration = {path: [doc_ex.EpubOverlaySequence(
+            [doc_ex.EpubOverlayCue("new"), doc_ex.EpubOverlayCue("new", voice, 0, 500_000)],
+            fragment="new-chapter",
+        )]}
+        with doc_ex.open(source) as book:
+            old_chapter = book.read_epub_resource(path)
+            old_cues = book.epub_media_cues(1)
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_chapters({0: markup})
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_structure([1, 0], replacements={0: markup})
+            with self.assertRaisesRegex(ValueError, "conflicting replacements"):
+                book.edit_epub_structure(replacements={0: markup, -2: markup.replace("Revised", "Other")},
+                                         overlays=narration)
+            revised = book.edit_epub_structure([1, 0], replacements={-2: markup}, overlays=narration)
+            sole_overlay = book.edit_epub_structure(overlays={"OEBPS/two.xhtml": None})
+            self.assertEqual(book.read_epub_resource(path), old_chapter)
+            self.assertEqual(book.epub_media_cues(1), old_cues)
+        with doc_ex.open(revised) as book:
+            self.assertEqual([page.metadata["chapter_path"] for page in book], ["OEBPS/two.xhtml", path])
+            self.assertEqual(book.epub_media_cues(0), old_cues)
+            self.assertEqual(book.epub_media_cues(1)[0]["text"]["fragment"], "new")
+            cue, playable = book.epub_narration(1)
+            self.assertEqual(cue.text, "Revised narration")
+            assert playable.audio is not None
+            self.assertEqual(playable.audio.frame_count, 4_000)
+            self.assertEqual(book.read_epub_resource(voice), audio)
+            item = next(item for item in book.metadata["manifest"] if item["path"] == path)
+            self.assertEqual(item["properties"], "mathml")
+        old_smil = "OEBPS/Sync/read.smil"
+        with doc_ex.open(sole_overlay) as book:
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_structure(replacements={0: markup}, overlays=narration)
+            revised = book.edit_epub_structure(replacements={0: markup}, overlays=narration,
+                                               remove_resources=[old_smil])
+        with doc_ex.open(revised) as book, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+            self.assertNotIn(old_smil, archive.namelist())
+            self.assertEqual(next(book.epub_narration(0)).text, "Revised narration")
+
+    def test_structure_reorders_staged_navigation_chapter_markup(self) -> None:
+        def toc(label: str, anchor: str) -> str:
+            return f'''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+              <head><title>Contents</title></head><body><nav epub:type="toc"><ol>
+                <li><a href="one.xhtml">Contents</a></li>
+                <li><a href="two.xhtml#{anchor}">{label}</a></li></ol></nav></body></html>'''
+
+        source = epub_fixture(chapter_one=toc("Original heading", "old"))
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b'<item id="one" ', b'<item id="one" properties="nav" ')
+        body = '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="{}">A chapter</h1></body></html>'
+        source = rewrite_epub(source, {"OEBPS/content.opf": package, "OEBPS/two.xhtml": body.format("old")})
+        with doc_ex.open(source) as book:
+            revised = book.edit_epub_structure([1, 0], replacements={
+                0: toc("Revised heading", "new"), 1: body.format("new"),
+            })
+        with doc_ex.open(revised) as book:
+            nav = book.metadata["navigation"][0]["items"]
+            self.assertEqual([item["label"] for item in nav], ["Revised heading", "Contents"])
+            self.assertEqual(nav[0]["fragment"], "new")
+            self.assertEqual(book[0].get_text(), "A chapter")
+
     def test_batch_chapter_anchor_validation_covers_non_spine_references(self) -> None:
         html = '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>{}</body></html>'
         chapter = html.format('<p id="spare">Spare destination</p>')
@@ -4799,6 +4867,18 @@ first
                 png = pdf.render_page(0, dpi=96)
                 self.assertEqual(struct.unpack_from(">II", png, 16), (100, 80))
                 self.assertIn(bytes.fromhex("e62c1aff"), rgba_pixels(png_chunks(png))[1])
+        with doc_ex.open(data) as book:
+            replacement = revised_graphic.replace("tile.png", "new.png")
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                book.edit_epub_structure(replacements={1: replacement})
+            staged = book.edit_epub_structure(replacements={1: replacement}, resources={
+                "OEBPS/Art/new.png": doc_ex.EpubResource("image/png", solid((72, 23, 161))),
+            })
+        with doc_ex.open(staged) as book:
+            self.assertEqual(book[1].metadata["viewport"], [75, 60])
+            self.assertEqual(next(book.epub_narration(1)).text, "Revised caption")
+            _, pixels = rgba_pixels(png_chunks(book.render_page(1, dpi=96)))
+            self.assertIn(bytes((72, 23, 161, 255)), pixels)
 
     def test_svg_use_preserves_nested_references_and_symbol_geometry(self) -> None:
         svg = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"

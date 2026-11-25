@@ -561,7 +561,7 @@ fn _edit_epub_chapters(
 }
 
 #[pyfunction]
-#[pyo3(signature = (data, order, resources, modified, removed=Vec::new(), overlays=Vec::new()))]
+#[pyo3(signature = (data, order, resources, modified, removed=Vec::new(), overlays=Vec::new(), chapters=Vec::new()))]
 fn _edit_epub_structure(
     data: &[u8],
     order: Option<Vec<crate::epub::SpineEdit>>,
@@ -569,6 +569,7 @@ fn _edit_epub_structure(
     modified: &str,
     removed: Vec<String>,
     overlays: Vec<crate::epub::OverlayEdit>,
+    chapters: Vec<(i64, String)>,
 ) -> Result<Vec<u8>, EngineError> {
     crate::epub::update_structure(
         data,
@@ -577,6 +578,7 @@ fn _edit_epub_structure(
         modified,
         &removed,
         &overlays,
+        &chapters,
     )
 }
 

@@ -13,6 +13,7 @@ use super::{
 };
 use crate::{
     author_epub::{escape_attribute, escape_text, validate_text, BoundedOutput},
+    model::DocumentPayload,
     EngineError,
 };
 
@@ -185,24 +186,66 @@ pub(crate) fn update_chapters(
     data: &[u8],
     changes: &[(i64, String)],
 ) -> Result<Vec<u8>, EngineError> {
-    crate::limits::validate_member_count(changes.len())?;
-    let mut total = 0;
-    for (_, replacement) in changes {
-        if replacement.len() > XML_BYTES {
-            return Err(limited("replacement chapter exceeds its XML byte budget"));
-        }
-        super::charge(
-            &mut total,
-            replacement.len(),
-            crate::limits::MAX_INPUT_SIZE,
-            "chapter replacements exceed their byte budget",
-        )?;
-    }
+    charge_chapter_replacements(changes, &mut 0)?;
     let mut book = open_for_edit(data)?;
     if changes.is_empty() {
         return Ok(data.to_vec());
     }
     let extracted = extract(data, None)?;
+    let mut removed = RemovedAnchors::new();
+    let ChapterReplacements {
+        mut files,
+        svg_paths,
+        declarations,
+    } = prepare_chapter_replacements(&mut book, &extracted, changes, &mut removed, &mut 0)?;
+    if !removed.is_empty() {
+        if let Some(overlays) = extracted.metadata.get("media_overlays") {
+            check_overlay_anchors(overlays, &removed)?;
+        }
+        check_staged_links(&mut book, &files, &removed, &HashSet::new())?;
+    }
+    let package = sync_chapter_properties(&mut book, &declarations)?;
+    if let Some((path, xml)) = &package {
+        files.insert(path, xml.as_bytes());
+    }
+    let result = rewrite(&mut book, files, BTreeMap::new(), &HashSet::new())?;
+    extract(&result, None)?;
+    validate_svg_chapters(&result, svg_paths.into_iter())?;
+    Ok(result)
+}
+
+pub(super) fn charge_chapter_replacements(
+    changes: &[(i64, String)],
+    total: &mut usize,
+) -> Result<(), EngineError> {
+    crate::limits::validate_member_count(changes.len())?;
+    for (_, replacement) in changes {
+        if replacement.len() > XML_BYTES {
+            return Err(limited("replacement chapter exceeds its XML byte budget"));
+        }
+        super::charge(
+            total,
+            replacement.len(),
+            crate::limits::MAX_INPUT_SIZE,
+            "chapter replacements exceed their byte budget",
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) struct ChapterReplacements<'doc, 'edit> {
+    pub(super) files: HashMap<&'doc str, &'edit [u8]>,
+    pub(super) svg_paths: HashSet<&'doc str>,
+    pub(super) declarations: HashMap<&'doc str, Vec<&'static str>>,
+}
+
+pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
+    book: &mut Book<'_>,
+    extracted: &'doc DocumentPayload,
+    changes: &'edit [(i64, String)],
+    removed_anchors: &mut RemovedAnchors<'doc>,
+    anchor_bytes: &mut usize,
+) -> Result<ChapterReplacements<'doc, 'edit>, EngineError> {
     let fixed_paths: HashSet<_> = extracted
         .pages
         .iter()
@@ -236,8 +279,6 @@ pub(crate) fn update_chapters(
         .as_str()
         .is_some_and(|version| version.starts_with('3'));
     let mut declarations = HashMap::new();
-    let mut removed_anchors = HashMap::new();
-    let mut anchor_bytes = 0;
     for (&path, &replacement) in &replacements {
         let xml = parse_xml(replacement)?;
         let root = xml.root_element();
@@ -263,29 +304,13 @@ pub(crate) fn update_chapters(
                 declarations.insert(path, xhtml_properties(root));
             }
         }
-        collect_removed_anchors(
-            &mut book,
-            path,
-            replacement,
-            &xml,
-            &mut removed_anchors,
-            &mut anchor_bytes,
-        )?;
+        collect_removed_anchors(book, path, replacement, &xml, removed_anchors, anchor_bytes)?;
     }
-    if !removed_anchors.is_empty() {
-        if let Some(overlays) = extracted.metadata.get("media_overlays") {
-            check_overlay_anchors(overlays, &removed_anchors)?;
-        }
-        check_staged_links(&mut book, &replacements, &removed_anchors, &HashSet::new())?;
-    }
-    let package = sync_chapter_properties(&mut book, &declarations)?;
-    if let Some((path, xml)) = &package {
-        replacements.insert(path, xml.as_bytes());
-    }
-    let result = rewrite(&mut book, replacements, BTreeMap::new(), &HashSet::new())?;
-    extract(&result, None)?;
-    validate_svg_chapters(&result, svg_paths.into_iter())?;
-    Ok(result)
+    Ok(ChapterReplacements {
+        files: replacements,
+        svg_paths,
+        declarations,
+    })
 }
 
 pub(super) fn validate_svg_chapters<'a>(
@@ -358,12 +383,27 @@ fn sync_chapter_properties(
     let xml = parse_xml(&bytes)?;
     let manifest = required(xml.root_element(), "manifest")?;
     let mut edits = Vec::new();
+    chapter_property_edits(source, &path, manifest, declarations, &mut edits)?;
+    if edits.is_empty() {
+        return Ok(None);
+    }
+    let updated = super::structure::apply_edits(source, edits, METADATA_BYTES)?;
+    Ok(Some((path, updated)))
+}
+
+pub(super) fn chapter_property_edits(
+    source: &str,
+    path: &str,
+    manifest: Node<'_, '_>,
+    declarations: &HashMap<&str, Vec<&str>>,
+    edits: &mut Vec<(std::ops::Range<usize>, String)>,
+) -> Result<(), EngineError> {
     for item in manifest.children().filter(|&node| name(node, OPF, "item")) {
         let href = super::attribute(item, "href")?;
         if external(href) {
             continue;
         }
-        let target = resolve(&path, href)?;
+        let target = resolve(path, href)?;
         let Some(inferred) = declarations.get(target.as_str()) else {
             continue;
         };
@@ -396,11 +436,7 @@ fn sync_chapter_properties(
         };
         edits.push((range, properties_attribute(&properties)));
     }
-    if edits.is_empty() {
-        return Ok(None);
-    }
-    let updated = super::structure::apply_edits(source, edits, METADATA_BYTES)?;
-    Ok(Some((path, updated)))
+    Ok(())
 }
 
 fn anchors<'a>(xml: &'a Document<'_>) -> HashSet<&'a str> {
@@ -565,7 +601,9 @@ fn check_markup_anchors(
             || smil.is_some_and(|namespace| name(node, namespace, "text"))
         {
             node.attribute("src")
-        } else if smil.is_some_and(|namespace| name(node, namespace, "seq")) {
+        } else if smil
+            .is_some_and(|namespace| name(node, namespace, "seq") || name(node, namespace, "body"))
+        {
             node.attribute((super::EPUB, "textref"))
         } else if package && name(node, OPF, "reference") {
             node.attribute("href")

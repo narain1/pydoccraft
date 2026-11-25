@@ -1070,6 +1070,11 @@ class Document:
             raise UnsupportedFormatError("chapter editing requires EPUB input")
         from . import _core, _native
 
+        changes, _ = self._epub_chapter_replacements(replacements)
+        self._ensure_open()
+        return bytes(_native(lambda: _core._edit_epub_chapters(self._source, changes)))
+
+    def _epub_chapter_replacements(self, replacements: Mapping[int, str]) -> tuple[list[tuple[int, str]], int]:
         changes: list[tuple[int, str]] = []
         total_bytes = 0
         page_count = len(self._pages)
@@ -1092,18 +1097,18 @@ class Document:
             if total_bytes > _MAX_EPUB_EDIT_BYTES:
                 raise UnsafeArchiveError("chapter replacements exceed their byte budget")
             changes.append((index, markup))
-        self._ensure_open()
-        return bytes(_native(lambda: _core._edit_epub_chapters(self._source, changes)))
+        return changes, total_bytes
 
     def edit_epub_structure(
         self,
         order: Iterable[int | EpubChapterSource | EpubSvgChapterSource] | None = None,
         *,
+        replacements: Mapping[int, str] | None = None,
         resources: Mapping[str, EpubResource] | None = None,
         remove_resources: Iterable[str] = (),
         overlays: Mapping[str, Iterable[EpubOverlayCue | EpubOverlaySequence] | None] | None = None,
     ) -> bytes:
-        """Return an EPUB with transactional spine, resource, or narration edits."""
+        """Stage chapter replacements by original index alongside spine, resource and narration edits."""
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError
@@ -1111,7 +1116,7 @@ class Document:
             raise UnsupportedFormatError("spine editing requires EPUB input")
         from . import _core, _native
 
-        total_bytes = 0
+        chapters, total_bytes = ([], 0) if replacements is None else self._epub_chapter_replacements(replacements)
         selected: list[tuple[int | None, tuple[str, str, str | None, bool, bool] | None]] | None = None
         if order is not None:
             selected = []
@@ -1198,7 +1203,7 @@ class Document:
         self._ensure_open()
         modified = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         return bytes(_native(lambda: _core._edit_epub_structure(
-            self._source, selected, changes, modified, removed, narration,
+            self._source, selected, changes, modified, removed, narration, chapters,
         )))
 
     def edit(self) -> PdfDocument:
