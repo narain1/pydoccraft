@@ -22,13 +22,97 @@ pub(super) struct Chapter {
 
 pub(super) fn xhtml_replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {
     let xml = parse_xml(data)?;
-    let root = xml.root_element();
+    validate_xhtml_replacement(xml.root_element())?;
+    Ok(xml)
+}
+
+pub(in crate::epub) fn validate_xhtml_replacement(root: Node<'_, '_>) -> Result<(), EngineError> {
     if !name(root, XHTML, "html") || child(root, XHTML, "body").is_none() {
         return Err(invalid(
             "replacement EPUB navigation requires an XHTML document body",
         ));
     }
-    Ok(xml)
+    let mut has_toc = false;
+    for nav in root.descendants().filter(|node| name(*node, XHTML, "nav")) {
+        let Some(kind) = nav.attribute((EPUB, "type")) else {
+            continue;
+        };
+        if kind.split_ascii_whitespace().any(|kind| kind == "toc")
+            && std::mem::replace(&mut has_toc, true)
+        {
+            return Err(invalid(
+                "replacement EPUB navigation requires one nonempty table of contents",
+            ));
+        }
+        let mut children = nav.children().filter(Node::is_element);
+        let mut list = children.next();
+        if list.is_some_and(|node| {
+            node.tag_name().namespace() == Some(XHTML)
+                && matches!(
+                    node.tag_name().name(),
+                    "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+                )
+        }) {
+            list = children.next();
+        }
+        let list = list
+            .filter(|node| name(*node, XHTML, "ol") && children.next().is_none())
+            .ok_or_else(|| invalid("replacement EPUB navigation requires one ordered list"))?;
+        validate_xhtml_list(list)?;
+    }
+    if !has_toc {
+        return Err(invalid(
+            "replacement EPUB navigation requires one nonempty table of contents",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_xhtml_list(list: Node<'_, '_>) -> Result<(), EngineError> {
+    let mut items = list.children().filter(Node::is_element).peekable();
+    if items.peek().is_none() {
+        return Err(invalid(
+            "replacement EPUB navigation ordered list requires at least one item",
+        ));
+    }
+    for item in items {
+        if !name(item, XHTML, "li") {
+            return Err(invalid(
+                "replacement EPUB navigation ordered list requires list items",
+            ));
+        }
+        let mut children = item.children().filter(Node::is_element);
+        let label = children
+            .next()
+            .filter(|node| name(*node, XHTML, "a") || name(*node, XHTML, "span"))
+            .ok_or_else(|| {
+                invalid("replacement EPUB navigation item requires an anchor or group label")
+            })?;
+        let nested = children.next();
+        if nested.is_some_and(|node| !name(node, XHTML, "ol")) || children.next().is_some() {
+            return Err(invalid(
+                "replacement EPUB navigation item requires one label and at most one ordered list",
+            ));
+        }
+        if name(label, XHTML, "a") {
+            if label
+                .attribute("href")
+                .is_none_or(|href| href.trim().is_empty())
+            {
+                return Err(invalid(
+                    "replacement EPUB navigation anchor requires a nonblank href",
+                ));
+            }
+        } else if nested.is_none() {
+            return Err(invalid(
+                "replacement EPUB navigation group requires a nested ordered list",
+            ));
+        }
+        if let Some(nested) = nested {
+            validate_xhtml_list(nested)?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn ncx_replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {

@@ -31,6 +31,7 @@ mod spine_edit;
 #[path = "epub_toc_edit.rs"]
 mod toc;
 pub(super) use toc::validate_replacement as validate_navigation_replacement;
+pub(super) use toc::validate_xhtml_replacement as validate_xhtml_navigation_replacement;
 
 type ChapterEdit = (String, String, Option<String>, bool, bool, bool);
 pub(crate) type SpineEdit = (Option<i64>, Option<ChapterEdit>);
@@ -298,6 +299,8 @@ pub(crate) fn update_structure<'a>(
         }
         if expected == "application/x-dtbncx+xml" {
             toc::ncx_replacement_xml(data)?;
+        } else {
+            toc::xhtml_replacement_xml(data)?;
         }
         plan.files.insert(path.clone(), Cow::Borrowed(data));
     }

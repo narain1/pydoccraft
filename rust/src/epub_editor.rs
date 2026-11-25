@@ -301,6 +301,20 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
     let epub3 = extracted.metadata["epub_version"]
         .as_str()
         .is_some_and(|version| version.starts_with('3'));
+    let navigation = extracted.metadata["manifest"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            epub3
+                && item["properties"].as_str().is_some_and(|properties| {
+                    properties
+                        .split_ascii_whitespace()
+                        .any(|property| property == "nav")
+                })
+        })
+        .find_map(|item| item["path"].as_str());
+    let replaces_navigation = navigation.is_some_and(|path| replacements.contains_key(path));
     let mut declarations = HashMap::new();
     let mut titles = HashMap::new();
     for (&path, &replacement) in &replacements {
@@ -327,6 +341,9 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
             if epub3 {
                 declarations.insert(path, xhtml_properties(root));
             }
+            if navigation == Some(path) {
+                super::structure::validate_xhtml_navigation_replacement(root)?;
+            }
             if collect_titles {
                 if let Some(title) = super::content::document_title(root) {
                     titles.insert(path, title);
@@ -335,21 +352,6 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
         }
         collect_removed_anchors(book, path, replacement, &xml, removed_anchors, anchor_bytes)?;
     }
-    let replaces_navigation = epub3
-        && extracted.metadata["manifest"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|item| {
-                item["path"]
-                    .as_str()
-                    .is_some_and(|path| replacements.contains_key(path))
-                    && item["properties"].as_str().is_some_and(|properties| {
-                        properties
-                            .split_ascii_whitespace()
-                            .any(|property| property == "nav")
-                    })
-            });
     Ok(ChapterReplacements {
         replaces_navigation,
         files: replacements,

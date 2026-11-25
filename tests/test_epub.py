@@ -16530,6 +16530,77 @@ Resume
             self.assertEqual(book.read_epub_resource("OEBPS/toc.ncx"), ncx)
             self.assertEqual(book.metadata["navigation"][0]["items"][0]["children"][0]["label"], "Edited label")
 
+    def test_staged_epub3_navigation_rejects_unlinked_structural_entries(self) -> None:
+        template = ('<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+                    '<head><title>Contents</title></head><body><nav id="old-nav" epub:type="toc">'
+                    '<h2>Contents</h2><ol><li id="part-a">{}</li></ol></nav>'
+                    '<p id="café">Local destination</p><p id="detail">More information</p>'
+                    '<nav><div><a>Ordinary untyped navigation</a></div></nav></body></html>')
+        self_link = '<a href="#caf%C3%A9">Local destination</a>'
+        detail = '<ol><li><a href="#detail">More information</a></li></ol>'
+        initial = template.format('<a href="two.xhtml">Another chapter</a>')
+        inside = epub_fixture(chapter_one=initial)
+        with zipfile.ZipFile(io.BytesIO(inside)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'<item id="one" ', b'<item id="one" properties="nav" ',
+            )
+        inside = rewrite_epub(inside, {"OEBPS/content.opf": package})
+        outside, nav_path, original_nav, _ = self.nonspine_navigation_fixture()
+
+        def resource(markup: str) -> dict[str, doc_ex.EpubResource]:
+            return {nav_path: doc_ex.EpubResource("application/xhtml+xml", markup.encode())}
+
+        cases = (
+            ("<span>Unlinked leaf</span>", "group requires a nested ordered list"),
+            ("<span>Empty group</span><ol/>", "ordered list requires at least one item"),
+            ("<a>Bare leaf</a>", "anchor requires a nonblank href"),
+            ("<a>Bare parent</a>" + detail, "anchor requires a nonblank href"),
+            ('<a href="">Empty link</a>', "anchor requires a nonblank href"),
+            ('<a href=" &#x9;">Blank link</a>', "anchor requires a nonblank href"),
+            (self_link + '<a href="#detail">Duplicate label</a>', "requires one label and at most"),
+        )
+        with doc_ex.open(inside) as spine, doc_ex.open(outside) as separate:
+            for entries, error in cases:
+                markup = template.format(entries)
+                operations = (
+                    ("spine chapter", lambda: spine.edit_epub_chapters({0: markup})),
+                    ("spine reorder", lambda: spine.edit_epub_structure([1, 0], replacements={0: markup})),
+                    ("resource", lambda: separate.edit_epub_structure(resources=resource(markup))),
+                    ("resource reorder", lambda: separate.edit_epub_structure([1, 0], resources=resource(markup))),
+                )
+                for route, operation in operations:
+                    with self.subTest(route=route, entries=entries):
+                        with self.assertRaisesRegex(doc_ex.MalformedDocumentError, error):
+                            operation()
+            self.assertEqual(spine.read_epub_resource("OEBPS/one.xhtml"), initial.encode())
+            self.assertEqual(separate.read_epub_resource(nav_path), original_nav.encode())
+
+            grouped = template.format(f"<span>Part A</span><ol><li>{self_link}{detail}</li></ol>")
+            for member, revised in (
+                ("OEBPS/one.xhtml", spine.edit_epub_chapters({0: grouped})),
+                ("OEBPS/one.xhtml", spine.edit_epub_structure([1, 0], replacements={0: grouped})),
+                (nav_path, separate.edit_epub_structure(resources=resource(grouped))),
+                (nav_path, separate.edit_epub_structure([1, 0], resources=resource(grouped))),
+            ):
+                with doc_ex.open(revised) as reopened:
+                    group, = reopened.metadata["navigation"][0]["items"]
+                    linked, = group["children"]
+                    leaf, = linked["children"]
+                    self.assertIsNone(group["href"])
+                    self.assertEqual((linked["path"], linked["fragment"]), (member, "café"))
+                    self.assertEqual((leaf["path"], leaf["fragment"]), (member, "detail"))
+
+        legacy = rewrite_epub(inside, {"OEBPS/one.xhtml": template.format(cases[0][0])})
+        with doc_ex.open(legacy) as old:
+            item, = old.metadata["navigation"][0]["items"]
+            self.assertIsNone(item["path"])
+            self.assertEqual(item["children"], [])
+            revised = old.edit_epub_chapters({1: '<html xmlns="http://www.w3.org/1999/xhtml">'
+                                                '<body><p>Unrelated edit</p></body></html>'})
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened[1].get_text(), "Unrelated edit")
+            self.assertEqual(reopened.metadata["navigation"][0]["items"], [item])
+
     def test_structure_rejects_invalid_nonspine_navigation_edits(self) -> None:
         source, nav_path, nav, _ = self.nonspine_navigation_fixture()
         with doc_ex.open(source) as book:
