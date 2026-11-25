@@ -1269,6 +1269,41 @@ class EpubTests(unittest.TestCase):
                 pictures.append((preview, external.bbox, destination.groups()))
         self.assertEqual(pictures[0], pictures[1])
 
+    def test_inline_bidi_trailing_anchor_uses_the_logical_end_of_an_rtl_isolate(self) -> None:
+        source = fixed_spread_fixture([("", "white", 260, 150)])
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>RTL anchor</title>
+          <meta name="viewport" content="width=260,height=150"/>
+          <style>html,body{margin:0} p{margin:0;font-size:14px;font-family:sans-serif,serif}
+            #edge,#middle,#links{position:absolute;left:12px;width:215px}
+            #edge{top:10px} #middle{top:45px} #links{top:100px}</style></head>
+          <body>
+            <p id="edge" dir="rtl"><bdi dir="rtl"><a href="https://example.org/edge">שלום</a><span id="edge-end"/></bdi></p>
+            <p id="middle" dir="ltr">Start <bdi dir="rtl"><a href="https://example.org/middle">שלום</a><span id="middle-end"/></bdi> End</p>
+            <p id="links"><a href="#edge-end">First target</a> <a href="#middle-end">Second target</a></p>
+          </body></html>"""
+        with doc_ex.open(source) as before:
+            updated = before.edit_epub_structure(replacements={0: chapter})
+        with doc_ex.open(updated) as book:
+            pdf = book.export_epub_fixed_pdf(dpi=96)
+        with doc_ex.open(pdf) as output, output.edit() as editor:
+            links = output[0].get_links()
+            boxes = {
+                link.uri.rsplit("/", 1)[-1]: link.bbox
+                for link in links if link.uri.startswith("https://example.org/")
+            }
+            self.assertEqual(set(boxes), {"edge", "middle"})
+            self.assertEqual(sum(link.metadata.get("target_page") == 0 for link in links), 2)
+            destinations = re.findall(
+                rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
+                editor.to_bytes(object_streams=False),
+            )
+        self.assertEqual(len(destinations), 2)
+        destinations.sort(key=lambda pair: -float(pair[1]))
+        for key, (x, _) in zip(("edge", "middle"), destinations):
+            left, _, right, _ = boxes[key]
+            self.assertGreater(right - left, 10)
+            self.assertAlmostEqual(float(x), left, delta=0.05)
+
     def test_reflow_inline_bidi_preserves_whitespace_and_image_offsets(self) -> None:
         markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Bidi image</title>
           <style>body{margin:0} p{font-family:sans-serif,serif}</style></head><body>

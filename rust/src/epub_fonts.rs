@@ -1204,7 +1204,15 @@ impl Text {
                     .binary_search_by_key(&range.start, |(at, _)| *at)
                     .is_ok();
                 if advance > 0.0 && !is_object && cluster.style().brush.rgba[3] != 0 {
-                    geometry.push((range, Rect::new(area.x + left, top, advance, height), None));
+                    let rect = Rect::new(area.x + left, top, advance, height);
+                    self.navigation.capture_upstream(
+                        range.end,
+                        rect,
+                        cluster.is_rtl(),
+                        clip,
+                        capture,
+                    );
+                    geometry.push((range, rect, None));
                 }
                 left += advance;
             }

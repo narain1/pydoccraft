@@ -15,6 +15,7 @@ use super::super::{
 pub(in crate::epub) struct InlineNavigation {
     links: Vec<(Range<usize>, Arc<str>)>,
     anchors: Vec<(usize, String)>,
+    upstream: Vec<(usize, String)>,
     length: usize,
 }
 
@@ -43,6 +44,10 @@ impl InlineNavigation {
                 Some((
                     usize::try_from(entry[0].as_u64()?).ok()?,
                     entry[1].as_str()?,
+                    entry
+                        .get(2)
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
                 ))
             })
             .peekable();
@@ -71,12 +76,12 @@ impl InlineNavigation {
                     result.links.push((left..right, href.clone()));
                 }
             }
-            while let Some(&(anchor, id)) = anchors.peek() {
+            while let Some(&(anchor, id, upstream)) = anchors.peek() {
                 if anchor >= range.end {
                     break;
                 }
                 let anchor = at + offsets[anchor.max(range.start)] - start;
-                result.anchors.push((anchor, id.to_owned()));
+                result.push_anchor(anchor, id, upstream);
                 anchors.next();
             }
             at + offsets[range.end] - start
@@ -115,15 +120,47 @@ impl InlineNavigation {
             position = end_position;
         }
         position = copy_text(&mut result, cursor..offsets.len() - 1, position);
-        result
-            .anchors
-            .extend(anchors.map(|(_, id)| (position, id.to_owned())));
+        for (_, id, upstream) in anchors {
+            result.push_anchor(position, id, upstream);
+        }
         result.length = position;
         Ok(result)
     }
 
+    fn push_anchor(&mut self, offset: usize, id: &str, upstream: bool) {
+        let anchors = if upstream {
+            &mut self.upstream
+        } else {
+            &mut self.anchors
+        };
+        anchors.push((offset, id.to_owned()));
+    }
+
     pub(in crate::epub) fn is_empty(&self) -> bool {
-        self.links.is_empty() && self.anchors.is_empty()
+        self.links.is_empty() && self.anchors.is_empty() && self.upstream.is_empty()
+    }
+
+    pub(in crate::epub) fn capture_upstream(
+        &self,
+        end: usize,
+        rect: Rect,
+        rtl: bool,
+        clip: Rect,
+        navigation: &mut Capture<'_, '_>,
+    ) {
+        let first = self.upstream.partition_point(|(offset, _)| *offset < end);
+        let x = if rtl { rect.x } else { rect.x + rect.w };
+        for (offset, id) in &self.upstream[first..] {
+            if *offset != end {
+                break;
+            }
+            capture_anchor(
+                &mut navigation.anchors,
+                id,
+                Rect::new(x, rect.y, 0.0, rect.h),
+                clip,
+            );
+        }
     }
 
     pub(in crate::epub) fn capture(

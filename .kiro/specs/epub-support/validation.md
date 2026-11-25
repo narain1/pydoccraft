@@ -1016,7 +1016,7 @@ Both lockfiles directly declare the already resolved unicode-bidi version 0.3.18
 
 ## 2026-11-24 EPUB inline bidi isolation
 
-The installed regressions verify XHTML bdi, bdo and CSS embedding against equivalent Unicode control layouts. The fixed EPUB and reopened PDF retain identical pixels. An external annotation and the local XYZ destination match the explicit control. The PDF search layer omits formatting controls. Separate reflow coverage verifies retained whitespace and image offsets in source extraction while rendering the expected isolated placement. The forced-line-break regression checks that active scopes reopen on the following line. An independently authored XHTML direction and isolation fixture passed EPUBCheck 5.4.0 with no errors or warnings.
+The installed regressions verify XHTML bdi, bdo and CSS embedding against equivalent Unicode control layouts. The fixed EPUB and reopened PDF retain identical pixels. An external annotation and the local XYZ destination match the explicit control. Trailing fragment targets match the logical end of RTL text both at the end of a paragraph and before an adjacent LTR run. The PDF search layer omits formatting controls. Separate reflow coverage verifies retained whitespace and image offsets in source extraction while rendering the expected isolated placement. The forced-line-break regression checks that active scopes reopen on the following line. An independently authored XHTML direction and isolation fixture passed EPUBCheck 5.4.0 with no errors or warnings.
 
 ## 2026-11-24 WebVTT region geometry
 

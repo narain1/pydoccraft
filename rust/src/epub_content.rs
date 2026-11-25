@@ -75,8 +75,8 @@ struct Inline {
     images: Vec<ImagePayload>,
     math: Vec<serde_json::Value>,
     styles: Vec<(usize, usize, super::output::RunStyle)>,
-    anchors: Vec<(usize, String)>,
-    controls: Vec<usize>,
+    anchors: Vec<(usize, String, bool)>,
+    controls: Vec<(usize, bool)>,
     scopes: Vec<super::bidi::Scope>,
     last_text: Option<char>,
 }
@@ -183,7 +183,10 @@ impl Inline {
     fn push_controls(&mut self, controls: &str, budget: &mut Budget) -> Result<(), EngineError> {
         budget.bytes(controls.len() + 16)?;
         for character in controls.chars() {
-            self.controls.push(self.characters);
+            self.controls.push((
+                self.characters,
+                matches!(character, '\u{202c}' | '\u{2069}'),
+            ));
             self.characters += 1;
             self.text.push(character);
         }
@@ -263,17 +266,30 @@ impl Inline {
         }
         if !inline.controls.is_empty() {
             block.metadata.insert("bidi_shaping".into(), true.into());
-            for (offset, _) in &mut inline.anchors {
+            for (offset, _, upstream) in &mut inline.anchors {
                 let start = inline
                     .controls
-                    .partition_point(|control| *control < *offset);
-                for &control in &inline.controls[start..] {
-                    if control != *offset {
-                        break;
+                    .partition_point(|(control, _)| *control < *offset);
+                if inline.controls.get(start) == Some(&(*offset, true)) {
+                    // The element ends inside the isolate, so use the
+                    // preceding logical glyph's trailing edge.
+                    *upstream = true;
+                    for &(control, _) in inline.controls[..start].iter().rev() {
+                        if control + 1 != *offset {
+                            break;
+                        }
+                        *offset = control;
                     }
-                    *offset += 1;
+                } else {
+                    for &(control, _) in &inline.controls[start..] {
+                        if control != *offset {
+                            break;
+                        }
+                        *offset += 1;
+                    }
                 }
             }
+            inline.anchors.sort_by_key(|(offset, _, _)| *offset);
         }
         if !inline.anchors.is_empty() {
             block
@@ -538,7 +554,7 @@ fn inline(
         if let Some(id) = node.attribute("id").or_else(|| node.attribute((XML, "id"))) {
             cx.budget.object()?;
             cx.budget.bytes(id.len())?;
-            run.anchors.push((run.characters, id.to_owned()));
+            run.anchors.push((run.characters, id.to_owned(), false));
         }
     }
     let tag = node.tag_name();
