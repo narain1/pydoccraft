@@ -51,6 +51,7 @@ impl Envelope {
                 }
             }
             Expression::Compare(comparison, values) => Self::compare(*comparison, values)?,
+            Expression::Hypot(values) => Self::hypot(values)?,
             _ => return None,
         })
     }
@@ -69,6 +70,33 @@ impl Envelope {
 
     fn magnitude(self) -> [f64; 2] {
         std::array::from_fn(|i| self.lower[i].abs().max(self.upper[i].abs()))
+    }
+
+    fn hypot(values: &[Expression]) -> Option<Self> {
+        let mut largest_lower = [0.0f64; 2];
+        let mut upper = [0.0f64; 2];
+        for value in values {
+            let value = Self::from_expression(value)?;
+            let lower = if nonnegative(value.lower) {
+                value.lower
+            } else if nonpositive(value.upper) {
+                value.upper.map(|coefficient| -coefficient)
+            } else {
+                [0.0; 2]
+            };
+            let magnitude = value.magnitude();
+            for i in 0..2 {
+                largest_lower[i] = largest_lower[i].max(lower[i]);
+                upper[i] = upper[i].hypot(magnitude[i]);
+            }
+        }
+        // The Euclidean norm bounds each single magnitude from below.
+        // The triangle inequality applies separately to the constant and
+        // percentage coefficient vectors for the upper envelope.
+        Some(Self {
+            lower: largest_lower.map(|coefficient| coefficient * 0.5),
+            upper,
+        })
     }
 
     fn compare(comparison: Comparison, values: &[Expression]) -> Option<Self> {
@@ -174,6 +202,9 @@ fn wide_value(expression: &Expression, basis: f64) -> Option<f64> {
         Expression::Sum(left, right) => wide_value(left, basis)? + wide_value(right, basis)?,
         Expression::Scale(value, factor) => wide_value(value, basis)? * f64::from(*factor),
         Expression::Abs(value) => wide_value(value, basis)?.abs(),
+        Expression::Hypot(values) => values.iter().try_fold(0.0f64, |norm, value| {
+            Some(norm.hypot(wide_value(value, basis)?))
+        })?,
         Expression::Compare(comparison, values) => {
             let mut values = values.iter().map(|value| wide_value(value, basis));
             let first = values.next()??;

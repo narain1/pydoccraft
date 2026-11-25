@@ -87,7 +87,7 @@
 - [x] Measure intrinsic block-axis minima and maxima at independently definite inline widths.
 - [x] Measure block-axis constraints for relative and in-flow automatic widths at a proven containing inline size.
 - [x] Resolve percentage fit-content() inline limits and relative border-box edges at independently definite containing blocks.
-- [x] Bound containing-axis percentage ratios with comparison, clamp and absolute-value operands.
+- [x] Bound containing-axis percentage ratios with comparison, clamp, absolute-value and Euclidean norm operands.
 - [ ] Extend the EPUB CSS profile with block bounds at dependent inline widths, functional block bounds, relative inline bounds and edges in dependent containing blocks, contain-fit sizing, other nonlinear ratio operands and typed math, and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.

@@ -1779,9 +1779,20 @@ class EpubTests(unittest.TestCase):
             with self.subTest(width=width):
                 self.assertTrue(result[0] == result[1] == result[2], "bounded ratio changed PDF geometry")
 
+        norm = """p{left:calc(20px * (25% / hypot(15%,20%)));top:3px;height:26px;
+          width:calc(30px * (hypot(30%,40%) / max(25%,20px)))}"""
+        for width, size in ((40, 30), (80, 60), (120, 60)):
+            controls = []
+            for css in (norm, f"p{{left:20px;top:3px;height:26px;width:{size}px}}"):
+                with doc_ex.open(publication(width, css)) as book:
+                    controls.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+            with self.subTest(norm_width=width):
+                self.assertTrue(controls[0] == controls[1], "hypot ratio changed geometry")
+
         for expression in (
             "calc(5px * ((10% + 8px) / max(25% - 15px,0px)))",
             "calc(5px * ((10% + 8px) / min(25%,10px)))",
+            "calc(5px * (25% / hypot(25% - 10px,50% - 20px)))",
         ):
             with self.subTest(expression=expression), doc_ex.open(
                 publication(120, f"p{{width:{expression}}}")
