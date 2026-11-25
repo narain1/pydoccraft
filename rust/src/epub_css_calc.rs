@@ -142,11 +142,18 @@ fn sign(value: f32) -> f32 {
 }
 
 impl Calculation {
+    fn constant(value: f32) -> Self {
+        Self::linear(Some(value), None)
+    }
+
     fn linear(points: Option<f32>, percent: Option<f32>) -> Self {
+        // NaN from a zero step remains in the expression. Its eventual
+        // top-level used value is zero, so it contributes no magnitude.
+        let bound = |value: f32| if value.is_nan() { 0.0 } else { value.abs() };
         Self {
             expression: Expression::Linear(points, percent),
-            point_bound: points.map(f32::abs),
-            percent_bound: percent.map(f32::abs),
+            point_bound: points.map(bound),
+            percent_bound: percent.map(bound),
             relative_scalar: false,
             nodes: 1,
         }
@@ -217,6 +224,9 @@ impl Calculation {
     }
 
     fn stepped(self, step: Step, interval: Self) -> Self {
+        if let (Some(value), Some(interval)) = (self.fixed(), interval.fixed()) {
+            return Self::constant(step.evaluate(value, interval));
+        }
         let bound = |value, interval: Option<f32>| match step {
             Step::Round(_) => sum_bounds(value, interval),
             Step::Mod | Step::Rem => interval.or(value.map(|_| 0.0)),
@@ -242,11 +252,7 @@ enum Value {
 
 impl Value {
     fn number(value: f32) -> Self {
-        let mut scalar = Calculation::linear(Some(value), None);
-        if value.is_nan() {
-            scalar.point_bound = Some(0.0);
-        }
-        Self::Number(scalar)
+        Self::Number(Calculation::constant(value))
     }
 
     fn map(self, map: impl FnOnce(Calculation) -> Calculation) -> Self {

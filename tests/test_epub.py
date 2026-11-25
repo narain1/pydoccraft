@@ -1506,7 +1506,9 @@ class EpubTests(unittest.TestCase):
              "round(to-zero, 60% - 5px, 12px) mod(52px - 30%, -20px) 1fr",
              "round(32.5px,5px) 1fr"),
             ("0", "120px 0 1fr", "35px 1fr"),
+            ("calc(6px + mod(12px,0px))", "120px 0 1fr", "35px 1fr"),
             ("calc((min(24999,1) + 100 - 101) * 1px)", "120px 0 1fr", "35px 1fr"),
+            ("calc(round(20000px,20000px) - 20000px)", "120px 0 1fr", "35px 1fr"),
         ):
             xhtml = chapter.replace("LEFT", left).replace("COLUMNS", columns).replace("ROWS", rows)
             with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
