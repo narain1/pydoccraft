@@ -2693,9 +2693,10 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(preview("width:stretch", box=True), preview("inline-size:contain", box=True))
         self.assertEqual(preview("height:stretch", "height:80px"),
                          preview("block-size:contain", "height:80px"))
-        for size in ("min-height:fit-content(10px)", "min-width:contain"):
+        for size in ("min-height:fit-content(10%)", "min-width:contain"):
             with self.subTest(size=size):
-                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "CSS intrinsic box size"):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError,
+                                            "CSS intrinsic box size|functional block bounds"):
                     preview(size)
 
     def test_css_contain_fit_preserves_aspect_ratio_in_fixed_and_reflow_layout(self) -> None:
@@ -2905,6 +2906,7 @@ class EpubTests(unittest.TestCase):
             for body, plate in (
                 ("min-block-size:min-content;height:5px", "min-height:min-content;height:6px"),
                 ("max-height:max-content;height:120px", "max-block-size:min-content;height:100px"),
+                ("max-height:fit-content(2px);height:120px", "max-height:fit-content(200px);height:100px"),
                 ("height:auto", "height:36px"),
             ):
                 rules = f"#panel{{box-sizing:{sizing};{body}}}#plate{{{plate}}}"
@@ -2920,7 +2922,7 @@ class EpubTests(unittest.TestCase):
                     self.assertTrue(all(link.uri == "https://example.org/block" for link in links))
                     views.append((pixels, hit, [link.bbox for link in links]))
             with self.subTest(sizing=sizing):
-                self.assertTrue(views[0] == views[1] == views[2], "intrinsic block size changed geometry")
+                self.assertTrue(all(view == views[0] for view in views[1:]), "intrinsic block size changed geometry")
 
         for declaration, control in (
             ("width:60%;padding-top:10%;height:8px;min-height:min-content",
@@ -2942,11 +2944,77 @@ class EpubTests(unittest.TestCase):
         for rules, message in (
             ("#holder{width:auto}#panel{width:60%;min-height:min-content}", "definite inline size"),
             ("#holder{display:flex}#panel{min-height:min-content}", "definite inline size"),
+            ("#panel{display:flex;min-height:fit-content(3px)}", "ordinary block box"),
             ("#holder{width:auto}#panel{padding-top:10%;min-height:min-content}", "fixed padding and borders"),
         ):
             with self.subTest(rules=rules), doc_ex.open(publication(rules)) as book:
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.render_page(0, dpi=96)
+
+    def test_css_definite_sizes_propagate_through_nested_block_geometry(self) -> None:
+        original = fixed_spread_fixture([("", "white", 310, 185)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+          <title>Nested containing boxes</title><meta name="viewport" content="width=310,height=185"/>
+          <style>html,body,p{margin:0;font-size:11px}
+            #viewport{position:absolute;left:12px;top:12px;width:240px;height:120px}
+            #shell{position:relative;box-sizing:border-box;padding:4px 12px;
+              border:2px solid #273e75;background:#e8e2dc}
+            #flow{margin-inline:10px 14px;padding-inline:3px;border:1px solid #476a76}
+            #label{width:4px;height:3px;background:#98bb74}
+            #edge{width:4px;box-sizing:border-box;background:#cebe83}
+            #fitted{position:absolute;top:64px;left:0;aspect-ratio:2/1;background:#74a597}
+            #callout{position:absolute;top:36px;left:88px;width:145px;background:#699cb6}
+            CSS</style></head><body><section id="viewport"><div id="shell"><div id="flow">
+            <p id="label"><a href="https://example.org/relative">First narrow words follow here</a></p>
+            <p id="edge">Edge padding</p></div>
+            <p id="callout">Block sized caption words</p><div id="fitted"></div>
+            </div></section></body></html>"""
+
+        def render(rules: str) -> tuple[tuple[int, bytes], object, object]:
+            source = template.replace("CSS", rules)
+            with doc_ex.open(rewrite_epub(original, {"OEBPS/s0.xhtml": source})) as book:
+                image = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                export = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(export) as pdf:
+                self.assertTrue(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))) == image)
+                first, = pdf[0].search_for("First")
+                links = pdf[0].get_links()
+                self.assertTrue(links)
+                self.assertTrue(all(link.uri == "https://example.org/relative" for link in links))
+                return image, first, [link.bbox for link in links]
+
+        qualified = (
+            "#shell{width:75%;min-width:60%;max-width:80%;height:calc(50% + 24px);padding-inline:5%}"
+            "#label{min-inline-size:fit-content(calc(30% + 4px));min-height:fit-content(6px)}"
+            "#edge{min-width:max-content;padding-left:10%}"
+            "#callout{max-inline-size:fit-content(calc(25% + 9px));height:1px;"
+            "min-block-size:fit-content(calc(10% + 6px))}"
+            "#fitted{inline-size:contain;block-size:contain}"
+        )
+        explicit = (
+            "#shell{width:180px;height:84px}#flow{width:120px}"
+            "#label{min-width:40px;height:auto}#edge{min-width:max-content;padding-left:12px}"
+            "#callout{max-width:53px;height:auto}#fitted{width:160px;height:80px}"
+        )
+        self.assertTrue(render(qualified) == render(explicit), "the nested content/padding edge changed")
+
+        inset_shell = (
+            "#shell{position:absolute;left:12px;right:36px;height:84px}"
+            "#label{min-inline-size:fit-content(30%);height:auto}"
+        )
+        inset_control = (
+            "#shell{position:absolute;left:12px;right:36px;width:192px;height:84px}"
+            "#flow{width:132px}#label{min-width:39.6px;height:auto}"
+        )
+        self.assertTrue(render(inset_shell) == render(inset_control), "the two-inset auto width changed")
+
+        for rules in (
+            "#flow{justify-self:center}#edge{min-width:max-content;padding-left:10%}",
+            "#flow{max-width:max-content}#label{max-width:fit-content(25%)}",
+        ):
+            with self.subTest(rules=rules):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing inline size"):
+                    render(rules)
 
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>

@@ -18,12 +18,12 @@ use crate::EngineError;
 
 pub(super) type Styles = HashMap<NodeId, Styled>;
 pub(super) type Paint = (Rgb, f32);
-pub(super) type InlineBounds = MinMax<Option<InlineBound>, Option<InlineBound>>;
+pub(super) type SizeBounds = MinMax<Option<IntrinsicBound>, Option<IntrinsicBound>>;
 
 #[derive(Clone, Copy)]
 pub(super) struct IntrinsicBounds {
-    pub inline: InlineBounds,
-    pub block: MinMax<bool, bool>,
+    pub inline: SizeBounds,
+    pub block: SizeBounds,
     pub contain: Size<bool>,
     pub content_box_ratio: bool,
 }
@@ -35,8 +35,8 @@ impl IntrinsicBounds {
             max: None,
         },
         block: MinMax {
-            min: false,
-            max: false,
+            min: None,
+            max: None,
         },
         contain: Size {
             width: false,
@@ -50,12 +50,12 @@ impl IntrinsicBounds {
     }
 
     pub fn has_block(self) -> bool {
-        self.block.min || self.block.max
+        self.block.min.is_some() || self.block.max.is_some()
     }
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum InlineBound {
+pub(super) enum IntrinsicBound {
     Minimum,
     Maximum,
     FitContent(LengthPercentage),
@@ -345,33 +345,28 @@ impl ChapterStyles {
                 let source = value(&values, key);
                 let dimension = intrinsic_dimension(source, calculations.get(key).copied());
                 match dimension.map(Dimension::expand) {
-                    Some(ExpandedDimension::MinContent) => Some(InlineBound::Minimum),
-                    Some(ExpandedDimension::MaxContent) => Some(InlineBound::Maximum),
+                    Some(ExpandedDimension::MinContent) => Some(IntrinsicBound::Minimum),
+                    Some(ExpandedDimension::MaxContent) => Some(IntrinsicBound::Maximum),
                     Some(ExpandedDimension::FitContentPx(limit)) => {
-                        Some(InlineBound::FitContent(LengthPercentage::length(limit)))
+                        Some(IntrinsicBound::FitContent(LengthPercentage::length(limit)))
                     }
-                    Some(ExpandedDimension::FitContentPercent(fraction)) => {
-                        Some(InlineBound::FitContent(LengthPercentage::percent(fraction)))
-                    }
+                    Some(ExpandedDimension::FitContentPercent(fraction)) => Some(
+                        IntrinsicBound::FitContent(LengthPercentage::percent(fraction)),
+                    ),
                     Some(ExpandedDimension::FitContentCalc(handle)) => {
-                        Some(InlineBound::FitContent(LengthPercentage::calc(handle)))
+                        Some(IntrinsicBound::FitContent(LengthPercentage::calc(handle)))
                     }
                     _ => None,
                 }
             };
-            let block_bound = |key| {
-                let value = value(&values, key);
-                value.eq_ignore_ascii_case("min-content")
-                    || value.eq_ignore_ascii_case("max-content")
-            };
             let intrinsic_bounds = IntrinsicBounds {
-                inline: InlineBounds {
+                inline: SizeBounds {
                     min: intrinsic_bound("min-width"),
                     max: intrinsic_bound("max-width"),
                 },
-                block: MinMax {
-                    min: block_bound("min-height"),
-                    max: block_bound("max-height"),
+                block: SizeBounds {
+                    min: intrinsic_bound("min-height"),
+                    max: intrinsic_bound("max-height"),
                 },
                 contain,
                 content_box_ratio: prefers_natural_ratio,

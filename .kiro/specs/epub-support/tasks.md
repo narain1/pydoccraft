@@ -91,7 +91,9 @@
 - [x] Resolve percentage fit-content() inline limits and relative border-box edges at independently definite containing blocks.
 - [x] Bound containing-axis percentage ratios with comparison, clamp, absolute-value and Euclidean norm operands.
 - [x] Resolve contain-fit preferred sizes at independently sized block edges and stretch when there is no aspect ratio. Honor numeric ratio syntax, including calculated terms and auto fallbacks.
-- [ ] Extend the EPUB CSS profile with block bounds at dependent inline widths, functional block bounds, relative inline bounds and edges in dependent containing blocks, remaining contain-fit sizing contexts, other nonlinear ratio operands and typed math, and subgrids.
+- [x] Propagate definite content and padding edges through nested block widths and heights, including ordinary auto inline widths and two-inset absolute inline widths.
+- [x] Resolve functional minima and maxima on ordinary blocks when the fit-content limit and the natural block probe both have independently resolvable geometry.
+- [ ] Extend the EPUB CSS profile with block and relative inline bounds in content-dependent or flex and grid containing geometry, functional block bounds with an indefinite containing height, remaining contain-fit sizing contexts, other nonlinear ratio operands and typed math, and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, length owners separated by positioned or independently painted wrappers and glyph positioning.

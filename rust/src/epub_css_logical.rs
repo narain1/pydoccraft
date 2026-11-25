@@ -211,7 +211,7 @@ pub(in crate::epub) fn resolve_calculated_geometry(
     for (name, value) in values {
         let limit = if matches!(
             name.as_str(),
-            "width" | "height" | "min-width" | "max-width"
+            "width" | "height" | "min-width" | "max-width" | "min-height" | "max-height"
         ) {
             fit_content_argument(value)
         } else {
@@ -398,7 +398,8 @@ pub(super) fn intrinsic_size_kind(name: &str, value: &str) -> Option<ValueKind> 
         name,
         "min-height" | "max-height" | "min-block-size" | "max-block-size"
     ) && (keyword(value, "min-content")
-        || keyword(value, "max-content"));
+        || keyword(value, "max-content")
+        || fit_content_argument(value).is_some());
     Some(match kind {
         ValueKind::Supported if !preferred && !intrinsic_width_bound && !intrinsic_block_bound => {
             ValueKind::Unsupported
