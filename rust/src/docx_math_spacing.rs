@@ -139,7 +139,19 @@ fn borrowed_padding_body(node: &MNode) -> Option<Arg> {
     Some(
         contents
             .iter()
-            .filter(|node| !tagged(node))
+            .filter(|node| {
+                !tagged(node)
+                    && !matches!(
+                        node,
+                        MNode::Phant {
+                            show: false,
+                            zero_wid: true,
+                            zero_asc: true,
+                            zero_desc: true,
+                            e,
+                        } if matches!(e.as_slice(), [space] if tagged(space))
+                    )
+            })
             .cloned()
             .collect(),
     )

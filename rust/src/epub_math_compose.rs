@@ -56,7 +56,12 @@ struct EditableBox {
     borrow: f32,
 }
 
-type ArgumentCaret<'a> = (&'a mut [(usize, usize)], &'a mut usize);
+type CaretSuffix = [(usize, usize); 2];
+type ArgumentCaret<'a> = (
+    &'a mut [(usize, usize)],
+    &'a mut usize,
+    &'a mut Option<CaretSuffix>,
+);
 
 pub(super) struct EditableLayout<'a> {
     document: &'a Document,
@@ -357,10 +362,16 @@ impl Editable {
     pub(super) fn apply_with_caret(
         &self,
         math: &mut Math,
-        caret: Option<&mut MathPos>,
+        mut caret: Option<&mut MathPos>,
     ) -> Result<(), EngineError> {
-        let caret = caret.map(|pos| (pos.path.as_mut_slice(), &mut pos.off));
-        let nodes = self.substitute(std::mem::take(&mut math.nodes), caret)?;
+        let mut suffix = None;
+        let argument = caret
+            .as_deref_mut()
+            .map(|pos| (pos.path.as_mut_slice(), &mut pos.off, &mut suffix));
+        let nodes = self.substitute(std::mem::take(&mut math.nodes), argument)?;
+        if let (Some(caret), Some(suffix)) = (caret, suffix) {
+            caret.path.extend(suffix);
+        }
         let too_deep = Cell::new(false);
         let node_count = Cell::new(0);
         math.nodes = check_editable_bounds(nodes, 0, &too_deep, &node_count);
@@ -379,20 +390,20 @@ impl Editable {
 
     fn substitute(&self, body: Arg, caret: Option<ArgumentCaret<'_>>) -> Result<Arg, EngineError> {
         let (mut operand, mut caret) = match caret {
-            Some(([], offset)) => (None, Some(offset)),
+            Some(([], offset, suffix)) => (None, Some((offset, suffix))),
             Some(nested) => (Some(nested), None),
             None => (None, None),
         };
-        let selected = operand.as_ref().map(|(path, _)| path[0].0);
+        let selected = operand.as_ref().map(|(path, _, _)| path[0].0);
         let mut native_end = 0;
         let mut result = Vec::with_capacity(body.len());
         for (index, node) in body.into_iter().enumerate() {
             if selected == Some(index) {
-                let (path, offset) = operand
+                let (path, offset, suffix) = operand
                     .take()
                     .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
                 path[0].0 = result.len();
-                result.push(self.substitute_operand(node, path, offset)?);
+                result.push(self.substitute_operand(node, path, offset, suffix)?);
                 continue;
             }
             if let Some(index) = box_index(&node) {
@@ -402,27 +413,36 @@ impl Editable {
                     .and_then(Cell::take)
                     .ok_or_else(|| invalid("missing editable MathML box"))?;
                 if borrow > 0.0 {
-                    let preceding = caret
-                        .as_ref()
-                        .and_then(|_| result.last())
-                        .map_or(0, argument_units);
-                    recompose_borrowed_padding(&mut result, node, borrow)?;
-                    if let Some(offset) = caret.as_deref_mut() {
+                    if let Some((offset, suffix)) = caret.as_mut() {
+                        let offset = &mut **offset;
+                        let preceding = result.last().map_or(0, argument_units);
                         let start = native_end - preceding;
                         let end = native_end + 1;
-                        if (start + 1..end).contains(offset) {
+                        let inside = (start + 1..end).contains(offset);
+                        let keep_caret = inside && preceding == 1 && *offset == native_end;
+                        recompose_borrowed_padding(&mut result, node, borrow, keep_caret)?;
+                        if inside && !keep_caret {
                             return Err(unsupported(
                                 "MathML alignment caret inside borrowed spacing in DOCX export",
                             ));
                         }
-                        if *offset >= end {
+                        if keep_caret {
+                            // Address the end of the original space inside
+                            // the zero-extent phantom at the front of the box.
+                            **suffix = Some([(result.len() - 1, 0), (0, 0)]);
+                            *offset = 1;
+                            caret = None;
+                        } else if *offset >= end {
                             *offset -= preceding;
                         }
                         // The old space run and the padding marker now occupy one box.
                         native_end = start + 1;
+                    } else {
+                        recompose_borrowed_padding(&mut result, node, borrow, false)?;
                     }
                 } else {
-                    if let Some(offset) = caret.as_deref_mut() {
+                    if let Some((offset, _)) = caret.as_mut() {
+                        let offset = &mut **offset;
                         let replacement = argument_units(&node);
                         // The marker occupies one source argument unit.
                         if *offset > native_end {
@@ -464,6 +484,7 @@ impl Editable {
         mut node: MNode,
         path: &mut [(usize, usize)],
         offset: &mut usize,
+        suffix: &mut Option<CaretSuffix>,
     ) -> Result<MNode, EngineError> {
         let ((_, target), rest) = path
             .split_first_mut()
@@ -475,7 +496,7 @@ impl Editable {
         for index in 0..count {
             let argument = math_edit::child_mut(&mut node, index)
                 .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
-            let caret = (index == *target).then_some((&mut *rest, &mut *offset));
+            let caret = (index == *target).then_some((&mut *rest, &mut *offset, &mut *suffix));
             *argument = self.substitute(std::mem::take(argument), caret)?;
         }
         Ok(node)
@@ -486,6 +507,7 @@ fn recompose_borrowed_padding(
     nodes: &mut Arg,
     node: MNode,
     borrow: f32,
+    keep_caret: bool,
 ) -> Result<(), EngineError> {
     let unavailable = || {
         unsupported(
@@ -517,6 +539,19 @@ fn recompose_borrowed_padding(
         ));
     }
     let mut contents = negative_padding_spaces((native_units - borrowed_units) / 5.0)?;
+    if keep_caret {
+        if (available - native_units / 5.0).abs() > 0.0001
+            || (borrow - borrowed_units / 5.0).abs() > 0.0001
+        {
+            return Err(unsupported(
+                "MathML alignment caret in borrowed space requires exact DOCX spacing",
+            ));
+        }
+        let mut donor = space.clone();
+        donor.lit = true;
+        donor.color = Some(math_spacing::NEGATIVE_PADDING_SPACE_COLOR);
+        contents.insert(0, phantom(MNode::Run(donor), false, true, true, true));
+    }
     let MNode::Boxed { e } = node else {
         return Err(invalid("negative padding lost its editable box"));
     };
