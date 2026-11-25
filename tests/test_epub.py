@@ -1878,6 +1878,86 @@ class EpubTests(unittest.TestCase):
         self.assertNotEqual(image, preview(reused, rules.replace("91.25%", "90.5%")))
         self.assertNotEqual(image, preview(reused, rules.replace("17.5deg", "-17.5deg")))
 
+        variables = rules.split(".first", 1)[0] + """
+          .first { --family: Local; --weight: 312.5; --width: 90.5%; --slope: -17.25deg; }
+          .second { --family: Local; --weight: 712.75; --width: 91.25%; --slope: 17.5deg;
+              --axes: "opsz" 18; }
+          .face { font-family: var(--family, serif); font-weight: var(--weight, 400);
+              font-stretch: var(--width, normal); font-style: var(--style, oblique var(--slope, 0deg));
+              font-variation-settings: var(--axes, normal); }
+          .third { --style: normal; }
+          .face text { fill: #245397; }"""
+        self.assertEqual(preview(reused, variables, verify=True), image)
+
+    def test_svg_use_custom_properties_inherit_per_instance_and_keep_links(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="158" height="42" viewBox="0 0 158 42">
+          <style>
+            .first { --ink: #ca2020; --stroke: #205080; }
+            .second { --ink: #20aa38 !important; }
+            .third { --ink: var(--loop); --loop: var(--ink); --fallback: #6340ba; }
+            .face rect { fill: var(--shade, #e2a020); stroke: var(--stroke, #9010aa); stroke-width: 2; }
+            .definition .face rect { --shade: #111 !important; --stroke: #111 !important; stroke-width: 10; }
+            .face:first-child { --override: #dea020; }
+          </style>
+          <defs>
+            <g class="definition" style="--shade:#111;--stroke:#111">
+              <rect width="1" height="1"/>
+              <g id="face" class="face">
+                <defs><linearGradient id="palette">
+                  <stop offset="0" style="stop-color:var(--shade,#e2a020)"/>
+                  <stop offset="1" style="stop-color:var(--shade,#e2a020)"/>
+                </linearGradient></defs>
+                <rect x="2" y="2" width="25" height="20"/>
+                <rect x="2" y="26" width="25" height="10" style="--shade:var(--override,#111)"/>
+                <rect x="31" y="2" width="5" height="20" style="stroke:none;fill:var(--gradient,url(#palette))"/>
+              </g>
+            </g>
+            <use id="nested" href="#face" x="3" style="--shade:var(--ink,var(--fallback,#304080))"/>
+            <symbol id="badge" viewBox="0 0 36 42"><use href="#nested"/></symbol>
+          </defs>
+          <a href="https://example.org/badge"><use class="first" href="#nested" x="2"/></a>
+          <a href="https://example.org/badge"><use class="second" href="#badge" x="41" width="36" height="42"
+            style="--ink:#b00010"/></a>
+          <a href="https://example.org/badge"><use class="third" href="#nested" x="80"/></a>
+          <a href="https://example.org/badge"><use href="#face" x="122"/></a>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 158, 42)])
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        xhtml = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Instance colors</title>
+            <meta name="viewport" content="width=158,height=42"/></head>
+            <body style="margin:0">{svg}</body></html>"""
+        versions = (
+            rewrite_epub(fixture, {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg}),
+            rewrite_epub(fixture, {"OEBPS/s0.xhtml": xhtml}),
+        )
+        for index, data in enumerate(versions):
+            with self.subTest(inline=bool(index)), doc_ex.open(data) as book:
+                self.assertEqual(book.read_epub_resource("OEBPS/s0.xhtml" if index else "OEBPS/s0.svg"),
+                                 (xhtml if index else svg).encode())
+                width, rgba = preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+
+                def pixel(x: int, y: int) -> tuple[int, ...]:
+                    offset = 4 * (y * width + x)
+                    return tuple(rgba[offset:offset + 3])
+
+                self.assertEqual([pixel(x, 10) for x in (12, 52, 92, 130)],
+                                 [(202, 32, 32), (32, 170, 56), (99, 64, 186), (226, 160, 32)])
+                self.assertEqual([pixel(x, 30) for x in (12, 52, 92, 130)], [(222, 160, 32)] * 4)
+                self.assertEqual([pixel(x, 10) for x in (38, 76, 116, 155)],
+                                 [(202, 32, 32), (32, 170, 56), (99, 64, 186), (226, 160, 32)])
+                self.assertEqual(pixel(7, 10), (32, 80, 128))
+                self.assertEqual(pixel(46, 10), (144, 16, 170))
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0])) as pdf:
+                    links = pdf[0].get_links()
+                    self.assertEqual({link.uri for link in links}, {"https://example.org/badge"})
+                    columns = {round(link.bbox[0] / 30) for link in links}
+                    self.assertEqual(columns, {0, 1, 2, 3})
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+
     def test_epub_svg_use_instance_requests_share_the_font_stack_limit(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
         instances = "".join(

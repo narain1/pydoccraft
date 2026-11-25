@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use parley::fontique::GenericFamily;
 use raffia::{ast::*, Parser, Spanned, Syntax};
-use roxmltree::Node;
+use roxmltree::{Node, NodeId};
 use serde::{Deserialize, Serialize};
 
 use super::{charge, external, invalid, limited, name, resolve, unsupported, Book, XHTML};
@@ -18,7 +18,32 @@ const SELECTOR_WORK: usize = 4_000_000;
 const SIDES: [&str; 4] = ["top", "right", "bottom", "left"];
 
 pub(super) type Properties = HashMap<String, String>;
+pub(super) use variables::Scope as VariableScope;
 type Specificity = [u16; 3];
+
+#[derive(Default)]
+pub(super) struct InstanceStyle {
+    custom: HashMap<String, CssValue>,
+    declarations: HashMap<String, CssValue>,
+}
+
+impl InstanceStyle {
+    pub(super) fn compute(
+        &self,
+        scope: &mut VariableScope,
+        node: Node<'_, '_>,
+        instance_start: Option<usize>,
+    ) -> Result<Vec<(&str, Option<String>)>, EngineError> {
+        scope.enter_at(node, &self.custom, instance_start.unwrap_or(0))?;
+        let mut results = Vec::new();
+        if instance_start.is_some() {
+            for (key, value) in &self.declarations {
+                results.push((key.as_str(), computed_value(scope, key, value)?));
+            }
+        }
+        Ok(results)
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Cascade {
@@ -30,6 +55,7 @@ pub(super) struct Cascade {
     work: usize,
     viewport: [f32; 2],
     variables: variables::Scope,
+    inline_pending: bool,
 }
 
 struct Rule {
@@ -349,12 +375,78 @@ impl Cascade {
     }
 
     pub(super) fn properties(&mut self, node: Node<'_, '_>) -> Result<Properties, EngineError> {
+        self.properties_for_instance(node).map(|(props, _)| props)
+    }
+
+    pub(super) fn take_variable_scope(&mut self) -> VariableScope {
+        let mut scope = std::mem::take(&mut self.variables);
+        scope.restore(0);
+        scope
+    }
+
+    pub(super) fn has_instance_variables(&self, supported: impl Fn(&str) -> bool) -> bool {
+        self.inline_pending
+            || self.rules.iter().any(|rule| {
+                rule.declarations
+                    .iter()
+                    .any(|(key, value, _)| supported(key) && matches!(value, CssValue::Pending(..)))
+            })
+    }
+
+    pub(super) fn properties_for_instance(
+        &mut self,
+        node: Node<'_, '_>,
+    ) -> Result<(Properties, InstanceStyle), EngineError> {
+        let mut selected = self.select(node, None)?;
+        let custom = selected
+            .extract_if(|name, _| name.starts_with("--"))
+            .map(|(name, (_, value))| (name, value))
+            .collect();
+        self.variables.enter_at(node, &custom, 0)?;
+        let mut output = Properties::new();
+        for (name, (_, value)) in selected {
+            if let Some(computed) = computed_value(&mut self.variables, &name, &value)? {
+                output.insert(name, computed);
+            }
+        }
+        Ok((
+            output,
+            InstanceStyle {
+                custom,
+                ..InstanceStyle::default()
+            },
+        ))
+    }
+
+    pub(super) fn shadow_style(
+        &mut self,
+        node: Node<'_, '_>,
+        root: NodeId,
+        supported: impl Fn(&str) -> bool,
+    ) -> Result<InstanceStyle, EngineError> {
+        let selected = self.select(node, Some(root))?;
+        let mut style = InstanceStyle::default();
+        for (name, (_, value)) in selected {
+            if name.starts_with("--") {
+                style.custom.insert(name, value);
+            } else if supported(&name) {
+                style.declarations.insert(name, value);
+            }
+        }
+        Ok(style)
+    }
+
+    fn select(
+        &mut self,
+        node: Node<'_, '_>,
+        boundary: Option<NodeId>,
+    ) -> Result<HashMap<String, (Priority, CssValue)>, EngineError> {
         let mut selected = HashMap::new();
         for order in self.candidates.matching_keys(node, &mut self.work)? {
             let rule = &self.rules[order];
             if rule
                 .selector
-                .matches(node, rule.selector.steps.len(), &mut self.work)?
+                .matches(node, rule.selector.steps.len(), &mut self.work, boundary)?
             {
                 for (key, value, important) in rule.declarations.iter() {
                     charge(
@@ -373,43 +465,23 @@ impl Cascade {
             }
         }
         if let Some(style) = node.attribute("style") {
-            self.charge_bytes(style)?;
+            if boundary.is_some() {
+                charge(
+                    &mut self.work,
+                    style.len(),
+                    SELECTOR_WORK,
+                    "EPUB CSS cascade work limit exceeded",
+                )?;
+            } else {
+                self.charge_bytes(style)?;
+            }
             for (key, value, important) in inline_declarations(style)? {
+                self.inline_pending |=
+                    !key.starts_with("--") && matches!(value, CssValue::Pending(..));
                 update(&mut selected, &key, &value, (important, true, [0; 3], 0));
             }
         }
-        let custom = selected
-            .extract_if(|name, _| name.starts_with("--"))
-            .map(|(name, (_, value))| (name, value))
-            .collect();
-        self.variables.enter(node, &custom)?;
-        let mut output = Properties::new();
-        for (name, (_, value)) in selected {
-            let value = match value {
-                CssValue::Text(value) => value.to_string(),
-                CssValue::Pending(template, property) => {
-                    let Some(value) = self.variables.substitute(&template)? else {
-                        continue;
-                    };
-                    if !valid_computed(&property, &value) {
-                        continue;
-                    }
-                    if name == property.as_ref() {
-                        value
-                    } else {
-                        let Some((_, expanded)) = expand(&property, &value)
-                            .into_iter()
-                            .find(|(part, _)| part == &name)
-                        else {
-                            continue;
-                        };
-                        expanded
-                    }
-                }
-            };
-            output.insert(name, value);
-        }
-        Ok(output)
+        Ok(selected)
     }
 
     fn media_matches(&self, query: &str) -> bool {
@@ -449,6 +521,31 @@ impl Cascade {
                     }
                 })
             })
+    }
+}
+
+fn computed_value(
+    variables: &mut VariableScope,
+    name: &str,
+    value: &CssValue,
+) -> Result<Option<String>, EngineError> {
+    match value {
+        CssValue::Text(value) => Ok(Some(value.to_string())),
+        CssValue::Pending(template, property) => {
+            let Some(value) = variables.substitute(template)? else {
+                return Ok(None);
+            };
+            if !valid_computed(property, &value) {
+                return Ok(None);
+            }
+            if name == property.as_ref() {
+                Ok(Some(value))
+            } else {
+                Ok(expand(property, &value)
+                    .into_iter()
+                    .find_map(|(part, value)| (part == name).then_some(value)))
+            }
+        }
     }
 }
 
@@ -904,21 +1001,11 @@ fn inline_declarations(style: &str) -> Result<Vec<DeclarationValue>, EngineError
 }
 
 /// Read presentation values back from the adapter's already resolved inline styles.
-pub(super) fn svg_font_declarations(style: &str) -> Result<Properties, EngineError> {
+pub(super) fn svg_declarations(style: &str) -> Result<Properties, EngineError> {
     let mut result = Properties::new();
     for (key, value, _) in inline_declarations(style)? {
-        if matches!(
-            key.as_str(),
-            "font-family"
-                | "font-weight"
-                | "font-stretch"
-                | "font-style"
-                | "font-variation-settings"
-                | "font-optical-sizing"
-        ) {
-            if let CssValue::Text(value) = value {
-                result.insert(key, value.to_string());
-            }
+        if let CssValue::Text(value) = value {
+            result.insert(key, value.to_string());
         }
     }
     Ok(result)
@@ -1254,6 +1341,7 @@ impl Selector {
         node: Node<'_, '_>,
         step_count: usize,
         work: &mut usize,
+        boundary: Option<NodeId>,
     ) -> Result<bool, EngineError> {
         let Some(index) = step_count.checked_sub(1) else {
             return Ok(false);
@@ -1266,26 +1354,32 @@ impl Selector {
             "EPUB CSS selector work limit exceeded",
         )?;
         for test in &step.tests {
-            if !test.matches(node, work)? {
+            if !test.matches(node, work, boundary)? {
                 return Ok(false);
             }
         }
         if index == 0 {
             return Ok(true);
         }
+        if boundary == Some(node.id()) {
+            return Ok(false);
+        }
         match step.relation.as_ref() {
             Some(CombinatorKind::Child) => match node.parent_element() {
-                Some(parent) => self.matches(parent, index, work),
+                Some(parent) => self.matches(parent, index, work, boundary),
                 None => Ok(false),
             },
             Some(CombinatorKind::NextSibling) => match node.prev_sibling_element() {
-                Some(sibling) => self.matches(sibling, index, work),
+                Some(sibling) => self.matches(sibling, index, work, boundary),
                 None => Ok(false),
             },
             Some(CombinatorKind::Descendant) => {
                 for parent in node.ancestors().skip(1).filter(Node::is_element) {
-                    if self.matches(parent, index, work)? {
+                    if self.matches(parent, index, work, boundary)? {
                         return Ok(true);
+                    }
+                    if boundary == Some(parent.id()) {
+                        break;
                     }
                 }
                 Ok(false)
@@ -1293,7 +1387,7 @@ impl Selector {
             Some(CombinatorKind::LaterSibling) => {
                 let mut sibling = node.prev_sibling_element();
                 while let Some(previous) = sibling {
-                    if self.matches(previous, index, work)? {
+                    if self.matches(previous, index, work, boundary)? {
                         return Ok(true);
                     }
                     sibling = previous.prev_sibling_element();
@@ -1315,7 +1409,13 @@ impl Test {
         }
     }
 
-    fn matches(&self, node: Node<'_, '_>, work: &mut usize) -> Result<bool, EngineError> {
+    fn matches(
+        &self,
+        node: Node<'_, '_>,
+        work: &mut usize,
+        boundary: Option<NodeId>,
+    ) -> Result<bool, EngineError> {
+        let shadow_root = boundary == Some(node.id());
         let yes = match self {
             Self::Tag(tag) => node.tag_name().name() == tag,
             Self::Id(id) => super::element_ids(node).any(|value| value == id),
@@ -1357,11 +1457,13 @@ impl Test {
                     Substring => !expected.is_empty() && actual.contains(expected),
                 }
             }),
-            Self::Root => node.parent_element().is_none(),
-            Self::First => node.prev_sibling_element().is_none(),
-            Self::Last => node.next_sibling_element().is_none(),
+            Self::Root => boundary.is_none() && node.parent_element().is_none(),
+            Self::First => shadow_root || node.prev_sibling_element().is_none(),
+            Self::Last => shadow_root || node.next_sibling_element().is_none(),
             Self::Only => {
-                node.prev_sibling_element().is_none() && node.next_sibling_element().is_none()
+                shadow_root
+                    || (node.prev_sibling_element().is_none()
+                        && node.next_sibling_element().is_none())
             }
             Self::Empty => !node.children().any(|child| {
                 child.is_element()
@@ -1370,7 +1472,7 @@ impl Test {
             Self::Link => node.tag_name().name() == "a" && node.attribute("href").is_some(),
             Self::Choice { selectors, negated } => {
                 for selector in selectors {
-                    if selector.matches(node, selector.steps.len(), work)? {
+                    if selector.matches(node, selector.steps.len(), work, boundary)? {
                         return Ok(!negated);
                     }
                 }

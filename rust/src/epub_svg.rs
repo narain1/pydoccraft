@@ -472,12 +472,17 @@ fn parse(
     let has_text = root
         .descendants()
         .any(|node| node.has_tag_name((NS, "text")));
-    let (styled, mut families) = apply_styles(root, source, &mut cascade, links, !has_uses)?;
-    let (styled, aliases) = if has_uses && has_text && families.tracks_variations() {
-        use_fonts::specialize(styled, &mut families)?
-    } else {
-        (styled, use_fonts::Aliases::new())
-    };
+    let (styled, mut families, instance_styles) =
+        apply_styles(root, source, &mut cascade, links, has_uses)?;
+    let has_instance_variables = has_uses && cascade.has_instance_variables(svg_property);
+    let (styled, aliases) =
+        if has_uses && (has_instance_variables || (has_text && families.tracks_variations())) {
+            let variables =
+                has_instance_variables.then(|| (instance_styles, cascade.take_variable_scope()));
+            use_fonts::specialize(styled, root, &mut families, &mut cascade, variables)?
+        } else {
+            (styled, use_fonts::Aliases::new())
+        };
     let fonts = if has_text {
         Some(svg_fonts::Resolver::install(
             &mut options,
@@ -545,14 +550,15 @@ fn apply_styles(
     source: &[u8],
     cascade: &mut Cascade,
     links: Option<&links::Links<'_>>,
-    direct_variations: bool,
-) -> Result<(Vec<u8>, svg_fonts::Families), EngineError> {
+    has_uses: bool,
+) -> Result<(Vec<u8>, svg_fonts::Families, Vec<super::css::InstanceStyle>), EngineError> {
     let mut output = Vec::with_capacity(source.len());
     let mut cursor = 0;
     let mut families = svg_fonts::Families::new(&cascade.fonts);
     let mut typography = HashMap::<roxmltree::NodeId, svg_fonts::CssFont>::new();
     let mut added_bytes = 0;
     let mut effects = None;
+    let mut instance_styles = Vec::new();
     // Process byte ranges in document order. Source XML remains available for extraction.
     for node in root.descendants().filter(Node::is_element) {
         if node.range().start < cursor {
@@ -564,7 +570,11 @@ fn apply_styles(
             cursor = range.end;
             continue;
         }
-        let mut props: Vec<_> = cascade.properties(node)?.into_iter().collect();
+        let (properties, instance) = cascade.properties_for_instance(node)?;
+        if has_uses {
+            instance_styles.push(instance);
+        }
+        let mut props: Vec<_> = properties.into_iter().collect();
         props.retain(|(key, _)| svg_property(key));
         props.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let family = props
@@ -577,7 +587,7 @@ fn apply_styles(
             .map(|value| families.encode(value))
             .transpose()?
             .flatten();
-        if direct_variations && families.tracks_variations() {
+        if !has_uses && families.tracks_variations() {
             let mut text = node
                 .parent_element()
                 .and_then(|parent| typography.get(&parent.id()))
@@ -624,35 +634,13 @@ fn apply_styles(
             }
         }
         props.retain(|(key, _)| key != "font-family");
-        for (key, mut value) in props {
-            if key == "font-optical-sizing" {
-                value = match super::css::optical_sizing(&value) {
-                    Some(true) => "auto",
-                    Some(false) => "none",
-                    None => continue,
-                }
-                .into();
-            } else if key == "font-variation-settings" {
-                match value.to_ascii_lowercase().as_str() {
-                    "inherit" | "unset" | "revert" | "revert-layer" => continue,
-                    "initial" => value = "normal".into(),
-                    _ => {}
-                }
+        for (key, value) in props {
+            if let Some(value) = canonical_style_value(root, node, &key, value, &mut effects)? {
+                style.push_str(&key);
+                style.push(':');
+                style.push_str(&value);
+                style.push(';');
             }
-            if key == "filter" {
-                value = effects
-                    .get_or_insert_with(|| effects::Effects::new(root))
-                    .validate_filter(node, &value)?
-                    .map_or_else(|| "none".into(), |id| format!("url(#{id})"));
-            } else if matches!(key.as_str(), "flood-color" | "flood-opacity") {
-                value = effects::flood_paint(&key, &value)?;
-            } else {
-                validate_paint(&value)?;
-            }
-            style.push_str(&key);
-            style.push(':');
-            style.push_str(&value);
-            style.push(';');
         }
         let id = links.and_then(|links| links.generated_ids.get(&node.id()));
         let range = if let Some(attribute) = node.attribute_node("style") {
@@ -677,7 +665,41 @@ fn apply_styles(
         cursor = range.end;
     }
     output.extend_from_slice(&source[cursor..]);
-    Ok((output, families))
+    Ok((output, families, instance_styles))
+}
+
+fn canonical_style_value<'a, 'input>(
+    root: Node<'a, 'input>,
+    node: Node<'_, '_>,
+    key: &str,
+    mut value: String,
+    effects: &mut Option<effects::Effects<'a, 'input>>,
+) -> Result<Option<String>, EngineError> {
+    if key == "font-optical-sizing" {
+        value = match super::css::optical_sizing(&value) {
+            Some(true) => "auto",
+            Some(false) => "none",
+            None => return Ok(None),
+        }
+        .into();
+    } else if key == "font-variation-settings" {
+        match value.to_ascii_lowercase().as_str() {
+            "inherit" | "unset" | "revert" | "revert-layer" => return Ok(None),
+            "initial" => value = "normal".into(),
+            _ => {}
+        }
+    }
+    if key == "filter" {
+        value = effects
+            .get_or_insert_with(|| effects::Effects::new(root))
+            .validate_filter(node, &value)?
+            .map_or_else(|| "none".into(), |id| format!("url(#{id})"));
+    } else if matches!(key, "flood-color" | "flood-opacity") {
+        value = effects::flood_paint(key, &value)?;
+    } else {
+        validate_paint(&value)?;
+    }
+    Ok(Some(value))
 }
 
 fn style_insertion(

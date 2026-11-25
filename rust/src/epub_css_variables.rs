@@ -193,23 +193,42 @@ fn variable(source: &str, reference: &Function<'_>) -> (Option<String>, Option<T
 
 type Values = HashMap<String, Option<Arc<str>>>;
 
+struct Layer {
+    end: usize,
+    serial: usize,
+    values: Values,
+}
+
 #[derive(Default)]
-pub(super) struct Scope {
-    layers: Vec<(usize, Values)>,
+pub(in crate::epub) struct Scope {
+    layers: Vec<Layer>,
     work: usize,
+    serial: usize,
 }
 
 impl Scope {
-    pub(super) fn enter(
+    pub(in crate::epub) fn mark(&self) -> usize {
+        self.layers.len()
+    }
+
+    pub(in crate::epub) fn key(&self) -> usize {
+        self.layers.last().map_or(0, |layer| layer.serial)
+    }
+
+    pub(in crate::epub) fn restore(&mut self, mark: usize) {
+        self.layers.truncate(mark);
+    }
+
+    pub(super) fn enter_at(
         &mut self,
         node: Node<'_, '_>,
         declarations: &HashMap<String, CssValue>,
+        base: usize,
     ) -> Result<(), EngineError> {
         let span = node.range();
-        while self
-            .layers
+        while self.layers[base..]
             .last()
-            .is_some_and(|(end, _)| *end <= span.start)
+            .is_some_and(|layer| layer.end <= span.start)
         {
             self.layers.pop();
         }
@@ -238,7 +257,12 @@ impl Scope {
         for name in declarations.keys() {
             resolver.compute(name, 0)?;
         }
-        self.layers.push((span.end, resolver.results));
+        self.serial += 1;
+        self.layers.push(Layer {
+            end: span.end,
+            serial: self.serial,
+            values: resolver.results,
+        });
         Ok(())
     }
 
@@ -250,11 +274,11 @@ impl Scope {
     }
 }
 
-fn lookup<'a>(layers: &'a [(usize, Values)], name: &str) -> Option<&'a str> {
+fn lookup<'a>(layers: &'a [Layer], name: &str) -> Option<&'a str> {
     layers
         .iter()
         .rev()
-        .find_map(|(_, values)| values.get(name))
+        .find_map(|layer| layer.values.get(name))
         .and_then(Option::as_deref)
 }
 
@@ -296,7 +320,7 @@ fn reaches(
 
 struct Resolver<'a> {
     declarations: &'a HashMap<String, CssValue>,
-    inherited: &'a [(usize, Values)],
+    inherited: &'a [Layer],
     results: Values,
     cyclic: HashSet<String>,
     work: &'a mut usize,
