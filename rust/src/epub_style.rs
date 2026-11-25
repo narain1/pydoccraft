@@ -25,6 +25,8 @@ pub(super) struct IntrinsicBounds {
     pub inline: SizeBounds,
     pub block: SizeBounds,
     pub contain: Size<bool>,
+    pub subgrid: Size<bool>,
+    pub subgrid_local_gap: Size<bool>,
     pub content_box_ratio: bool,
 }
 
@@ -39,6 +41,14 @@ impl IntrinsicBounds {
             max: None,
         },
         contain: Size {
+            width: false,
+            height: false,
+        },
+        subgrid: Size {
+            width: false,
+            height: false,
+        },
+        subgrid_local_gap: Size {
             width: false,
             height: false,
         },
@@ -311,6 +321,7 @@ impl ChapterStyles {
                             css::grid::Template {
                                 tracks: tracks.clone(),
                                 names: names.clone(),
+                                subgrid: p.intrinsic_bounds.subgrid.get_abs(axis),
                             }
                         })
                         .unwrap_or_default());
@@ -369,6 +380,18 @@ impl ChapterStyles {
                     max: intrinsic_bound("max-height"),
                 },
                 contain,
+                subgrid: Size {
+                    width: columns.subgrid,
+                    height: rows.subgrid,
+                },
+                subgrid_local_gap: Size {
+                    width: values
+                        .get("column-gap")
+                        .is_some_and(|source| !source.eq_ignore_ascii_case("normal")),
+                    height: values
+                        .get("row-gap")
+                        .is_some_and(|source| !source.eq_ignore_ascii_case("normal")),
+                },
                 content_box_ratio: prefers_natural_ratio,
             };
             let box_style = Style {

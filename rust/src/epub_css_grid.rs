@@ -76,6 +76,7 @@ enum Issue {
 pub(in crate::epub) struct Template<T> {
     pub tracks: Vec<T>,
     pub names: Vec<Vec<String>>,
+    pub subgrid: bool,
 }
 
 impl<T> Default for Template<T> {
@@ -83,6 +84,7 @@ impl<T> Default for Template<T> {
         Self {
             tracks: Vec::new(),
             names: Vec::new(),
+            subgrid: false,
         }
     }
 }
@@ -92,6 +94,7 @@ impl<T> Template<T> {
         Self {
             tracks: Vec::new(),
             names: vec![Vec::new()],
+            subgrid: false,
         }
     }
 }
@@ -164,6 +167,35 @@ fn parse<'a>(
 ) -> Result<Template<TrackPart<'a>>, Issue> {
     if value.eq_ignore_ascii_case("none") {
         return Ok(Template::default());
+    }
+    if let [first, lines @ ..] = components {
+        if keyword(first, "subgrid") {
+            if lines.len() > MAX_TRACKS + 1 {
+                return Err(Issue::Limit);
+            }
+            let mut template = Template {
+                subgrid: true,
+                ..Template::default()
+            };
+            let mut total = 0;
+            for line in lines {
+                let ComponentValue::BracketBlock(block) = line else {
+                    return Err(Issue::Unsupported);
+                };
+                total += block.value.len();
+                if total > MAX_LINE_NAMES {
+                    return Err(Issue::Limit);
+                }
+                template.names.push(
+                    block
+                        .value
+                        .iter()
+                        .map(|name| line_name(name).map(str::to_owned))
+                        .collect::<Result<_, _>>()?,
+                );
+            }
+            return Ok(template);
+        }
     }
     let mut template = Template::with_first_line();
     let offset = components.first().ok_or(Issue::Invalid)?.span().start;
@@ -732,7 +764,11 @@ pub(in crate::epub) fn resolve(
     let syntax = Parser::new(&declaration, Syntax::Css)
         .parse::<Declaration>()
         .map_err(|_| invalid("invalid EPUB grid track expression"))?;
-    let Template { tracks, names } = parse(source, &syntax.value).map_err(|issue| match issue {
+    let Template {
+        tracks,
+        names,
+        subgrid,
+    } = parse(source, &syntax.value).map_err(|issue| match issue {
         Issue::Invalid => invalid("invalid EPUB grid track expression"),
         Issue::Unsupported => unsupported("unsupported EPUB grid track expression"),
         Issue::Limit => limited("EPUB grid track expression exceeds its limit"),
@@ -791,5 +827,9 @@ pub(in crate::epub) fn resolve(
             }
         })
         .collect::<Result<_, EngineError>>()?;
-    Ok(Template { tracks, names })
+    Ok(Template {
+        tracks,
+        names,
+        subgrid,
+    })
 }

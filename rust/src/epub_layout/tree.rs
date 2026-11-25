@@ -25,6 +25,8 @@ use crate::EngineError;
 
 #[path = "grid_budget.rs"]
 mod grid_budget;
+#[path = "subgrid.rs"]
+mod subgrid;
 
 #[derive(Default)]
 pub(super) struct Tree {
@@ -61,6 +63,8 @@ impl Tree {
             || bounds.has_block()
             || bounds.contain.width
             || bounds.contain.height
+            || bounds.subgrid.width
+            || bounds.subgrid.height
             || children
                 .iter()
                 .any(|id| self.nodes[usize::from(*id)].needs_intrinsic_geometry);
@@ -114,13 +118,7 @@ impl Tree {
             fit_probes: 0,
             grid_limit: false,
         };
-        if view.nodes.iter().any(|node| {
-            let bounds = node.bounds;
-            bounds.has_inline()
-                || bounds.has_block()
-                || bounds.contain.width
-                || bounds.contain.height
-        }) {
+        if view.nodes.iter().any(|node| node.needs_intrinsic_geometry) {
             view.geometry
                 .resize(view.nodes.len(), BoxGeometry::default());
             view.grid_areas.resize(view.nodes.len(), None);
@@ -157,6 +155,7 @@ impl Tree {
             ));
         }
         view.verify_grid_areas()?;
+        view.verify_subgrids()?;
         Ok(())
     }
 }
@@ -179,6 +178,7 @@ struct BoxGeometry {
 
 #[derive(Clone, Copy)]
 struct GridArea {
+    item_slot: usize,
     size: Size<f32>,
     block_probe_width: Option<f32>,
 }
@@ -314,11 +314,136 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             if self.grid_limit || self.fit_probes > MAX_FIT_PROBES {
                 break;
             }
+            self.materialize_subgrid(index)?;
             self.resolve_contain(index)?;
             if !self.nodes[index].children.is_empty() {
                 self.geometry[index] = self.box_geometry(index);
                 if self.nodes[index].style.display == Display::Grid {
                     self.measure_grid_areas(index)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn materialize_subgrid(&mut self, index: usize) -> Result<(), EngineError> {
+        use AbsoluteAxis::{Horizontal, Vertical};
+
+        let node = &self.nodes[index];
+        let axes = node.bounds.subgrid;
+        if node.style.display != Display::Grid || !(axes.width || axes.height) {
+            return Ok(());
+        }
+        let parent = node
+            .parent
+            .map(usize::from)
+            .ok_or_else(subgrid::unresolved)?;
+        let parent = &self.nodes[parent];
+        let area = self.grid_area(index).ok_or_else(subgrid::unresolved)?;
+        let DetailedLayoutInfo::Grid(details) = &parent.details else {
+            return Err(subgrid::unresolved());
+        };
+        let item = details
+            .items
+            .get(area.item_slot)
+            .ok_or_else(subgrid::unresolved)?;
+        let style = &node.style;
+        if style.aspect_ratio.is_some()
+            || style.scrollbar_width != 0.0
+            || (axes.width && style.direction != parent.style.direction)
+        {
+            return Err(subgrid::unresolved());
+        }
+        let calculate = |handle, basis| self.calculations.at(handle, basis);
+        let inline = Some(area.size.width);
+        let padding = style.padding.resolve_or_zero(inline, calculate).sum_axes();
+        let border = style.border.resolve_or_zero(inline, calculate).sum_axes();
+        let margin = style
+            .margin
+            .map(|edge| edge.maybe_resolve(inline, calculate));
+        let mut layout = [None, None];
+        for (axis, output) in [Horizontal, Vertical].into_iter().zip(&mut layout) {
+            if !axes.get_abs(axis) {
+                continue;
+            }
+            let (alignment, margins, tracks, span, aliases, reversed) = match axis {
+                Horizontal => (
+                    style.justify_self.unwrap_or(parent.style.justify_items),
+                    [margin.left, margin.right],
+                    &details.columns,
+                    usize::from(item.column_start - 1)..usize::from(item.column_end - 1),
+                    &style.grid_template_column_names,
+                    style.direction.is_rtl(),
+                ),
+                Vertical => (
+                    style.align_self.unwrap_or(parent.style.align_items),
+                    [margin.top, margin.bottom],
+                    &details.rows,
+                    usize::from(item.row_start - 1)..usize::from(item.row_end - 1),
+                    &style.grid_template_row_names,
+                    false,
+                ),
+            };
+            let minimum = style.min_size.get_abs(axis);
+            let extent = Some(area.size.get_abs(axis));
+            if !matches!(
+                alignment.keyword,
+                AlignItemsKeyword::Normal | AlignItemsKeyword::Stretch
+            ) || margins != [Some(0.0); 2]
+                || padding.get_abs(axis) != 0.0
+                || border.get_abs(axis) != 0.0
+                || !style.size.get_abs(axis).is_auto()
+                || !style.max_size.get_abs(axis).is_auto()
+                || !(minimum.is_auto() || minimum.maybe_resolve(extent, calculate) == Some(0.0))
+                || match axis {
+                    Horizontal => node.bounds.has_inline(),
+                    Vertical => node.bounds.has_block(),
+                }
+            {
+                return Err(subgrid::unresolved());
+            }
+            let gap = node
+                .bounds
+                .subgrid_local_gap
+                .get_abs(axis)
+                .then(|| style.gap.get_abs(axis).resolve_or_zero(extent, calculate));
+            *output = Some(subgrid::inherit_axis(tracks, span, aliases, gap, reversed)?);
+        }
+        let style = &mut self.nodes[index].style;
+        let [horizontal, vertical] = layout;
+        if let Some(inherited) = horizontal {
+            style.grid_template_columns = inherited.tracks;
+            style.grid_template_column_names = inherited.names;
+            style.gap.width = inherited.gap;
+        }
+        if let Some(inherited) = vertical {
+            style.grid_template_rows = inherited.tracks;
+            style.grid_template_row_names = inherited.names;
+            style.gap.height = inherited.gap;
+        }
+        Ok(())
+    }
+
+    fn verify_subgrids(&self) -> Result<(), EngineError> {
+        for (index, node) in self.nodes.iter().enumerate() {
+            let axes = node.bounds.subgrid;
+            if node.style.display != Display::Grid || !(axes.width || axes.height) {
+                continue;
+            }
+            let area = self.grid_area(index).ok_or_else(subgrid::unresolved)?;
+            let different = node.layout.size.zip_map(area.size, |actual, expected| {
+                !actual.is_finite() || (actual - expected).abs() > 0.001
+            });
+            if (axes.width && different.width) || (axes.height && different.height) {
+                return Err(subgrid::unresolved());
+            }
+            if let DetailedLayoutInfo::Grid(details) = &node.details {
+                if (axes.width && subgrid::implicit(&details.columns))
+                    || (axes.height && subgrid::implicit(&details.rows))
+                {
+                    return Err(unsupported(
+                        "EPUB CSS implicit tracks on an inherited subgrid axis",
+                    ));
                 }
             }
         }
@@ -523,7 +648,9 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 geometry.outer.width = Some(outer);
             }
         }
-        let adjustable_block = !style.position.is_out_of_flow()
+        let grid_area = self.grid_area(index);
+        let adjustable_block = grid_area.is_none()
+            && !style.position.is_out_of_flow()
             && node.parent.is_some_and(|parent| {
                 matches!(
                     self.nodes[usize::from(parent)].style.display,
@@ -536,7 +663,9 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 AbsoluteAxis::Vertical,
                 basis.height,
                 basis.width,
-                None,
+                grid_area
+                    .filter(|_| node.bounds.subgrid.height)
+                    .map(|area| area.size.height),
                 calculate,
             ) {
                 geometry.content.height = Some(content);
@@ -672,6 +801,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         for (slot, child) in children.into_iter().enumerate() {
             let size = grid_area_size(details, slot).ok_or_else(unproven_grid)?;
             self.grid_areas[child] = Some(GridArea {
+                item_slot: slot,
                 size,
                 block_probe_width: None,
             });

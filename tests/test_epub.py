@@ -3132,6 +3132,66 @@ class EpubTests(unittest.TestCase):
                                             "containing|definite|contain-fit"):
                     render(qualified + independent)
 
+    def test_css_subgrid_inherits_used_tracks_names_and_gap_geometry(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 331, 195)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Inherited grid tracks</title>
+          <meta name="viewport" content="width=331,height=195"/><style>
+          html,body,p{margin:0;font-size:11px}
+          #parent{position:absolute;top:13px;left:13px;width:300px;height:156px;display:grid;
+            grid-template-columns:[outer] 60px [left] 80px [middle] minmax(0,1fr) [end];
+            grid-template-rows:[first] 40px [second] 106px [bottom];gap:10px;background:#efe0ca}
+          #sub{grid-column:left/end;grid-row:first/bottom;display:grid;background:#dad4ee}
+          #one{grid-column:left/middle;grid-row:first/second;background:#a9c38c}
+          #two{grid-column:inner/end;grid-row:first/second;background:#83babd}
+          #nested{grid-column:inner/end;grid-row:second/bottom;display:grid;
+            grid-template-rows:36px;background:#d9ab86}
+          #last{grid-column:middle/end;grid-row:1;background:#c6a1ce}
+          CSS</style></head><body><div id="parent"><div id="sub">
+          <p id="one"><a href="https://example.org/subgrid">Inherited label</a></p>
+          <p id="two">Named alias</p><section id="nested"><p id="last">Nested grid</p></section>
+          </div></div></body></html>"""
+
+        def render(css: str) -> tuple[tuple[int, bytes], object, object]:
+            epub = rewrite_epub(fixture, {"OEBPS/s0.xhtml": source.replace("CSS", css)})
+            with doc_ex.open(epub) as book:
+                image = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                pdf_bytes = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(pdf_bytes) as pdf:
+                page = pdf[0]
+                self.assertTrue(image == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                found = [page.search_for(word) for word in ("Inherited", "alias", "Nested")]
+                self.assertTrue(all(found))
+                self.assertEqual([link.uri for link in page.get_links()], ["https://example.org/subgrid"])
+                return image, found, [link.bbox for link in page.get_links()]
+
+        inherited = (
+            "#sub{grid-template-columns:subgrid [] [inner];grid-template-rows:subgrid}"
+            "#nested{grid-template-columns:subgrid}"
+        )
+        for direction in ("", "#parent{direction:rtl}"):
+            for change, columns, rows, gap, nested in (
+                ("", "80px [middle inner] 140px", "40px [second] 106px", "10px", 140),
+                ("#sub{column-gap:4px;row-gap:16px}",
+                 "83px [middle inner] 143px", "37px [second] 103px", "16px 4px", 143),
+            ):
+                with self.subTest(direction=direction, change=change):
+                    explicit = direction + (
+                        f"#sub{{grid-template-columns:[left] {columns} [end];"
+                        f"grid-template-rows:[first] {rows} [bottom];gap:{gap}}}"
+                        f"#nested{{grid-template-columns:[middle] {nested}px [end]}}"
+                    )
+                    self.assertTrue(render(direction + inherited + change) == render(explicit))
+
+        for invalid in (
+            "#parent{grid-template-columns:[outer] 60px [left] 80px [middle] 1fr [end]}",
+            "#sub{padding-left:1px}",
+            "#one{grid-column:4}",
+            "#parent{display:block}",
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "subgrid"):
+                    render(inherited + invalid)
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}

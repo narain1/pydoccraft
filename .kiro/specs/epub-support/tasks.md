@@ -95,7 +95,8 @@
 - [x] Resolve functional minima and maxima on ordinary blocks when the fit-content limit and the natural block probe both have independently resolvable geometry.
 - [x] Measure intrinsic block bounds after native flex growth and shrinkage for a single independently sized row with definite main-axis inputs.
 - [x] Resolve intrinsic inline and block bounds and contain-fit against independently sized native grid areas, including named spans and nested inline geometry.
-- [ ] Extend the EPUB CSS profile with block and relative inline bounds in other content-dependent, flex and grid containing geometry, functional block bounds with an indefinite containing height, remaining contain-fit sizing contexts, other nonlinear ratio operands and typed math, and subgrids.
+- [x] Render subgrids over independently sized parent tracks with inherited line names, local aliases, definite gutter overrides and nested inheritance.
+- [ ] Extend the EPUB CSS profile with block and relative inline bounds in other content-dependent, flex and grid containing geometry, functional block bounds with an indefinite containing height, remaining contain-fit sizing contexts, other nonlinear ratio operands and typed math, and content-dependent subgrid geometry and implicit-placement clamping.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [x] Render bounded native diffuse and specular distant lighting. Verify single-source PDF text and links when an original-alpha mask controls the lit result.
 - [x] Render bounded point lighting on flat surfaces under uniform device scaling and raised surfaces at unit scale. Preserve proven original-alpha PDF attribution.
