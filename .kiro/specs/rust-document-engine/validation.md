@@ -3064,3 +3064,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 913 installed tests, including 3
 ## 2026-11-25 EPUB authored chapter navigation and fixed-layout SVG spacing
 
 The Linux x86-64 CPython 3.11 host wheel passed 914 installed tests, including 319 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-authored-chapter-navigation-and-fixed-layout-svg-spacing)
+
+## 2026-11-25 EPUB nested intrinsic sizing, MathML padding, exact SMIL clocks and distant SVG lighting
+
+The Linux x86-64 CPython 3.11 host wheel passed 918 installed tests, including 323 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-nested-intrinsic-sizing-mathml-padding-exact-smil-clocks-and-distant-svg-lighting)
