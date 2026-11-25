@@ -1,5 +1,5 @@
 //! Materialize independently sized inherited grid tracks for the native solver.
-use std::ops::Range;
+use std::{collections::BTreeMap, ops::Range};
 
 use taffy::{
     geometry::Line,
@@ -25,6 +25,16 @@ pub(super) struct Axis {
     pub(super) gap: LengthPercentage,
 }
 
+pub(super) struct AreaOrigins {
+    pub(super) areas: Vec<GridTemplateArea<String>>,
+    pub(super) authored_names: [Option<Vec<Vec<String>>>; 2],
+}
+
+pub(super) struct AreaTemplates {
+    pub(super) native: GridTemplateAreas<String>,
+    pub(super) origins: Option<Box<AreaOrigins>>,
+}
+
 pub(super) fn unresolved() -> EngineError {
     unsupported(
         "EPUB CSS subgrid requires independently sized inherited grid tracks and a stretched box",
@@ -36,13 +46,18 @@ pub(super) fn implicit(tracks: &DetailedGridTracksInfo<String>) -> bool {
 }
 
 pub(super) fn inherit_areas(
-    source: &GridTemplateAreas<String>,
+    source: &[GridTemplateArea<String>],
+    local: Option<&GridTemplateAreas<String>>,
     details: &DetailedGridInfo,
     item: &DetailedGridItemsInfo,
-    axes: &[Option<Axis>; 2],
+    axes: &mut [Option<Axis>; 2],
     reverse_columns: bool,
-) -> Result<Option<GridTemplateAreas<String>>, EngineError> {
-    let [columns, rows] = axes;
+) -> Result<Option<AreaTemplates>, EngineError> {
+    let [columns, rows] = &*axes;
+    let count =
+        |axis: &Option<Axis>, local| axis.as_ref().map_or(local, |axis| axis.tracks.len() as u16);
+    let column_count = count(columns, local.map_or(0, |template| template.column_count));
+    let row_count = count(rows, local.map_or(0, |template| template.row_count));
     let project =
         |inherited: bool, area: Range<u16>, span: Range<u16>, leading: u16, reverse: bool| {
             if !inherited || area.start == 0 {
@@ -67,14 +82,8 @@ pub(super) fn inherit_areas(
                 }
             })
         };
-    let [mut column_names, mut row_names] = axes.each_ref().map(|axis| {
-        axis.iter()
-            .flat_map(|axis| &axis.names)
-            .map(Vec::len)
-            .sum::<usize>()
-    });
     let mut areas = Vec::new();
-    for area in &source.areas {
+    for area in source {
         let Some((column_start, column_end)) = project(
             columns.is_some(),
             area.column_start..area.column_end,
@@ -96,11 +105,6 @@ pub(super) fn inherit_areas(
         if column_start == 0 && row_start == 0 {
             continue;
         }
-        column_names += usize::from(column_start != 0) * 2;
-        row_names += usize::from(row_start != 0) * 2;
-        if column_names.max(row_names) > MAX_LINE_NAMES {
-            return Err(limited("EPUB CSS inherited grid line name limit"));
-        }
         areas.push(GridTemplateArea {
             name: area.name.clone(),
             row_start,
@@ -109,14 +113,109 @@ pub(super) fn inherit_areas(
             column_end,
         });
     }
-    // Keep generated names in native area metadata so that they can be
-    // clipped again without moving any authored names on nested subgrids.
-    let count = |axis: &Option<Axis>| axis.as_ref().map_or(0, |axis| axis.tracks.len() as u16);
-    Ok((!areas.is_empty()).then_some(GridTemplateAreas {
-        areas,
-        row_count: count(rows),
-        column_count: count(columns),
+    let has_inherited = !areas.is_empty();
+    if let Some(local) = local {
+        for area in &local.areas {
+            let column_end = area.column_end.min(column_count + 1);
+            let row_end = area.row_end.min(row_count + 1);
+            if area.column_start < column_end && area.row_start < row_end {
+                areas.push(GridTemplateArea {
+                    column_end,
+                    row_end,
+                    ..area.clone()
+                });
+            }
+        }
+    } else if !has_inherited {
+        return Ok(None);
+    }
+    if has_inherited {
+        for (axis, count) in axes.iter().zip([
+            areas.iter().filter(|area| area.column_start != 0).count(),
+            areas.iter().filter(|area| area.row_start != 0).count(),
+        ]) {
+            if let Some(axis) = axis {
+                let authored = axis.names.iter().map(Vec::len).sum::<usize>();
+                if authored + count * 2 > MAX_LINE_NAMES {
+                    return Err(limited("EPUB CSS inherited grid line name limit"));
+                }
+            }
+        }
+    }
+    let (areas, origins) = merge_area_names(areas, axes);
+    Ok(Some(AreaTemplates {
+        native: GridTemplateAreas {
+            areas,
+            row_count,
+            column_count,
+        },
+        origins,
     }))
+}
+
+fn merge_area_names(
+    areas: Vec<GridTemplateArea<String>>,
+    axes: &mut [Option<Axis>; 2],
+) -> (Vec<GridTemplateArea<String>>, Option<Box<AreaOrigins>>) {
+    let earliest = |old, next| match (old, next) {
+        (0, _) => next,
+        (_, 0) => old,
+        (old, next) => u16::min(old, next),
+    };
+    let mut resolved = BTreeMap::<&str, GridTemplateArea<String>>::new();
+    for area in &areas {
+        resolved
+            .entry(&area.name)
+            .and_modify(|first| {
+                first.column_start = earliest(first.column_start, area.column_start);
+                first.column_end = earliest(first.column_end, area.column_end);
+                first.row_start = earliest(first.row_start, area.row_start);
+                first.row_end = earliest(first.row_end, area.row_end);
+            })
+            .or_insert_with(|| area.clone());
+    }
+    if resolved.len() == areas.len() {
+        return (areas, None);
+    }
+
+    // Taffy stores a single rectangle per area name. Its earliest edges
+    // resolve bare names. Later edges remain available as numbered lines.
+    let authored_names = axes
+        .each_ref()
+        .map(|axis| axis.as_ref().map(|axis| axis.names.clone()));
+    for area in &areas {
+        let first = &resolved[area.name.as_str()];
+        let edges = [
+            [
+                (area.column_start, first.column_start),
+                (area.column_end, first.column_end),
+            ],
+            [
+                (area.row_start, first.row_start),
+                (area.row_end, first.row_end),
+            ],
+        ];
+        for (axis, edges) in axes.iter_mut().zip(edges) {
+            let Some(axis) = axis else { continue };
+            for (suffix, (position, first)) in ["start", "end"].into_iter().zip(edges) {
+                if position > first {
+                    let names = &mut axis.names[usize::from(position - 1)];
+                    let name = format!("{}-{suffix}", area.name);
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+            }
+        }
+    }
+    let native = resolved.into_values().collect();
+    (
+        native,
+        Some(Box::new(AreaOrigins {
+            areas,
+            authored_names,
+        })),
+    )
 }
 
 pub(super) fn clamp_numeric_placement(placement: &mut Line<GridPlacement<String>>, tracks: usize) {
@@ -162,6 +261,7 @@ pub(super) struct Projection {
 pub(super) fn inherit_axis(
     source: &DetailedGridTracksInfo<String>,
     aliases: &[Vec<String>],
+    authored_names: Option<&[Vec<String>]>,
     projection: Projection,
 ) -> Result<Axis, EngineError> {
     let Projection {
@@ -256,7 +356,18 @@ pub(super) fn inherit_axis(
             } else {
                 span.start + index
             };
-            let mut line = source.names_for_line(line_index).to_vec();
+            // Additional generated aliases used by native placement must
+            // be clipped again from the original rectangles, not inherited
+            // as authored names on their previous physical lines.
+            let mut line = if let Some(names) = authored_names {
+                line_index
+                    .checked_sub(usize::from(source.negative_implicit_tracks))
+                    .and_then(|index| names.get(index))
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                source.names_for_line(line_index).to_vec()
+            };
             for alias in aliases.get(alias_index(index)).into_iter().flatten() {
                 if !line.contains(alias) {
                     line.push(alias.clone());

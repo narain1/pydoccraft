@@ -3613,6 +3613,79 @@ class EpubTests(unittest.TestCase):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "implicit tracks on an inherited subgrid axis"):
                     document.render_page(0, dpi=96)
 
+    def test_css_subgrid_merges_local_and_inherited_named_areas(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 275, 147)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Merged grid areas</title>
+          <meta name="viewport" content="width=275,height=147"/><style>
+          html,body,p{margin:0;font-size:9px}
+          #outer{position:absolute;left:10px;top:10px;width:250px;height:120px;display:grid;
+            grid-template-columns:30px 40px 50px 60px 70px;grid-template-rows:20px 22px 24px 26px 28px;
+            grid-template-areas:"panel panel panel . ." "panel panel panel . ."
+              ". . separate separate ." ". . . . ." ". . . . ."}
+          #sub{grid-column:2/6;grid-row:2/6;display:grid;direction:DIR}
+          #nested{grid-column:2/5;grid-row:1/5;display:grid;direction:REVERSE}
+          #one{background:#9fc286}#later{background:#7bb3b5}
+          #other{background:#d19874;width:22px;height:16px;justify-self:end;align-self:end}
+          #area{background:#e0cf93}#alias{background:#af9cc7}
+          RULES</style></head><body><div id="outer"><div id="sub">
+          PANEL<p id="other">Rest</p><p id="area">Local</p><p id="alias">Alias</p>
+          </div></div></body></html>"""
+        panel = ('<p id="one"><a href="https://example.org/merged">Core</a></p>'
+                 '<p id="later">Later</p>')
+
+        def preview(direction: str, nesting: bool, rules: str) -> tuple[tuple[int, bytes], list[object], object]:
+            chapter = (source.replace("DIR", direction).replace("REVERSE", "rtl" if direction == "ltr" else "ltr")
+                       .replace("PANEL", f'<div id="nested">{panel}</div>' if nesting else panel)
+                       .replace("RULES", rules))
+            data = rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter})
+            with doc_ex.open(data) as document:
+                image = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+                output = document.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(output) as pdf:
+                self.assertTrue(image == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                words = [pdf[0].search_for(word) for word in ("Core", "Later", "Rest", "Local", "Alias")]
+                self.assertTrue(all(words))
+                link, = pdf[0].get_links()
+                self.assertEqual(link.uri, "https://example.org/merged")
+                return image, words, link.bbox
+
+        local = 'grid-template-areas:". . . ." ". panel panel ." ". panel panel ." "local . . ."'
+        extended = ('grid-template-areas:". . . . ." ". panel panel . ."'
+                    ' ". panel panel . ." "local . . edge edge"')
+        names = ("#one{grid-area:panel}#other{grid-area:separate}"
+                 "#area{grid-area:local}#alias{grid-row:4;grid-column:panel-start 3/-1}")
+        fixed = "grid-template-rows:22px 24px 26px 28px"
+        inherited = "grid-template-columns:subgrid [] [] [] [panel-start]"
+        for direction, tracks, first, later, nested_tracks, nested_first, nested_later in (
+            ("ltr", "40px 50px 60px 70px", "1/3", "2/4", "70px 60px 50px", "2/4", "3/4"),
+            ("rtl", "70px 60px 50px 40px", "2/4", "3/5", "40px 50px 60px", "1/3", "2/3"),
+        ):
+            control = (f"#sub{{grid-template-columns:{tracks};{fixed}}}"
+                       "#other{grid-row:2/3;grid-column:2/4}#area{grid-row:4;grid-column:1}"
+                       "#alias{grid-row:4;grid-column:4/5}")
+            both = "#nested{grid-template-columns:subgrid;grid-template-rows:subgrid}"
+            direct = "#later{grid-row:panel-start 2/panel-end 2;grid-column:panel-start 2/panel-end 2}"
+            nested = "#later{grid-row:panel-start 2/panel-end 2;grid-column:panel-start -1/panel-end}"
+            for case, actual, reference in (
+                ("both", f"#sub{{{inherited};grid-template-rows:subgrid;{local}}}" + names + direct,
+                 control + f"#one{{grid-row:1/2;grid-column:{first}}}#later{{grid-row:2/4;grid-column:{later}}}"),
+                ("clipped local", f"#sub{{{inherited};grid-template-rows:subgrid;{extended}}}"
+                 + names + direct + "#alias{grid-area:edge}",
+                 control + f"#one{{grid-row:1/2;grid-column:{first}}}#later{{grid-row:2/4;grid-column:{later}}}"),
+                ("nested", f"#sub{{{inherited};grid-template-rows:subgrid;{local}}}" + names + both + nested,
+                 control + f"#nested{{grid-template-columns:{nested_tracks};{fixed}}}"
+                 f"#one{{grid-row:1/2;grid-column:{nested_first}}}#later{{grid-row:2/4;grid-column:{nested_later}}}"),
+                ("columns", f"#sub{{grid-column:2/auto;{inherited};{local};"
+                 "grid-template-rows:22px 24px;grid-auto-rows:26px 28px}"
+                 "#one{grid-area:panel}#area{grid-area:local}#other{grid-row:2;grid-column:separate}"
+                 "#alias{grid-row:-2/-1;grid-column:panel-start 3/-1}"
+                 "#later{grid-row:3;grid-column:panel-start 2/panel-end 2}",
+                 control + f"#one{{grid-row:2/4;grid-column:{first}}}#later{{grid-row:3;grid-column:{later}}}"),
+            ):
+                with self.subTest(direction=direction, case=case):
+                    self.assertTrue(preview(direction, case == "nested", actual) ==
+                                    preview(direction, case == "nested", reference))
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}

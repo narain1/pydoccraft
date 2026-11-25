@@ -44,6 +44,7 @@ struct Node {
     cache: Cache,
     hoisted: Vec<NodeId>,
     details: DetailedLayoutInfo,
+    area_origins: Option<Box<subgrid::AreaOrigins>>,
 }
 
 impl Tree {
@@ -55,11 +56,13 @@ impl Tree {
         relative_math: bool,
     ) -> NodeId {
         if style.display == Display::Grid {
+            let areas = style.grid_template_areas.as_ref();
             if bounds.subgrid.width {
                 style.grid_column = grid::subgrid_placement(
                     style.grid_column,
                     style.grid_template_column_names.len(),
                     bounds.subgrid_name_repeat.width,
+                    areas.map_or(0, |areas| areas.column_count),
                 );
             }
             if bounds.subgrid.height {
@@ -67,6 +70,7 @@ impl Tree {
                     style.grid_row,
                     style.grid_template_row_names.len(),
                     bounds.subgrid_name_repeat.height,
+                    areas.map_or(0, |areas| areas.row_count),
                 );
             }
         }
@@ -98,6 +102,7 @@ impl Tree {
             cache: Cache::new(),
             hoisted: Vec::new(),
             details: DetailedLayoutInfo::None,
+            area_origins: None,
         });
         id
     }
@@ -379,7 +384,11 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         let outer = area.size - margin.sum_axes();
         let inner = area.size - trim.sum_axes();
         let mut layout = [None, None];
-        for (axis, output) in [Horizontal, Vertical].into_iter().zip(&mut layout) {
+        for (slot, (axis, output)) in [Horizontal, Vertical]
+            .into_iter()
+            .zip(&mut layout)
+            .enumerate()
+        {
             if !axes.get_abs(axis) {
                 continue;
             }
@@ -426,6 +435,10 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             *output = Some(subgrid::inherit_axis(
                 tracks,
                 aliases,
+                parent
+                    .area_origins
+                    .as_ref()
+                    .and_then(|origins| origins.authored_names[slot].as_deref()),
                 subgrid::Projection {
                     span,
                     trim,
@@ -436,19 +449,26 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 },
             )?);
         }
-        let inherited_areas = match (
-            &parent.style.grid_template_areas,
-            &style.grid_template_areas,
-        ) {
-            (Some(source), None) => subgrid::inherit_areas(
-                source,
-                details,
-                item,
-                &layout,
-                parent.style.direction.is_rtl() != style.direction.is_rtl(),
-            )?,
-            _ => None,
-        };
+        let parent_areas = parent
+            .area_origins
+            .as_ref()
+            .map(|origins| origins.areas.as_slice())
+            .or_else(|| {
+                parent
+                    .style
+                    .grid_template_areas
+                    .as_ref()
+                    .map(|areas| areas.areas.as_slice())
+            })
+            .unwrap_or_default();
+        let inherited_areas = subgrid::inherit_areas(
+            parent_areas,
+            style.grid_template_areas.as_ref(),
+            details,
+            item,
+            &mut layout,
+            parent.style.direction.is_rtl() != style.direction.is_rtl(),
+        )?;
 
         // CSS Grid stretches subgrids in their inherited axes regardless of
         // the authored preferred size, limits or alignment in those axes.
@@ -494,8 +514,9 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         if axes.width && axes.height {
             style.aspect_ratio = None;
         }
-        if inherited_areas.is_some() {
-            style.grid_template_areas = inherited_areas;
+        if let Some(areas) = inherited_areas {
+            style.grid_template_areas = Some(areas.native);
+            node.area_origins = areas.origins;
         }
         for child in &node.children {
             let child = &mut descendants[usize::from(*child)].style;

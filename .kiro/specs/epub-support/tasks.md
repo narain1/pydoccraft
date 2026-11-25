@@ -102,7 +102,7 @@
 - [x] Limit oversized automatic numeric spans to the inherited track count before native grid placement.
 - [x] Clip inherited named areas to the used two-axis subgrid rectangle and preserve authored and generated edge names across nested subgrids and inline direction changes.
 - [x] Project named areas across a single inherited axis with independent orthogonal track sizing and preserved names through nested mixed-axis subgrids.
-- [ ] Merge inherited named areas with local templates.
+- [x] Merge inherited named areas with local templates and retain earliest and numbered same-name edges through nested and RTL subgrids.
 - [ ] Extend the EPUB CSS profile with block and relative inline bounds in other content-dependent, flex and grid containing geometry, functional block bounds with an indefinite containing height, remaining contain-fit sizing contexts, other nonlinear ratio operands and typed math, and content-dependent subgrid sizing, edge insets that exhaust an outer track, scrollbar gutters, collapsed tracks, and automatic-placement and unresolved named-placement clamping.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [x] Render bounded native diffuse and specular distant lighting. Verify single-source PDF text and links when an original-alpha mask controls the lit result.

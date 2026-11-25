@@ -359,9 +359,10 @@ pub(in crate::epub) fn subgrid_placement(
     mut line: Line<GridPlacement<String>>,
     names: usize,
     repeat: Option<NameRepeat>,
+    area_tracks: u16,
 ) -> Line<GridPlacement<String>> {
     let fixed = names - repeat.map_or(0, |repeat| repeat.length);
-    let span = GridPlacement::Span(fixed.saturating_sub(1).max(1) as u16);
+    let span = GridPlacement::Span((fixed.saturating_sub(1) as u16).max(area_tracks).max(1));
     match (&line.start, &line.end) {
         (
             GridPlacement::Auto | GridPlacement::Line(_) | GridPlacement::NamedLine(..),
