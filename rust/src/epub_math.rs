@@ -634,6 +634,10 @@ impl<'xml> Projection<'_, 'xml> {
                 }
             }
             "msup" | "msub" | "msubsup" | "munder" | "mover" | "munderover" => {
+                let seeking = self
+                    .alignment_group
+                    .as_ref()
+                    .is_some_and(table::alignment::Scope::seeking_caret);
                 let (base, sub, sup) = match tag {
                     "msubsup" | "munderover" => {
                         let [base, sub, sup] = self.arguments(node, depth, style)?;
@@ -648,7 +652,19 @@ impl<'xml> Projection<'_, 'xml> {
                         (base, Vec::new(), sup)
                     }
                 };
-                scripts(node, base, sub, sup, style.display_style, self.root)?
+                let native = scripts(node, base, sub, sup, style.display_style, self.root)?;
+                if seeking
+                    && !matches!(native, MNode::Script { .. })
+                    && self
+                        .alignment_group
+                        .as_ref()
+                        .is_some_and(|scope| scope.caret.is_some())
+                {
+                    return Err(unsupported(
+                        "MathML alignment caret in a promoted script operator",
+                    ));
+                }
+                native
             }
             "mmultiscripts" => return self.multiscripts(node, depth, style),
             "mfenced" => self.fenced(node, depth, style)?,
@@ -708,8 +724,10 @@ impl<'xml> Projection<'_, 'xml> {
         let mut children = node.children().filter(Node::is_element);
         let mut args = std::array::from_fn(|_| Vec::new());
         let slots: &[usize] = match node.tag_name().name() {
-            "mfrac" => &[0, 1],
+            "mfrac" | "msub" => &[0, 1],
             "mroot" => &[1, 0],
+            "msup" => &[0, 2],
+            "msubsup" => &[0, 1, 2],
             _ => &[],
         };
         for (index, arg) in args.iter_mut().enumerate() {
@@ -879,7 +897,10 @@ fn operator<'a, 'input>(mut node: Node<'a, 'input>) -> Option<Node<'a, 'input>> 
         match node.tag_name().name() {
             "mo" => return Some(node),
             "mrow" | "mstyle" => {
-                let mut children = node.children().filter(Node::is_element);
+                let mut children = node
+                    .children()
+                    .filter(Node::is_element)
+                    .filter(|child| !child.has_tag_name((MATHML, "malignmark")));
                 node = children.next()?;
                 if children.next().is_some() {
                     return None;

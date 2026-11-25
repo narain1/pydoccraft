@@ -483,7 +483,17 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
             .any(|ancestor| {
                 !matches!(
                     tag(ancestor),
-                    Some("mrow" | "mstyle" | "semantics" | "mfrac" | "msqrt" | "mroot")
+                    Some(
+                        "mrow"
+                            | "mstyle"
+                            | "semantics"
+                            | "mfrac"
+                            | "msqrt"
+                            | "mroot"
+                            | "msub"
+                            | "msup"
+                            | "msubsup"
+                    )
                 )
             })
         || mark
@@ -563,7 +573,16 @@ fn decimal_offset(cell: Node<'_, '_>, number: Node<'_, '_>) -> Result<usize, Eng
         .any(|node| {
             !matches!(
                 tag(node),
-                Some("mrow" | "mstyle" | "semantics" | "msqrt" | "mroot")
+                Some(
+                    "mrow"
+                        | "mstyle"
+                        | "semantics"
+                        | "msqrt"
+                        | "mroot"
+                        | "msub"
+                        | "msup"
+                        | "msubsup"
+                )
             )
         })
     {

@@ -10498,6 +10498,97 @@ Trailing
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML alignment mark in an empty operand"):
                     operation()
 
+    def test_mathml_aligns_native_script_bases_and_attachments(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML script carets</title><meta name="viewport" content="width=520,height=360"/>
+            <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">
+            <m:mtable groupalign="{decimalpoint}" columnwidth="215pt" rowspacing="12pt">
+              <m:mtr><m:mtd><m:maligngroup/><m:msup>
+                <m:mn mathcolor="#bf222d">12.345</m:mn><m:mtext>Rise</m:mtext>
+              </m:msup></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:msub>
+                <m:mtext>Note</m:mtext><m:mrow><m:mn>77<m:malignmark/>;819</m:mn></m:mrow>
+              </m:msub></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:msubsup>
+                <m:mtext>Key</m:mtext><m:mtext>Anchor</m:mtext><m:mn>63<m:malignmark/>:925</m:mn>
+              </m:msubsup></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:msup>
+                <m:mrow><m:mtext>West</m:mtext><m:malignmark edge="right"/><m:mo>+</m:mo><m:mtext>Arm</m:mtext></m:mrow>
+                <m:mtext>Roof</m:mtext>
+              </m:msup></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mn>.456</m:mn></m:mtd></m:mtr>
+            </m:mtable>
+          </m:math></p></body></html>"""
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        terms = ("12.345", "Rise", "Note", "77;819", "Key", "Anchor", "63:925", "West", "+", "Arm", "Roof", ".456")
+
+        def boxes(doc: doc_ex.Document, names: tuple[str, ...]) -> dict[str, tuple[float, float, float, float]]:
+            matches = {}
+            for name in names:
+                matches[name], = doc[0].search_for(name)
+            return matches
+
+        def geometry(doc: doc_ex.Document, delta: float) -> dict[str, tuple[float, float, float, float]]:
+            rects = boxes(doc, (*terms, "12", "77", "63"))
+            for prefix in ("12", "77", "63", "West"):
+                self.assertAlmostEqual(rects[prefix][2], rects[".456"][0], delta=delta)
+            self.assertGreater(rects["+"][0] - rects["West"][2], 1.0)
+            self.assertGreater(rects["Arm"][0] - rects["+"][2], 1.0)
+            self.assertLess(rects["Rise"][1], rects["12.345"][1])
+            self.assertGreater(rects["77;819"][1], rects["Note"][1])
+            self.assertLess(rects["63:925"][1], rects["Key"][1])
+            self.assertGreater(rects["Anchor"][1], rects["Key"][1])
+            return rects
+
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                self.assertFalse(pdf[0].get_images())
+                reference = geometry(pdf, 0.05)
+            editable = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+            xml = ET.fromstring(archive.read("word/document.xml"))
+        matrix = xml.find(".//m:oMath//m:m", ns)
+        self.assertIsNotNone(matrix)
+        for path, term in (
+            (".//m:sSup/m:e", "12.345"),
+            (".//m:sSub/m:sub", "77;819"),
+            (".//m:sSubSup/m:sup", "63:925"),
+            (".//m:sSup/m:e", "+"),
+        ):
+            tokens = [run.text for arg in matrix.findall(path, ns) for run in arg.findall(".//m:t", ns)]
+            self.assertEqual(tokens.count(term), 1, tokens)
+        with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+            word_text = word[0].get_text()
+            for term in terms:
+                self.assertEqual(word_text.count(term), 1, word_text)
+            self.assertNotIn("⟡H", word_text)
+            native = geometry(pdf, 0.25)
+            for term in terms:
+                for expected, actual in zip(reference[term], native[term]):
+                    self.assertAlmostEqual(expected, actual, delta=0.35)
+
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 520, 360)])
+        with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                fixed = boxes(pdf, terms)
+                for term in terms:
+                    self.assertAlmostEqual(fixed[term][0] - fixed[".456"][0],
+                                           reference[term][0] - reference[".456"][0], delta=0.65)
+
+        promoted = source.replace("<m:mtext>Note</m:mtext>", "<m:mo>∑</m:mo>")
+        promoted_marked_base = source.replace(
+            "<m:mtext>Note</m:mtext><m:mrow><m:mn>77<m:malignmark/>;819</m:mn></m:mrow>",
+            '<m:mrow><m:mo>∑</m:mo><m:malignmark edge="right"/></m:mrow><m:mn>77;819</m:mn>',
+        )
+        for chapter in (promoted, promoted_marked_base):
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML alignment caret in a promoted script operator"):
+                        operation()
+
     def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Labeled MathML</title><meta name="viewport" content="width=440,height=320"/>
