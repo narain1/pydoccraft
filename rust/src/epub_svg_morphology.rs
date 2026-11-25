@@ -1,7 +1,7 @@
 //! Validate morphology kernels and bound native neighborhood sampling.
 use roxmltree::Node;
 
-use super::finite_number;
+use super::number_pair;
 use crate::{
     epub::{invalid, limited, parse_xml, structure::apply_edits, svg, unsupported, XML_BYTES},
     EngineError,
@@ -13,20 +13,7 @@ fn radius(node: Node<'_, '_>) -> Result<[f32; 2], EngineError> {
     let Some(raw) = node.attribute("radius") else {
         return Ok([0.0; 2]);
     };
-    let error = "invalid SVG morphology radius";
-    if !raw.is_ascii() {
-        return Err(invalid(error));
-    }
-    if let Some((x, y)) = raw.split_once(',') {
-        return Ok([finite_number(x, error)?, finite_number(y, error)?]);
-    }
-    let mut values = raw.split_ascii_whitespace();
-    let x = finite_number(values.next().ok_or_else(|| invalid(error))?, error)?;
-    let y = values.next().map_or(Ok(x), |y| finite_number(y, error))?;
-    if values.next().is_some() {
-        return Err(invalid(error));
-    }
-    Ok([x, y])
+    number_pair(raw, "invalid SVG morphology radius")
 }
 
 pub(super) fn validate(node: Node<'_, '_>) -> Result<(), EngineError> {

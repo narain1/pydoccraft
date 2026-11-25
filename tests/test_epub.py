@@ -10497,6 +10497,166 @@ overlay
             with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, reason):
                 book.render_page(0, dpi=96)
 
+    def test_svg_turbulence_and_displacement_render_and_preserve_provable_pdf_geometry(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 156 92">
+          <defs>
+            <filter id="noise" filterUnits="userSpaceOnUse" x="4" y="5" width="48" height="36"
+                    color-interpolation-filters="sRGB">
+              <feTurbulence type="fractalNoise" baseFrequency=".16, .11" numOctaves="2" seed="7.9"/>
+            </filter>
+            <filter id="shift" filterUnits="userSpaceOnUse" x="56" y="4" width="46" height="41"
+                    color-interpolation-filters="sRGB">
+              <feFlood flood-color="#ff0000" result="channels"/>
+              <feDisplacementMap in="SourceGraphic" in2="channels" scale="12"
+                                 xChannelSelector="R" yChannelSelector="G"/>
+            </filter>
+            <filter id="caption" filterUnits="userSpaceOnUse" x="0" y="48" width="146" height="42"
+                    color-interpolation-filters="sRGB">
+              <feTurbulence type="turbulence" baseFrequency=".27" numOctaves="3" seed="-3" result="map"/>
+              <feDisplacementMap in="SourceGraphic" in2="map" scale="0"
+                                 xChannelSelector="B" yChannelSelector="A" result="mapped"/>
+            </filter>
+          </defs>
+          <rect x="12" y="14" width="16" height="12" filter="url(#noise)"/>
+          <rect x="70" y="14" width="16" height="12" fill="#3060bc" filter="url(#shift)"/>
+          <g filter="url(#caption)"><text id="label" x="12" y="75" font-size="22">
+            <a href="https://example.org/caption">Café</a>
+          </text></g>
+          <a href="#label"><rect x="133" y="9" width="12" height="9" fill="green"/></a>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 156, 92)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Noise</title>
+            <meta name="viewport" content="width=156,height=92"/></head><body style="margin:0">{}</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+
+        def open_book(markup: str, inline: bool) -> doc_ex.Document:
+            members = ({"OEBPS/s0.xhtml": template.format(markup)} if inline else
+                       {"OEBPS/content.opf": package, "OEBPS/s0.svg": markup})
+            return doc_ex.open(rewrite_epub(fixture, members))
+
+        def rgba(document: doc_ex.Document) -> tuple[int, bytes]:
+            return rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+
+        for inline in (False, True):
+            with self.subTest(inline=inline), open_book(svg, inline) as book:
+                width, pixels = preview = rgba(book)
+                path, authored = ("OEBPS/s0.xhtml", template.format(svg)) if inline else ("OEBPS/s0.svg", svg)
+                self.assertEqual(book.read_epub_resource(path), authored.encode())
+                noise = {pixels[4 * (y * width + x):4 * (y * width + x + 1)]
+                         for y in range(5, 41) for x in range(4, 52)}
+                self.assertGreater(len(noise), 100)
+                with open_book(svg.replace('seed="7.9"', 'seed="7.1"'), inline) as same_seed:
+                    self.assertEqual(rgba(same_seed), preview)
+                with open_book(svg.replace('seed="7.9"', 'seed="8"'), inline) as new_seed:
+                    self.assertNotEqual(rgba(new_seed), preview)
+
+                for sign in (1, -1):
+                    displaced = svg.replace('scale="12"', f'scale="{12 * sign}"')
+                    reference = svg.replace('filter="url(#shift)"', f'transform="translate({-6 * sign} {6 * sign})"')
+                    with open_book(displaced, inline) as shifted, open_book(reference, inline) as direct:
+                        self.assertEqual(rgba(shifted), rgba(direct))
+
+                with (open_book(svg.replace('filter="url(#caption)"', ''), inline) as direct,
+                      doc_ex.open(direct.export_epub_fixed_pdf(dpi=96, searchable=True)) as expected,
+                      doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf):
+                    self.assertEqual(rgba(pdf), preview)
+                    self.assertEqual(rgba(expected), preview)
+                    self.assertEqual(pdf[0].get_text(), "Café")
+                    self.assertEqual(pdf[0].search_for("Café"), expected[0].search_for("Café"))
+                    self.assertEqual([link.bbox for link in pdf[0].get_links()],
+                                     [link.bbox for link in expected[0].get_links()])
+                    local, = [link for link in pdf[0].get_links() if link.metadata.get("target_page") is not None]
+                    self.assertEqual(local.metadata["target_page"], 0)
+
+        moved = svg.replace('result="mapped"/>', 'result="mapped"/><feOffset in="mapped" dx="6" dy="3"/>')
+        control = svg.replace('filter="url(#caption)"', '').replace('x="12" y="75"', 'x="18" y="78"')
+        with (open_book(moved, False) as book, open_book(control, False) as direct,
+              doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf,
+              doc_ex.open(direct.export_epub_fixed_pdf(dpi=96, searchable=True)) as expected):
+            self.assertEqual(rgba(book), rgba(direct))
+            self.assertEqual(rgba(pdf), rgba(book))
+            result, = pdf[0].search_for("Café")
+            reference, = expected[0].search_for("Café")
+            for actual, projected in zip(result, reference):
+                self.assertAlmostEqual(actual, projected, delta=.75)
+
+        active = svg.replace('scale="0"', 'scale="18"')
+        with open_book(active, False) as book, open_book(svg, False) as neutral:
+            self.assertNotEqual(rgba(book), rgba(neutral))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+        merged = active.replace(
+            'result="mapped"/>',
+            'result="mapped"/><feMerge><feMergeNode in="mapped"/><feMergeNode in="SourceGraphic"/></feMerge>',
+        )
+        with (open_book(merged, False) as book, open_book(svg, False) as neutral,
+              doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf,
+              doc_ex.open(neutral.export_epub_fixed_pdf(dpi=96, searchable=True)) as reference):
+            self.assertNotEqual(rgba(book), rgba(neutral))
+            self.assertEqual(rgba(pdf), rgba(book))
+            self.assertEqual(pdf[0].search_for("Café"), reference[0].search_for("Café"))
+
+        masked = svg.replace('baseFrequency=".27"', 'baseFrequency="0"').replace(
+            'result="mapped"/>',
+            'result="mapped"/><feComposite in="mapped" in2="map" operator="in"/>',
+        )
+        with open_book(masked, False) as book, doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+            self.assertEqual(rgba(pdf), rgba(book))
+            self.assertEqual(pdf[0].get_text(), "")
+            self.assertNotIn("https://example.org/caption", [link.uri for link in pdf[0].get_links()])
+
+    def test_svg_turbulence_and_displacement_check_dependencies_and_work(self) -> None:
+        def svg(primitive: str, *, region: str = "", transform: str = "") -> str:
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+              <defs><filter id="fx" {region}>{primitive}</filter></defs>
+              <rect width="24" height="18" {transform} filter="url(#fx)"/></svg>"""
+
+        malformed = (
+            ('<feTurbulence in="SourceGraphic"/>', doc_ex.MalformedDocumentError, "unexpected SVG filter input"),
+            ('<feTurbulence type="other"/>', doc_ex.UnsupportedFormatError, "turbulence type"),
+            ('<feTurbulence baseFrequency="-.04"/>', doc_ex.MalformedDocumentError, "base frequency"),
+            ('<feTurbulence baseFrequency="1,2,3"/>', doc_ex.MalformedDocumentError, "base frequency"),
+            ('<feTurbulence numOctaves="1.5"/>', doc_ex.MalformedDocumentError, "octave count"),
+            ('<feTurbulence numOctaves="9"/>', doc_ex.UnsafeArchiveError, "8 octaves"),
+            ('<feTurbulence baseFrequency="1200"/>', doc_ex.UnsafeArchiveError, "base frequency exceeds"),
+            ('<feTurbulence seed="-2147483648"/>', doc_ex.UnsafeArchiveError, "signed generator range"),
+            ('<feTurbulence stitchTiles="stitch"/>', doc_ex.UnsupportedFormatError, "turbulence stitching"),
+            ('<feDisplacementMap xChannelSelector="r"/>', doc_ex.UnsupportedFormatError, "channel selector"),
+            ('<feDisplacementMap in2="later"/><feTurbulence result="later"/>',
+             doc_ex.MalformedDocumentError, "prior named result"),
+            ('<feDisplacementMap in2="BackgroundImage"/>', doc_ex.UnsupportedFormatError, "prior named result"),
+            ('<feDisplacementMap scale="-16001"/>', doc_ex.UnsafeArchiveError, "displacement scale exceeds 16000"),
+        )
+        with doc_ex.open(epub_fixture()) as original:
+            for primitive, error, reason in malformed:
+                with self.subTest(primitive=primitive), self.assertRaisesRegex(error, reason):
+                    original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Noise", svg(primitive)), 0])
+            for primitive in ("<feTurbulence/>", "<feDisplacementMap/>"):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "userSpaceOnUse primitive units"):
+                    original.edit_epub_structure([doc_ex.EpubSvgChapterSource(
+                        "Noise", svg(primitive, region='primitiveUnits="objectBoundingBox"')), 0])
+            cases = (
+                (svg('<feTurbulence numOctaves="8" baseFrequency=".4"/>',
+                     region='filterUnits="userSpaceOnUse" width="1000" height="1000"'),
+                 "filter work exceeds"),
+                (svg('<feTurbulence numOctaves="8" baseFrequency="1024"/>',
+                     region='filterUnits="userSpaceOnUse" x="1000000" y="0" width="32" height="32"'),
+                 "lattice exceeds its device coordinate budget"),
+                (svg('<feDisplacementMap scale="20"/>',
+                     region='filterUnits="userSpaceOnUse" width="1" height="1"', transform='transform="scale(1024)"'),
+                 "displacement scale exceeds 16000 after scaling"),
+            )
+            rendered = [(original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Noise", markup), 0]), reason)
+                        for markup, reason in cases]
+        for data, reason in rendered:
+            with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, reason):
+                book.render_page(0, dpi=96)
+
     def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
         def svg(primitives: str, attrs: str = "", rect: str = "") -> str:
             return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 48">

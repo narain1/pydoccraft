@@ -14,6 +14,9 @@ use crate::{
 mod morphology;
 pub(super) use morphology::normalize as normalize_morphology;
 
+#[path = "epub_svg_noise.rs"]
+mod noise;
+
 #[path = "epub_svg_transfer.rs"]
 mod transfer;
 pub(in crate::epub) use transfer::is_channel as is_transfer_channel;
@@ -45,6 +48,8 @@ pub(in crate::epub) fn is_filter_primitive(tag: &str) -> bool {
             | "feBlend"
             | "feComponentTransfer"
             | "feMorphology"
+            | "feTurbulence"
+            | "feDisplacementMap"
     )
 }
 
@@ -182,7 +187,7 @@ fn validate_chain(node: Node<'_, '_>) -> Result<(), EngineError> {
             return Err(unsupported("unsupported SVG filter primitive"));
         }
         match child.tag_name().name() {
-            "feFlood" | "feMerge" if child.has_attribute("in") => {
+            "feFlood" | "feMerge" | "feTurbulence" if child.has_attribute("in") => {
                 return Err(invalid("unexpected SVG filter input"));
             }
             "feMerge" => {
@@ -201,7 +206,7 @@ fn validate_chain(node: Node<'_, '_>) -> Result<(), EngineError> {
                     return Err(invalid("SVG filter merge requires an input"));
                 }
             }
-            "feComposite" | "feBlend" => {
+            "feComposite" | "feBlend" | "feDisplacementMap" => {
                 validate_input(child.attribute("in"), &results)?;
                 validate_input(child.attribute("in2"), &results)?;
             }
@@ -296,6 +301,8 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
         "feComposite" => return validate_composite(node),
         "feComponentTransfer" => return transfer::validate_channels(node),
         "feMorphology" => return morphology::validate(node),
+        "feTurbulence" => return noise::validate_turbulence(node),
+        "feDisplacementMap" => return noise::validate_displacement(node),
         "feBlend" => {
             if !matches!(
                 node.attribute("mode").unwrap_or("normal"),
@@ -451,6 +458,22 @@ fn validate_color_matrix(node: Node<'_, '_>) -> Result<(), EngineError> {
     Ok(())
 }
 
+fn number_pair(raw: &str, error: &'static str) -> Result<[f32; 2], EngineError> {
+    if !raw.is_ascii() {
+        return Err(invalid(error));
+    }
+    if let Some((x, y)) = raw.split_once(',') {
+        return Ok([finite_number(x, error)?, finite_number(y, error)?]);
+    }
+    let mut values = raw.split_ascii_whitespace();
+    let x = finite_number(values.next().ok_or_else(|| invalid(error))?, error)?;
+    let y = values.next().map_or(Ok(x), |y| finite_number(y, error))?;
+    if values.next().is_some() {
+        return Err(invalid(error));
+    }
+    Ok([x, y])
+}
+
 fn finite_number(value: &str, reason: &'static str) -> Result<f32, EngineError> {
     value
         .trim()
@@ -524,6 +547,7 @@ pub(super) enum FilterGeometry {
 struct Support {
     retains_source: bool,
     within_source: bool,
+    procedural: bool,
 }
 
 impl Support {
@@ -531,6 +555,7 @@ impl Support {
         Self {
             retains_source: self.retains_source || other.retains_source,
             within_source: self.within_source && other.within_source,
+            procedural: self.procedural || other.procedural,
         }
     }
 
@@ -538,6 +563,7 @@ impl Support {
         Self {
             retains_source: false,
             within_source,
+            procedural: false,
         }
     }
 }
@@ -556,6 +582,7 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
     let source = Support {
         retains_source: covers(filter.rect()),
         within_source: true,
+        procedural: false,
     };
     let mut output = Support::default();
     for primitive in filter.primitives() {
@@ -576,8 +603,12 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                         // The native input is premultiplied and transparent pixels have
                         // zero color. A nonpositive bias cannot create coverage there.
                         within_source: input.within_source && values[19] <= 0.0,
+                        procedural: input.procedural,
                     },
-                    ColorMatrixKind::LuminanceToAlpha => Support::subset(input.within_source),
+                    ColorMatrixKind::LuminanceToAlpha => Support {
+                        retains_source: false,
+                        ..input
+                    },
                     ColorMatrixKind::Saturate(_) | ColorMatrixKind::HueRotate(_) => input,
                 }
             }
@@ -586,11 +617,20 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
             {
                 get(blur.input())
             }
+            Kind::GaussianBlur(blur) => Support {
+                procedural: get(blur.input()).procedural,
+                ..Support::default()
+            },
             Kind::DropShadow(shadow) => Support {
-                retains_source: get(shadow.input()).retains_source,
                 within_source: false,
+                ..get(shadow.input())
             },
             Kind::Offset(offset) if offset.dx() == 0.0 && offset.dy() == 0.0 => get(offset.input()),
+            Kind::DisplacementMap(map) if map.scale() == 0.0 => get(map.input1()),
+            Kind::DisplacementMap(_) | Kind::Turbulence(_) => Support {
+                procedural: true,
+                ..Support::default()
+            },
             Kind::Flood(flood) if flood.opacity().get() == 0.0 => Support::subset(true),
             // Native blend modes use the same source-over alpha as normal.
             Kind::Blend(blend) => get(blend.input1()).union(get(blend.input2())),
@@ -600,21 +640,25 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                 Support {
                     retains_source: input.retains_source && alpha.retains_ink,
                     within_source: input.within_source && alpha.keeps_transparency,
+                    procedural: input.procedural,
                 }
             }
             Kind::Morphology(morphology) => {
                 let input = get(morphology.input());
                 match morphology.operator() {
-                    usvg::filter::MorphologyOperator::Erode => Support::subset(input.within_source),
+                    usvg::filter::MorphologyOperator::Erode => Support {
+                        retains_source: false,
+                        ..input
+                    },
                     usvg::filter::MorphologyOperator::Dilate => Support {
-                        retains_source: input.retains_source,
                         within_source: false,
+                        ..input
                     },
                 }
             }
             Kind::Composite(composite) => {
                 let (first, second) = (get(composite.input1()), get(composite.input2()));
-                match composite.operator() {
+                let support = match composite.operator() {
                     CompositeOperator::Over | CompositeOperator::Lighter => first.union(second),
                     CompositeOperator::In => {
                         Support::subset(first.within_source || second.within_source)
@@ -627,6 +671,10 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                     CompositeOperator::Arithmetic { k4, .. } => {
                         Support::subset(k4 <= 0.0 && first.within_source && second.within_source)
                     }
+                };
+                Support {
+                    procedural: first.procedural || second.procedural,
+                    ..support
                 }
             }
             Kind::Merge(merge) => merge
@@ -684,6 +732,7 @@ fn offset_chain(filter: &usvg::filter::Filter) -> Option<(Vec<[f32; 2]>, bool)> 
                 preserves_alpha = false;
                 morphology.input()
             }
+            Kind::DisplacementMap(map) if map.scale() == 0.0 => map.input1(),
             Kind::GaussianBlur(blur)
                 if blur.std_dev_x().get() == 0.0 && blur.std_dev_y().get() == 0.0 =>
             {
@@ -706,16 +755,16 @@ fn offset_chain(filter: &usvg::filter::Filter) -> Option<(Vec<[f32; 2]>, bool)> 
         .then_some((offsets, preserves_alpha))
 }
 
-fn filter_geometry(group: &usvg::Group, additive_input: bool) -> (FilterGeometry, bool) {
+fn filter_geometry(group: &usvg::Group, additive_input: bool) -> (FilterGeometry, bool, bool) {
     let [filter] = group.filters() else {
         return if group.filters().is_empty() {
-            (FilterGeometry::Retained, additive_input)
+            (FilterGeometry::Retained, additive_input, false)
         } else {
-            (FilterGeometry::Unproven, true)
+            (FilterGeometry::Unproven, true, false)
         };
     };
     let Some(bounds) = group.stroke_bounding_box() else {
-        return (FilterGeometry::Unproven, true);
+        return (FilterGeometry::Unproven, true, false);
     };
     let output = filter_support(filter, bounds);
     let filter = if output.retains_source {
@@ -727,7 +776,11 @@ fn filter_geometry(group: &usvg::Group, additive_input: bool) -> (FilterGeometry
     } else {
         FilterGeometry::Unproven
     };
-    (filter, additive_input || !output.within_source)
+    (
+        filter,
+        additive_input || !output.within_source,
+        output.procedural,
+    )
 }
 
 fn at_most_one_leaf(group: &usvg::Group, seen: &mut bool) -> bool {
@@ -784,7 +837,7 @@ impl CaptureGeometry {
             status.incompatible_stack |= child.incompatible_stack;
             additive_input |= additive;
         }
-        let (mut filter, additive) = filter_geometry(group, additive_input);
+        let (mut filter, additive, procedural) = filter_geometry(group, additive_input);
         let key = std::ptr::from_ref(group);
         if !group.filters().is_empty() {
             let axis_aligned = positive_axes(group.abs_transform());
@@ -793,11 +846,8 @@ impl CaptureGeometry {
                 .iter()
                 .flat_map(|filter| filter.primitives())
                 .any(|primitive| {
-                    matches!(
-                        primitive.kind(),
-                        usvg::filter::Kind::Morphology(value)
-                            if value.operator() == usvg::filter::MorphologyOperator::Erode
-                    )
+                    matches!(primitive.kind(), usvg::filter::Kind::Morphology(value)
+                    if value.operator() == usvg::filter::MorphologyOperator::Erode)
                 });
             let can_stack = status.moved_children
                 && !status.incompatible_stack
@@ -805,7 +855,7 @@ impl CaptureGeometry {
                 && at_most_one_leaf(group, &mut false);
             if status.moved_children
                 || status.context_subtree
-                || (erosion && !axis_aligned) && filter == FilterGeometry::Sample
+                || (erosion || procedural) && !axis_aligned && filter == FilterGeometry::Sample
             {
                 filter = FilterGeometry::Unproven;
             }
@@ -827,8 +877,9 @@ impl CaptureGeometry {
             // the next layer's raster grid and cannot compose this way.
             status.incompatible_stack |= filter != FilterGeometry::Moved || !axis_aligned;
             status.filters_subtree = true;
-            status.needs_context = (status.moved_children && filter == FilterGeometry::Moved)
-                || erosion && matches!(filter, FilterGeometry::Sample | FilterGeometry::Moved);
+            status.needs_context = (erosion || status.moved_children)
+                && filter == FilterGeometry::Moved
+                || (erosion || procedural) && filter == FilterGeometry::Sample;
         }
         status.filter = filter;
         status.unproven_subtree |= filter == FilterGeometry::Unproven;
@@ -988,6 +1039,16 @@ fn measure_group(
                     usvg::filter::Kind::Composite(_) | usvg::filter::Kind::Blend(_) => 12,
                     usvg::filter::Kind::ComponentTransfer(transfer) => transfer::work(transfer),
                     usvg::filter::Kind::Merge(merge) => 4 + 5 * merge.inputs().len(),
+                    usvg::filter::Kind::Turbulence(turbulence) => {
+                        charge_work(pixels, 1, noise::TURBULENCE_SETUP_WORK)?;
+                        noise::turbulence_work(turbulence, bounds, [sx, sy])?
+                    }
+                    usvg::filter::Kind::DisplacementMap(map) => {
+                        let message = "SVG displacement scale exceeds 16000 after scaling";
+                        validate_offset(map.scale() * sx, message)?;
+                        validate_offset(map.scale() * sy, message)?;
+                        16
+                    }
                     usvg::filter::Kind::Morphology(morphology) => morphology::work(
                         [
                             morphology.radius_x().get() * sx,

@@ -1105,6 +1105,22 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if tag == "feMergeNode" && key == "in" => true,
                 None if tag == "feBlend" && matches!(key, "in2" | "mode") => true,
                 None if tag == "feMorphology" && matches!(key, "operator" | "radius") => true,
+                None if tag == "feTurbulence"
+                    && matches!(
+                        key,
+                        "type" | "baseFrequency" | "numOctaves" | "seed" | "stitchTiles"
+                    ) =>
+                {
+                    true
+                }
+                None if tag == "feDisplacementMap"
+                    && matches!(
+                        key,
+                        "in2" | "scale" | "xChannelSelector" | "yChannelSelector"
+                    ) =>
+                {
+                    true
+                }
                 None if transfer_channel
                     && matches!(
                         key,

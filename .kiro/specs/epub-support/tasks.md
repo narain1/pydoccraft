@@ -58,6 +58,7 @@
 - [x] Compose nested axis-aligned SVG offsets for one painted source and capture surviving search, links and fragments from the whole native stack.
 - [x] Render bounded native SVG blend and component transfer and retain searchable text, links and fragments through provable alpha and offset chains.
 - [x] Render bounded native morphology and preserve PDF source attribution through provable erosion, dilation and erosion-to-offset chains.
+- [x] Render bounded native turbulence and displacement. Keep provable source geometry and reject ambiguous PDF attribution.
 - [x] Resolve mixed length and percentage calculations for supported box geometry against the native containing box and preserve indefinite percentage sizing.
 - [x] Resolve calculated grid rows and columns, intrinsic tracks, minmax, fit-content and bounded counted repetition.
 - [ ] Extend the EPUB CSS profile with intrinsic box sizing, more math functions, grid automatic repetition, named lines and subgrids.
