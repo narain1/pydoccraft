@@ -16,6 +16,7 @@ pub(super) use convolution::normalize as normalize_convolution;
 
 #[path = "epub_svg_lighting.rs"]
 mod lighting;
+pub(super) use lighting::normalize as normalize_lighting;
 
 #[path = "epub_svg_morphology.rs"]
 mod morphology;

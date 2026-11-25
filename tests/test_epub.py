@@ -16945,8 +16945,8 @@ Resume
         for svg, reason in (
             (filtered(diffuse + alpha_mask.replace('operator="in"', 'operator="over"'), link=True),
              "filter.*geometry"),
-            (filtered(diffuse).replace('color-interpolation-filters="sRGB"', 'color-interpolation-filters="linearRGB"'),
-             "lighting requires sRGB"),
+            (filtered(diffuse).replace('color-interpolation-filters="sRGB"', 'color-interpolation-filters="display-p3"'),
+             "unsupported SVG lighting color interpolation"),
             (filtered(diffuse).replace('surfaceScale="0"', 'surfaceScale="0" kernelUnitLength="1"'),
              "lighting kernelUnitLength"),
             (filtered(diffuse).replace('<feDistantLight azimuth="37" elevation="30"/>', ""),
@@ -17191,6 +17191,151 @@ Resume
             with self.subTest(reason=reason), self.assertRaisesRegex(error, reason):
                 with doc_ex.open(publication(svg, False)) as book:
                     book.render_page(0, dpi=96)
+
+    def test_svg_linear_lighting_resolves_css_color_space_and_searchable_masks(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 144, 96)])
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Linear light</title>
+          <meta name="viewport" content="width=144,height=96"/><style>body {margin:0}</style>
+          </head><body>SVGCONTENT</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        region = 'x="12" y="12" width="112" height="72"'
+        label = '<text id="ink" x="27" y="57" font-size="24">Café</text>'
+        linked = f'<a href="https://example.org/ink">{label}</a>'
+        marker = '<a href="#ink"><rect x="2" y="2" width="6" height="6" fill="navy"/></a>'
+        mask = '<feComposite in="lit" in2="SourceAlpha" operator="in"/>'
+
+        def sample(art: str, inline: bool, root: str = "") -> bytes:
+            svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="144" height="96" viewBox="0 0 144 96" {root}>'
+                   f'{art}</svg>')
+            if inline:
+                return rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter.replace("SVGCONTENT", svg)})
+            return rewrite_epub(fixture, {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg})
+
+        def light(kind: str, *, primitive: str = "", color: str = "rgb(192 96 32 / .25)") -> str:
+            settings = 'diffuseConstant="1"' if kind == "Diffuse" else 'specularConstant=".75" specularExponent="6"'
+            elevation = 30 if kind == "Diffuse" else 90
+            return (f'<fe{kind}Lighting in="SourceAlpha" surfaceScale="0" result="lit" '
+                    f'lighting-color="{color}" {settings} {primitive}>'
+                    f'<feDistantLight elevation="{elevation}"/></fe{kind}Lighting>')
+
+        def scene(effect: str, *, attributes: str = "", artwork: str = label, after: str = "") -> str:
+            return (
+                '<style>filter.linear {color-interpolation-filters:var(--filter-space)}</style>'
+                f'<defs><filter id="fx" filterUnits="userSpaceOnUse" {region} {attributes}>{effect}</filter></defs>'
+                f'<g filter="url(#fx)">{artwork}</g>{after}'
+            )
+
+        def rounded(value: float) -> int:
+            return int(value + .5)
+
+        def to_linear(byte: int) -> int:
+            x = byte / 255
+            return rounded(255 * (x / 12.92 if x <= .04045 else ((x + .055) / 1.055)**2.4))
+
+        def to_srgb(byte: int) -> int:
+            x = byte / 255
+            return rounded(255 * (12.92*x if x <= .0031308 else 1.055*x**(1/2.4) - .055))
+
+        def shade(kind: str, linear: bool) -> str:
+            factor = .5 if kind == "Diffuse" else .75
+            lighting = (192, 96, 32)
+            if linear:
+                lighting = tuple(to_linear(channel) for channel in lighting)
+            rgb = tuple(rounded(channel * factor) for channel in lighting)
+            alpha = 255 if kind == "Diffuse" else max(rgb)
+            if linear:
+                rgb = tuple(rounded(to_srgb(rounded(channel * 255 / alpha)) * alpha / 255) for channel in rgb)
+            return "#" + bytes(255 - alpha + channel for channel in rgb).hex()
+
+        inherited = 'class="linear" style="--filter-space:linearRGB"'
+        for inline in (False, True):
+            for dpi in (96, 144):
+                for kind in ("Diffuse", "Specular"):
+                    for name, root, attributes, primitive, linear in (
+                        ("default", "", "", "", True),
+                        ("inherited", 'color-interpolation-filters="sRGB"', inherited,
+                         'style="color-interpolation-filters:inherit"', True),
+                        ("override", "", inherited, 'style="color-interpolation-filters:sRGB"', False),
+                        ("initial", 'color-interpolation-filters="sRGB"', "",
+                         'style="color-interpolation-filters:initial"', True),
+                    ):
+                        with self.subTest(inline=inline, dpi=dpi, kind=kind, mode=name):
+                            art = scene(light(kind, primitive=primitive), attributes=attributes)
+                            reference = f'<rect {region} fill="{shade(kind, linear)}"/>'
+                            with (
+                                doc_ex.open(sample(art, inline, root)) as book,
+                                doc_ex.open(sample(reference, inline)) as expected,
+                            ):
+                                preview = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+                                self.assertEqual(preview, rgba_pixels(png_chunks(expected.render_page(0, dpi=dpi))))
+                                with doc_ex.open(book.export_epub_fixed_pdf(dpi=dpi)) as pdf:
+                                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))), preview)
+                                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "filter.*geometry"):
+                                    book.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+
+                lit = scene(light("Diffuse", color="#0000c0") + mask, artwork=linked, after=marker)
+                with (
+                    doc_ex.open(sample(lit, inline)) as book,
+                    doc_ex.open(sample(linked + marker, inline)) as normal,
+                ):
+                    width, pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+                    normal_width, plain = rgba_pixels(png_chunks(normal.render_page(0, dpi=dpi)))
+                    self.assertEqual(width, normal_width)
+                    self.assertEqual(pixels[0::4], plain[0::4])
+                    self.assertEqual(pixels[1::4], plain[1::4])
+                    self.assertNotEqual(pixels[2::4], plain[2::4])
+                    with (
+                        doc_ex.open(book.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as pdf,
+                        doc_ex.open(normal.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as expected,
+                    ):
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))), (width, pixels))
+                        self.assertEqual(pdf[0].get_text(), "Café")
+                        self.assertEqual(pdf[0].search_for("Café"), expected[0].search_for("Café"))
+                        actual = {link.uri: link for link in pdf[0].get_links()}
+                        reference = {link.uri: link for link in expected[0].get_links()}
+                        self.assertEqual(set(actual), {"#page=1", "https://example.org/ink"})
+                        for uri, link in actual.items():
+                            for edge, bound in zip(link.bbox, reference[uri].bbox, strict=True):
+                                self.assertAlmostEqual(edge, bound, delta=72 / dpi)
+                        with pdf.edit() as edit:
+                            target, = re.findall(rb"/XYZ[ ]+([1-9][0-9.]*)[ ]+([0-9.]+)[ ]+null",
+                                                 edit.to_bytes(object_streams=False))
+                        ink = [(i // 4 % width, i // 4 // width) for i in range(0, len(plain), 4)
+                               if plain[i] == plain[i + 1] == plain[i + 2] < 255]
+                        self.assertTrue(ink)
+                        self.assertEqual(tuple(map(float, target)),
+                                         (min(x for x, _ in ink) * 72 / dpi, 72 - min(y for _, y in ink) * 72 / dpi))
+
+        for root, attributes, linear in (
+            ("", "", True),
+            ('color-interpolation-filters="sRGB"', "", False),
+            ('color-interpolation-filters="sRGB"', 'color-interpolation-filters="linearRGB"', True),
+        ):
+            art = scene(light("Diffuse"), attributes=attributes)
+            reused = f'<defs><g id="reused">{art}</g></defs><use href="#reused"/>'
+            control = f'<rect {region} fill="{shade("Diffuse", linear)}"/>'
+            with (
+                doc_ex.open(sample(reused, False, root)) as book,
+                doc_ex.open(sample(control, False)) as expected,
+            ):
+                self.assertEqual(rgba_pixels(png_chunks(book.render_page(0, dpi=96))),
+                                 rgba_pixels(png_chunks(expected.render_page(0, dpi=96))))
+
+        art = scene(light("Diffuse"))
+        conflicting = (f'<defs><g id="reused">{art}</g></defs>'
+                       '<use href="#reused" color-interpolation-filters="sRGB"/>'
+                       '<use href="#reused" color-interpolation-filters="linearRGB"/>')
+        with doc_ex.open(sample(conflicting, False)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "inside a use instance needs a local"):
+                book.render_page(0, dpi=96)
+
+        with doc_ex.open(sample(art, False)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "SVG filter work exceeds"):
+                book.render_page(0, dpi=1100)
 
     def test_svg_filter_chain_renders_named_results_and_alpha_to_visual_outputs(self) -> None:
         tint = "0 0 0 0 0, 1 0 0 0 0, 0 0 0 0 0, 0 0 0 1 0"

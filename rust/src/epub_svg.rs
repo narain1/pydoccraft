@@ -712,6 +712,14 @@ fn parse(
     } else {
         styled
     };
+    let styled = if root
+        .descendants()
+        .any(|node| node.is_element() && effects::is_lighting(node.tag_name().name()))
+    {
+        effects::normalize_lighting(styled, has_uses)?
+    } else {
+        styled
+    };
     let fonts = if has_text {
         Some(svg_fonts::Resolver::install(
             &mut options,

@@ -1,4 +1,6 @@
 //! Validate bounded SVG lighting before calling the native raster kernel.
+use std::collections::HashMap;
+
 use resvg::{
     tiny_skia::Transform,
     usvg::{
@@ -6,11 +8,17 @@ use resvg::{
         NonZeroRect,
     },
 };
-use roxmltree::Node;
+use roxmltree::{Node, NodeId};
 
-use super::{finite_number, is_light_source, is_lighting, positive_axes, MAX_OFFSET};
+use super::{
+    super::{style_insertion, use_refs},
+    finite_number, is_light_source, is_lighting, positive_axes, MAX_OFFSET,
+};
 use crate::{
-    epub::{css, invalid, limited, unsupported},
+    author_epub::escape_attribute,
+    epub::{
+        charge, css, invalid, limited, parse_xml, structure::apply_edits, unsupported, XML_BYTES,
+    },
     EngineError,
 };
 
@@ -114,17 +122,156 @@ pub(super) fn color(value: &str) -> Result<String, EngineError> {
     Ok(format!("rgb({red},{green},{blue})"))
 }
 
+const INTERPOLATION: &str = "color-interpolation-filters";
+type FilterSpace = (ColorInterpolation, Option<NodeId>);
+
+/// usvg passes CSS color bytes to the lighting kernel without decoding them.
+/// Project the already cascaded paint into the selected raster color space.
+pub(in crate::epub::svg) fn normalize(
+    styled: Vec<u8>,
+    has_uses: bool,
+) -> Result<Vec<u8>, EngineError> {
+    let source = std::str::from_utf8(&styled).map_err(invalid)?;
+    let xml = parse_xml(&styled)?;
+    let root = xml.root_element();
+    // A root-only declaration, or the initial value alone, is common to
+    // all use instances. Local overrides can vary across native clones.
+    let scoped_color = has_uses
+        && root
+            .descendants()
+            .skip(1)
+            .filter(Node::is_element)
+            .any(|node| {
+                node.has_attribute(INTERPOLATION)
+                    || node
+                        .attribute("style")
+                        .is_some_and(|style| style.contains(INTERPOLATION))
+            });
+    let used = if scoped_color {
+        use_refs::used_sources(root)
+    } else {
+        Vec::new()
+    };
+    let mut spaces = HashMap::new();
+    let mut edits = Vec::new();
+    let mut bytes = 0;
+    for light in root
+        .descendants()
+        .filter(|node| node.is_element() && is_lighting(node.tag_name().name()))
+    {
+        let (space, declared_by) = filter_space(light, &mut spaces)?;
+        let declaration = light.attribute_node("style");
+        let inline = declaration.map_or("", |style| style.value());
+        let properties = css::svg_declarations(inline)?;
+        let color = properties
+            .get("lighting-color")
+            .map(String::as_str)
+            .or_else(|| light.attribute("lighting-color"));
+        let rgb = color
+            .map(|value| {
+                css::color(value)
+                    .map(|(rgb, _)| rgb)
+                    .ok_or_else(|| unsupported("SVG lighting requires an absolute color"))
+            })
+            .transpose()?;
+
+        // An inherited mode from outside a native-use clone can depend on
+        // the instance. A color with only endpoint channels needs no decoding.
+        if use_refs::scope_contains(&used, light)
+            && declared_by != Some(light.id())
+            && declared_by != light.parent_element().map(|filter| filter.id())
+        {
+            if rgb.is_some_and(|rgb| rgb.iter().any(|&channel| channel != 0 && channel != 255)) {
+                return Err(unsupported("SVG lighting color interpolation inside a use instance needs a local declaration"));
+            }
+            continue;
+        }
+
+        let mut style = inline.trim_end_matches(';').to_owned();
+        if !style.is_empty() {
+            style.push(';');
+        }
+        style.push_str(INTERPOLATION);
+        match space {
+            ColorInterpolation::SRGB => style.push_str(":sRGB;"),
+            ColorInterpolation::LinearRGB => {
+                style.push_str(":linearRGB;");
+                if let Some(rgb) = rgb {
+                    let [r, g, b] = rgb.map(linear_channel);
+                    style.push_str(&format!("lighting-color:rgb({r},{g},{b});"));
+                }
+            }
+        }
+        let range = declaration.map_or_else(
+            || style_insertion(source.as_bytes(), light),
+            |attribute| Ok(attribute.range()),
+        )?;
+        let replacement = format!(r#" style="{}""#, escape_attribute(&style));
+        charge(
+            &mut bytes,
+            replacement.len(),
+            XML_BYTES,
+            "EPUB SVG lighting styles exceed 8 MiB",
+        )?;
+        edits.push((range, replacement));
+    }
+    Ok(apply_edits(source, edits, XML_BYTES)?.into_bytes())
+}
+
+fn filter_space(
+    node: Node<'_, '_>,
+    cache: &mut HashMap<NodeId, FilterSpace>,
+) -> Result<FilterSpace, EngineError> {
+    let mut visited = Vec::new();
+    let mut result = (ColorInterpolation::LinearRGB, None);
+    for ancestor in node.ancestors().filter(Node::is_element) {
+        if let Some(&space) = cache.get(&ancestor.id()) {
+            result = space;
+            break;
+        }
+        visited.push(ancestor.id());
+        let declarations = ancestor
+            .attribute("style")
+            .filter(|style| style.contains(INTERPOLATION))
+            .map(css::svg_declarations)
+            .transpose()?;
+        let value = declarations
+            .as_ref()
+            .and_then(|style| style.get(INTERPOLATION))
+            .map(String::as_str)
+            .or_else(|| ancestor.attribute(INTERPOLATION));
+        let Some(value) = value else {
+            continue;
+        };
+        let space = match value.trim().to_ascii_lowercase().as_str() {
+            "srgb" => ColorInterpolation::SRGB,
+            "linearrgb" | "initial" | "auto" => ColorInterpolation::LinearRGB,
+            "inherit" | "unset" => continue,
+            _ => return Err(unsupported("unsupported SVG lighting color interpolation")),
+        };
+        result = (space, Some(ancestor.id()));
+        break;
+    }
+    cache.extend(visited.into_iter().map(|id| (id, result)));
+    Ok(result)
+}
+
+fn linear_channel(channel: u8) -> u8 {
+    let encoded = f64::from(channel) / 255.0;
+    let linear = if encoded <= 0.04045 {
+        encoded / 12.92
+    } else {
+        ((encoded + 0.055) / 1.055).powf(2.4)
+    };
+    (255.0 * linear).round() as u8
+}
+
 pub(super) fn work(
     primitive: &Primitive,
     filter: NonZeroRect,
     device: Transform,
     [width, height]: [u32; 2],
 ) -> Result<usize, EngineError> {
-    if primitive.color_interpolation() != ColorInterpolation::SRGB {
-        return Err(unsupported(
-            "SVG lighting requires sRGB color interpolation",
-        ));
-    }
     if !positive_axes(device) {
         return Err(unsupported(
             "SVG lighting requires an axis-aligned raster transform",
@@ -155,6 +302,14 @@ pub(super) fn work(
         Kind::SpecularLighting(light) => (light.light_source(), light.surface_scale(), 32),
         _ => return Err(invalid("invalid SVG lighting primitive")),
     };
+    // Linear output can require unpremultiplication, transfer, and
+    // premultiplication before compositing on the rendered canvas.
+    let color_work = if primitive.color_interpolation() == ColorInterpolation::LinearRGB {
+        6
+    } else {
+        0
+    };
+    let passes = passes + color_work;
     let (position, target, kind, spatial_work) = match source {
         LightSource::DistantLight(_) => return Ok(passes),
         LightSource::PointLight(point) => ([point.x, point.y, point.z], None, "point", 8),
