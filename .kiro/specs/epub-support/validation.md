@@ -1800,3 +1800,9 @@ The release matrix tested `7a461c1de1954e21d229e502a8ac1e095df8478e` on Linux x8
 | Windows | 25,134,390–25,160,006 | 61,959,168–61,968,896 |
 
 The release workflow retries a version when its bump already merged and the tag is still missing. The 0.3.2 release merge runs the nine installed-wheel jobs before creating the source tag and publishing its wheels.
+
+## Deterministic EPUB authoring output
+
+The 0.3.2 release merge `d902b11` passed eight installed-wheel jobs. On Windows with CPython 3.12, `test_strict_package_and_authoring_safety_are_atomic` failed because two `to_bytes()` calls on the same unchanged book returned different bytes. rbook 0.7.12 writes the current time into an unset `dc:date` and `dcterms:modified` on every write, and the slow runner crossed a one-second boundary between the calls. The failed job skipped the GitHub release and PyPI publication, and no `v0.3.2` tag was created. [Failed release run](https://github.com/narain1/pydoccraft/actions/runs/45653610873)
+
+`EditableEpub` now passes a stamp to rbook that changes only on a successful edit. The Rust unit test `unchanged_book_writes_identical_bytes` covers rejected edits. Against a locally installed macOS arm64 wheel, two writes 1.2 seconds apart returned identical bytes, and a later edit changed them.

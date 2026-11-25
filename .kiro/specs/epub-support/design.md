@@ -24,7 +24,7 @@ The existing native extraction, render, and conversion operations dispatch to EP
 
 ## Creation and dependency scope
 
-`EditableEpub` validates and escapes semantic EPUB 3 source, then calls rbook 0.7.12 with only its write feature. Writes run through a bounded sink. The public creation APIs do not accept externally supplied XHTML, OPF, or archive entry names. Authoring and metadata editing use the same output limit. Input, output, XML and resource limits bound the work of individual stages. They do not measure total process memory.
+`EditableEpub` validates and escapes semantic EPUB 3 source, then calls rbook 0.7.12 with only its write feature. Writes run through a bounded sink. The public creation APIs do not accept externally supplied XHTML, OPF, or archive entry names. Authoring and metadata editing use the same output limit. rbook stamps the wall clock into an unset `dc:date` or `dcterms:modified` on each write. `EditableEpub` therefore records one UTC stamp at creation and after each successful edit, and passes it to rbook as the modification date and as the publication date when none is set. Writing an unchanged book returns identical bytes, and a rejected edit leaves the output unchanged. Input, output, XML and resource limits bound the work of individual stages. They do not measure total process memory.
 
 This design replaces LexePub and retains the existing rbook writer. It requires no craft-libs EPUB proposal or change to the shared backend revision. The read and creation paths are independently exercised by round-trip tests.
 
