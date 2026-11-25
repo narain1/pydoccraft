@@ -39,6 +39,7 @@
 - [x] Render bounded same-document SVG use references, including nested instances and symbols, in fixed-layout and inline content.
 - [x] Preserve packaged variable-font selection and inherited axis settings across distinct SVG use instances.
 - [x] Substitute inherited CSS custom properties in nested SVG use instances with instance-scoped cascade, local paint, variable fonts, and preserved PDF text links.
+- [x] Recover graphics hyperlinks and fragments inside repeated SVG use instances with native transformed and clipped PDF geometry.
 - [x] Render SVG gradient templates and bounded Gaussian blur in fixed-layout previews, visual PDF and rasterized inline SVG exports.
 - [x] Render a bounded SVG drop-shadow primitive with SourceGraphic and SourceAlpha input, signed offsets, and CSS flood color and opacity.
 - [x] Apply Unicode ranges and ordered font fallback to static SVG text, including inherited lists and matching in reopened exports.
@@ -46,7 +47,7 @@
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
 - [x] Render alpha-preserving SVG color matrices, including saturation and hue rotation, with the fixed-layout PDF text and annotations preserved.
 - [x] Render bounded SVG filter chains with prior named inputs, including alpha-changing color matrices in visual output. Reject PDF text or annotation capture when the source geometry cannot be preserved.
-- [ ] Extend source CSS and fixed-layout fidelity, including more SVG filter primitives, PDF text and annotations under alpha-changing filters, complex SVG text fallback, and graphics-only links inside reused SVG sources.
+- [ ] Extend source CSS and fixed-layout fidelity, including more SVG filter primitives, PDF text and annotations under alpha-changing filters, and complex SVG text fallback.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

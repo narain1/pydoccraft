@@ -1,4 +1,4 @@
-//! Retain link and fragment ownership erased by the native SVG text parser.
+//! Retain link and fragment ownership erased by the native SVG parser.
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
@@ -17,6 +17,9 @@ use crate::{
     epub::{charge, invalid, parse_xml, rendition, structure::apply_edits, XML_BYTES},
     EngineError,
 };
+
+#[path = "epub_svg_object_links.rs"]
+mod object_links;
 
 pub(super) struct Links<'a> {
     pub(super) generated_ids: HashMap<roxmltree::NodeId, String>,
@@ -111,8 +114,38 @@ impl<'a> Links<'a> {
         let synthetic_ids: HashSet<&str> =
             self.generated_ids.values().map(String::as_str).collect();
         let mut coverage = Coverage::new(tree, [1.0; 2]);
+        let mut instantiated = if has_uses {
+            object_links::recover(self, source, tree, options, aliases, &synthetic_ids)?
+        } else {
+            object_links::ByNode::new()
+        };
+        let mut instance_anchors = Geometry::default();
         visit_painted_svg(tree, clip, |paint, clip, effects| {
             let node = paint.node;
+            if let Some(claims) = instantiated.remove(&std::ptr::from_ref(node)) {
+                if let Some(rect) = node.abs_stroke_bounding_box() {
+                    if let Some(rect) = coverage.refine(
+                        paint,
+                        effects,
+                        actual_rect(rect),
+                        clip,
+                        Target::PaintedObject,
+                    )? {
+                        for claim in claims {
+                            if let Some(id) = claim
+                                .id
+                                .as_deref()
+                                .filter(|id| !instance_anchors.anchors.contains_key(*id))
+                            {
+                                instance_anchors.anchor(id, rect, clip)?;
+                            }
+                            if let Some(href) = claim.href {
+                                geometry.link(rect, clip, href.into())?;
+                            }
+                        }
+                    }
+                }
+            }
             let id = authored_id(aliases, node.id());
             if !id.is_empty() && !synthetic_ids.contains(id) {
                 if let Some(rect) = node.abs_bounding_box() {
@@ -181,6 +214,11 @@ impl<'a> Links<'a> {
             }
             Ok(())
         })?;
+        for (id, rect) in instance_anchors.anchors {
+            if !geometry.anchors.contains_key(&id) {
+                geometry.anchor(&id, rect, clip)?;
+            }
+        }
         Ok(geometry)
     }
 

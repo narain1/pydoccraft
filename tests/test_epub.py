@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 import struct
 from pathlib import Path
 import tempfile
@@ -1087,6 +1088,73 @@ class EpubTests(unittest.TestCase):
             self.assertEqual(rgba_pixels(png_chunks(result.render_page(0, dpi=96))), preview)
             self.assertRegex(editor.to_bytes(object_streams=False),
                              rb"/XYZ\s+60(?:\.0+)?\s+30(?:\.0+)?\s+null")
+
+    def test_fixed_layout_pdf_recovers_graphics_links_and_destinations_inside_svg_use(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 184, 124)])
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+            width="184" height="124" viewBox="0 0 184 124">
+          <style>.first { --tint: #d05030; } .second { --tint: #6070d0; }
+                 .panel rect { fill: var(--tint, black); }</style>
+          <defs>
+            <clipPath id="triangle"><path d="M 20,2 L 36,2 L 20,18 Z"/></clipPath>
+            <g id="panel" class="panel">
+              <a href="#caf%C3%A9" xlink:href="https://example.org/wrong">
+                <rect x="2" y="2" width="12" height="12"/>
+              </a>
+              <a xlink:href="https://example.org/wedge" clip-path="url(#triangle)">
+                <rect x="18" y="0" width="24" height="22"/>
+              </a>
+              <a href="https://example.org/clear" style="opacity:0">
+                <rect x="38" y="0" width="10" height="10"/>
+              </a>
+              <a href="https://example.org/transparent">
+                <rect x="2" y="22" width="10" height="8" fill-opacity="0"/>
+              </a>
+              <g transform="translate(37 22)">
+                <rect id="café" x="3" y="2" width="9" height="9"/>
+              </g>
+            </g>
+            <use id="nested" href="#panel" x="4" y="3"/>
+            <symbol id="symbol" viewBox="0 0 52 36"><use href="#nested"/></symbol>
+          </defs>
+          <use class="first" href="#nested" x="90" y="5"/>
+          <use class="second" href="#symbol" x="10" y="58" width="78" height="54"/>
+        </svg>"""
+        xhtml = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Reused graphics</title>
+          <meta name="viewport" content="width=184,height=124"/></head>
+          <body style="margin:0">{svg}</body></html>"""
+        variants = (
+            ("OEBPS/s0.svg", svg, {"OEBPS/content.opf": package}),
+            ("OEBPS/s0.xhtml", xhtml, {}),
+        )
+        for path, chapter, updates in variants:
+            with self.subTest(path=path), doc_ex.open(rewrite_epub(fixture, {**updates, path: chapter})) as book:
+                preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                output = book.export_epub_fixed_pdf(dpi=96, pages=[0, 0], searchable=True)
+                self.assertEqual(book.read_epub_resource(path), chapter.encode())
+                with doc_ex.open(output) as pdf, pdf.edit() as editor:
+                    for i in range(2):
+                        jump, wedge, repeat_jump, repeat_wedge = pdf[i].get_links()
+                        self.assertEqual([jump.metadata["target_page"], repeat_jump.metadata["target_page"]], [i, i])
+                        self.assertEqual(wedge.uri, "https://example.org/wedge")
+                        self.assertEqual(repeat_wedge.uri, wedge.uri)
+                        for link, bounds in (
+                            (jump, (72.0, 7.5, 81.0, 16.5)),
+                            (repeat_jump, (14.25, 49.125, 27.75, 62.625)),
+                            (wedge, (85.5, 7.5, 97.5, 19.5)),
+                        ):
+                            for actual, expected in zip(link.bbox, bounds):
+                                self.assertAlmostEqual(actual, expected, delta=0.001)
+                        for actual, expected in zip(repeat_wedge.bbox, (34.5, 49.125, 52.5, 67.125)):
+                            self.assertAlmostEqual(actual, expected, delta=0.75)
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(i, dpi=96))), preview)
+                    raw = editor.to_bytes(object_streams=False)
+                    self.assertEqual(len(re.findall(rb"/XYZ\s+100\.5\s+69(?:\.0+)?\s+null", raw)), 4)
 
     def test_fixed_layout_pdf_links_use_positioned_svg_text_spans(self) -> None:
         data = fixed_spread_fixture([("", "white", 320, 160)])

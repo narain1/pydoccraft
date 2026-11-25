@@ -29,6 +29,7 @@ pub(super) struct Coverage<'tree> {
 
 pub(super) enum Target {
     Object,
+    PaintedObject,
     Glyph(Option<Rect>),
 }
 
@@ -174,7 +175,7 @@ impl<'tree> Coverage<'tree> {
         clip: Rect,
         target: Target,
     ) -> Result<Option<Rect>, EngineError> {
-        if effects.is_empty() {
+        if effects.is_empty() && !matches!(target, Target::PaintedObject) {
             return Ok(Some(rect));
         }
         let rect = intersection(clip, rect);
@@ -226,7 +227,9 @@ impl<'tree> Coverage<'tree> {
             }
         }
         Ok((!visible.is_empty()).then(|| match target {
-            Target::Object => intersection(rect, visible.as_rect(self.density)),
+            Target::Object | Target::PaintedObject => {
+                intersection(rect, visible.as_rect(self.density))
+            }
             Target::Glyph(_) => visible.trim(ink, rect, self.density),
         }))
     }
