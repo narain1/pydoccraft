@@ -584,16 +584,7 @@ impl<'xml> Projection<'_, 'xml> {
                 }
                 return space(node, style);
             }
-            "mpadded" => {
-                let body = self.elements(node, depth, style)?;
-                if compose::selected(node) {
-                    let viewport = self.stylesheet.map_or([0.0; 2], |sheet| sheet.viewport);
-                    return self
-                        .extras
-                        .push(compose::padding(node, body, style, viewport)?);
-                }
-                return padded(node, body);
-            }
+            "mpadded" => return self.padded(node, depth, style),
             "mfrac" => {
                 let seeking = self
                     .alignment_group
@@ -698,6 +689,47 @@ impl<'xml> Projection<'_, 'xml> {
             _ => return Err(unsupported(&format!("MathML element {tag}"))),
         };
         Ok(vec![native])
+    }
+
+    fn padded(
+        &mut self,
+        node: Node<'xml, '_>,
+        depth: usize,
+        style: Presentation<'xml>,
+    ) -> Result<Arg, EngineError> {
+        if compose::selected(node) {
+            let seeking = self
+                .alignment_group
+                .as_ref()
+                .is_some_and(table::alignment::Scope::seeking_caret);
+            let body = self.elements(node, depth, style)?;
+            if seeking
+                && self
+                    .alignment_group
+                    .as_ref()
+                    .is_some_and(|scope| scope.caret.is_some())
+            {
+                return Err(unsupported(
+                    "MathML alignment caret inside composed padding",
+                ));
+            }
+            let viewport = self.stylesheet.map_or([0.0; 2], |sheet| sheet.viewport);
+            return self
+                .extras
+                .push(compose::padding(node, body, style, viewport)?);
+        }
+        let [zero_wid, zero_asc, zero_desc] = padded_metrics(node)?;
+        if !zero_wid && !zero_asc && !zero_desc {
+            return self.elements(node, depth, style);
+        }
+        let e = self.with_operand_caret(0, |projection| projection.elements(node, depth, style))?;
+        Ok(vec![MNode::Phant {
+            show: true,
+            zero_wid,
+            zero_asc,
+            zero_desc,
+            e,
+        }])
     }
 
     fn with_operand_caret(
@@ -1389,28 +1421,13 @@ fn zero_length(value: &str) -> bool {
         || css::points(value, 12.0, [100.0; 2]) == Some(0.0)
 }
 
-fn padded(node: Node<'_, '_>, e: Arg) -> Result<Arg, EngineError> {
-    for key in ["lspace", "voffset"] {
-        if node.attribute(key).is_some_and(|value| !zero_length(value)) {
-            return Err(unsupported("nonzero MathML mpadded offsets"));
-        }
-    }
+fn padded_metrics(node: Node<'_, '_>) -> Result<[bool; 3], EngineError> {
     let metric = |key| match node.attribute(key).map(str::trim) {
         None => Ok(false),
         Some(value) if zero_length(value) => Ok(!value.starts_with(['+', '-'])),
-        Some(_) => Err(unsupported("nonzero MathML mpadded dimensions")),
+        Some(_) => Err(unsupported("nonzero native MathML mpadded dimensions")),
     };
-    let (zero_wid, zero_asc, zero_desc) = (metric("width")?, metric("height")?, metric("depth")?);
-    if !zero_wid && !zero_asc && !zero_desc {
-        return Ok(e);
-    }
-    Ok(vec![MNode::Phant {
-        show: true,
-        zero_wid,
-        zero_asc,
-        zero_desc,
-        e,
-    }])
+    Ok([metric("width")?, metric("height")?, metric("depth")?])
 }
 
 fn enclosure(notation: &str, e: Arg) -> Result<MNode, EngineError> {

@@ -514,7 +514,10 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
     let token = matches!(tag(parent), Some("mi" | "mn" | "mo" | "ms" | "mtext"));
     if !token
         && parent != cell
-        && !matches!(tag(parent), Some("mrow" | "mstyle" | "msqrt" | "menclose"))
+        && !matches!(
+            tag(parent),
+            Some("mrow" | "mstyle" | "msqrt" | "menclose" | "mpadded")
+        )
     {
         return Err(unsupported(
             "MathML alignment mark outside the cell baseline",
@@ -534,6 +537,7 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
                             | "msqrt"
                             | "mroot"
                             | "menclose"
+                            | "mpadded"
                             | "mfenced"
                             | "msub"
                             | "msup"
@@ -629,6 +633,7 @@ fn decimal_offset(cell: Node<'_, '_>, number: Node<'_, '_>) -> Result<usize, Eng
                         | "msqrt"
                         | "mroot"
                         | "menclose"
+                        | "mpadded"
                         | "mfenced"
                         | "msub"
                         | "msup"
