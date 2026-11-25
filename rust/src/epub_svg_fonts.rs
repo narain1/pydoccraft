@@ -128,9 +128,10 @@ impl Resolver {
                 continue;
             };
             let [weight, upper] = face.weight.unwrap_or([400.0; 2]);
-            let Some(style) = face.style.filter(|_| weight == upper) else {
+            if weight != upper || face.oblique.is_some_and(|[low, high]| low != high) {
                 return Err(unsupported("EPUB SVG font-face weight and style ranges"));
-            };
+            }
+            let style = face.style;
             if !face.axes.is_empty() {
                 return Err(unsupported("EPUB SVG font-face variation defaults"));
             }

@@ -1369,6 +1369,91 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(preview(primary + second), preview(neutral, text=control))
         self.assertNotEqual(preview(primary + second), preview(neutral))
 
+    def test_xhtml_oblique_ranges_match_before_weight_and_preserve_inline_angles(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        wide = font_with_extra_advance(font)
+
+        def face(file: str, slope: str, extra: str = "", family: str = "Sample") -> str:
+            return f"@font-face{{font-family:{family};src:url({file});font-style:{slope};{extra}}}"
+
+        def preview(definitions: str, request: str, text: str = "Slant sample", *, fixed: bool = False) -> bytes:
+            viewport = '<meta name="viewport" content="width=420,height=100"/>' if fixed else ""
+            chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Oblique</title>{viewport}
+            <style>{definitions}
+            body {{margin:0;font-family:Sample;font-size:36px;line-height:56px;{request}}}
+            p {{margin:0}}</style></head><body><p>{text}</p></body></html>"""
+            if fixed:
+                source = fixed_spread_fixture([("", "white", 420, 100)])
+                files = {"OEBPS/s0.xhtml": chapter}
+            else:
+                source = epub_fixture(chapter_one=chapter)
+                files = {}
+            files.update({"OEBPS/book.ttf": font, "OEBPS/wide.ttf": wide})
+            with doc_ex.open(rewrite_epub(source, files)) as book:
+                image = book.render_page(0, dpi=96)
+                if fixed:
+                    with doc_ex.open(book.export_epub_fixed_pdf(dpi=96)) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))),
+                                         rgba_pixels(png_chunks(image)))
+                return image
+
+        shallow = face("book.ttf", "oblique 3deg 8deg")
+        steep = face("wide.ttf", "oblique 28deg 16deg")
+        for fixed in (False, True):
+            with self.subTest(fixed=fixed):
+                self.assertNotEqual(preview(shallow, "font-style:oblique 9deg", fixed=fixed),
+                                    preview(steep, "font-style:oblique 9deg", fixed=fixed))
+                for request, winner in (
+                    ("font-style:oblique 9deg", shallow),
+                    ("font-style:oblique 10.99deg", shallow),
+                    ("font-style:oblique 11deg", steep),
+                    ("--angle:oblique 12deg;font-style:var(--angle)", steep),
+                    ("font-style:Oblique /* comment */ 10grad", shallow),
+                    ("font-style:oblique 0.04turn", steep),
+                    ("font-style:oblique 9deg;font-style:oblique 10deg 20deg", shallow),
+                    ("font-style:oblique;font-style:oblique 91deg", steep),
+                ):
+                    self.assertEqual(preview(shallow + steep, request, fixed=fixed),
+                                     preview(winner, request, fixed=fixed))
+
+        back_shallow = face("book.ttf", "oblique -8deg -3deg")
+        back_steep = face("wide.ttf", "oblique -28deg -16deg")
+        for request, winner in (("oblique -9deg", back_shallow), ("oblique -12deg", back_steep)):
+            property = f"font-style:{request}"
+            self.assertEqual(preview(back_shallow + back_steep, property), preview(winner, property))
+
+        italic = face("book.ttf", "italic")
+        self.assertEqual(preview(steep + italic, "font-style:italic"), preview(italic, "font-style:italic"))
+        auto = face("book.ttf", "oblique 16deg 20deg", "font-style:auto")
+        self.assertEqual(preview(auto + steep, "font-style:normal"),
+                         preview(face("book.ttf", "normal") + steep, "font-style:normal"))
+        # A matching style takes precedence over a closer weight. Width still comes first.
+        heavy = face("wide.ttf", "oblique 2deg 8deg", "font-weight:700")
+        exact = face("book.ttf", "oblique 16deg 22deg", "font-weight:400")
+        request = "font-style:oblique 18deg;font-weight:700"
+        self.assertEqual(preview(heavy + exact, request), preview(exact, request))
+        narrow = face("wide.ttf", "oblique 2deg 8deg", "font-width:75%;font-weight:700")
+        request += ";font-width:75%"
+        self.assertEqual(preview(narrow + exact, request), preview(narrow, request))
+
+        upright = face("book.ttf", "normal")
+        variable_slope = face("wide.ttf", "oblique -5deg 5deg", "font-weight:700")
+        for slope in ("normal", "oblique 0deg"):
+            request = f"font-style:{slope};font-weight:700"
+            self.assertEqual(preview(upright + variable_slope, request),
+                             preview(variable_slope, request))
+            self.assertNotEqual(preview(upright + variable_slope, request),
+                                preview(upright, request))
+
+        # Adjacent spans share other typography and still choose different named faces.
+        separately_named = steep.replace("font-family:Sample", "font-family:Wide")
+        mixed = '<span style="font-style:oblique 8deg">A</span><span style="font-style:oblique 18deg">B</span>C'
+        control = mixed.replace("font-style:oblique 18deg", "font-style:oblique 18deg;font-family:Wide")
+        self.assertEqual(preview(shallow + steep, "", mixed),
+                         preview(shallow + separately_named, "", control))
+        self.assertNotEqual(preview(shallow + steep, "", mixed),
+                            preview(shallow + steep, "font-style:oblique 8deg", "ABC"))
+
     def test_epub_svg_variable_axes_change_rendered_text(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
 

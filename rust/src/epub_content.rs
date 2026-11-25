@@ -116,6 +116,9 @@ impl Inline {
                     && last.chars == props
                     && last.families.as_slice() == typography.families.as_ref()
                     && last.axes.as_slice() == typography.axes.as_ref()
+                    && last.font_weight == typography.font_weight
+                    && last.font_width == typography.font_width
+                    && last.oblique == typography.oblique
                     && last.optical_sizing_disabled == typography.optical_sizing_disabled
                 {
                     *end = self.characters;
@@ -143,6 +146,7 @@ impl Inline {
                     axes: typography.axes.to_vec(),
                     font_weight: typography.font_weight,
                     font_width: typography.font_width,
+                    oblique: typography.oblique,
                     optical_sizing_disabled: typography.optical_sizing_disabled,
                 },
             ));

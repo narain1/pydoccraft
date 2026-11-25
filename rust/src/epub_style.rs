@@ -42,6 +42,7 @@ pub(super) struct Typography {
     pub axes: Arc<[css::Axis]>,
     pub font_weight: Option<f32>,
     pub font_width: Option<f32>,
+    pub oblique: Option<f32>,
     pub optical_sizing_disabled: bool,
     pub align: Option<Align>,
     pub line_height: Option<LineSpacing>,
@@ -428,12 +429,23 @@ impl Typography {
         } else if let Some(width) = css::font_width(width) {
             self.font_width = Some(width);
         }
-        self.chars.italic = match value(values, "font-style") {
-            "normal" => Some(false),
-            "italic" | "oblique" => Some(true),
-            _ if matches!(tag, "i" | "em" | "cite") => Some(true),
-            _ => self.chars.italic,
+        use parley::FontStyle;
+        let slope = value(values, "font-style");
+        let style = match slope.to_ascii_lowercase().as_str() {
+            "initial" => Some(FontStyle::Normal),
+            "" | "revert" | "revert-layer" if matches!(tag, "i" | "em" | "cite") => {
+                Some(FontStyle::Italic)
+            }
+            "" | "inherit" | "unset" | "revert" | "revert-layer" => None,
+            _ => css::font_style(slope),
         };
+        if let Some(style) = style {
+            self.chars.italic = Some(style != FontStyle::Normal);
+            self.oblique = match style {
+                FontStyle::Oblique(angle) => angle,
+                _ => None,
+            };
+        }
         if let Some(color) = css::color(value(values, "color")) {
             self.chars.color = Some(TextColor::Rgb(ink(color).0));
             self.invisible = color.1 == 0.0;

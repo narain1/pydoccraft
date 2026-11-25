@@ -40,12 +40,36 @@ use crate::{model::BlockPayload, EngineError};
 
 #[path = "epub_font_ranges.rs"]
 pub(super) mod ranges;
+#[path = "epub_fonts/slope.rs"]
+mod slope;
 
 pub(super) const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REGISTERED_FACES: usize = 512;
 const MAX_VARIATION_SPAN_BYTES: usize = 8 * 1024 * 1024;
 type Brush = [u8; 4];
-type FontRequest = [u32; 2];
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct FontRequest {
+    weight: u32,
+    width: u32,
+    slope: slope::Request,
+}
+
+impl FontRequest {
+    fn new(weight: f32, width: f32, italic: Option<bool>, oblique: Option<f32>) -> Self {
+        Self {
+            weight: weight.to_bits(),
+            width: width.to_bits(),
+            slope: slope::Request::new(italic, oblique),
+        }
+    }
+
+    fn upright(self) -> Self {
+        Self {
+            slope: slope::Request::Normal,
+            ..self
+        }
+    }
+}
 type FontNames = HashMap<String, HashMap<Option<FontRequest>, String>>;
 
 pub(super) struct Face {
@@ -54,7 +78,8 @@ pub(super) struct Face {
     pub urls: Vec<String>,
     pub weight: Option<[f32; 2]>,
     pub width: Option<[f32; 2]>,
-    pub style: Option<FontStyle>,
+    pub style: FontStyle,
+    pub oblique: Option<[f32; 2]>,
     pub unicode_ranges: Option<Vec<(u32, u32)>>,
     pub axes: Arc<[super::css::Axis]>,
 }
@@ -62,6 +87,7 @@ pub(super) struct Face {
 struct FaceVariations {
     weight: Option<[f32; 2]>,
     width: Option<[f32; 2]>,
+    oblique: Option<[f32; 2]>,
     axes: Arc<[super::css::Axis]>,
 }
 
@@ -116,13 +142,19 @@ impl Fonts {
             let families = &style.text.families;
             let weight = style.text.font_weight.unwrap_or(400.0);
             let width = style.text.font_width.unwrap_or(100.0);
-            needs_stack |= families.len() > 1 || unusual_weight(weight) || width != 100.0;
+            needs_stack |= families.len() > 1
+                || unusual_weight(weight)
+                || width != 100.0
+                || style.text.oblique.is_some();
             let mut record = |name: &str| {
                 let key = name.to_ascii_lowercase();
                 if declared.contains_key(&key) {
-                    used.entry(key)
-                        .or_default()
-                        .insert([weight.to_bits(), width.to_bits()]);
+                    used.entry(key).or_default().insert(FontRequest::new(
+                        weight,
+                        width,
+                        style.text.chars.italic,
+                        style.text.oblique,
+                    ));
                 }
             };
             if families.is_empty() {
@@ -144,45 +176,90 @@ impl Fonts {
         let mut rewritten_bytes = 0;
         let mut registered_faces = 0;
         let mut families = 0;
-        let mut matched_widths = HashMap::new();
+        let mut matching = HashMap::new();
+        let mut match_work = 0;
         for (name, requests) in &used {
             let group = &declared[name];
-            if group.iter().any(|face| {
-                face.width.is_some() || face.weight.is_some_and(|[low, high]| low != high)
-            }) {
+            let match_slope = group.iter().any(|face| face.oblique.is_some());
+            if match_slope
+                || group.iter().any(|face| {
+                    face.width.is_some() || face.weight.is_some_and(|[low, high]| low != high)
+                })
+            {
                 let mut widths = HashMap::new();
-                for [_, width] in requests {
-                    widths
-                        .entry(*width)
-                        .or_insert_with(|| match_width(group, f32::from_bits(*width)));
+                let mut slopes = HashMap::new();
+                let mut matched = HashMap::new();
+                for &request in requests {
+                    let width = *widths
+                        .entry(request.width)
+                        .or_insert_with(|| match_width(group, f32::from_bits(request.width)));
+                    let slope = if match_slope {
+                        let key = (width.to_bits(), request.slope);
+                        if let Some(rank) = slopes.get(&key) {
+                            *rank
+                        } else {
+                            charge(
+                                &mut match_work,
+                                group.len(),
+                                4_000_000,
+                                "EPUB font-style matching exceeds its work budget",
+                            )?;
+                            let rank = group
+                                .iter()
+                                .filter(|face| contains_width(face, width))
+                                .map(|face| request.slope.rank(face.style, face.oblique))
+                                .min_by(|a, b| a.cmp(*b));
+                            slopes.insert(key, rank);
+                            rank
+                        }
+                    } else {
+                        None
+                    };
+                    let request = if match_slope {
+                        request
+                    } else {
+                        request.upright()
+                    };
+                    matched.insert(request, (width, slope));
                 }
-                matched_widths.insert(name.as_str(), widths);
+                matching.insert(name.as_str(), matched);
             }
         }
         // Fontique tries matching faces in registration order. CSS composite faces
         // try the last declaration first when multiple faces cover a character.
         for face in faces.iter().rev() {
             let key = face.family.to_ascii_lowercase();
-            let Some(requests) = used.get(&key) else {
+            if !used.contains_key(&key) {
                 continue;
-            };
-            let choices: Vec<_> = if let Some(widths) = matched_widths.get(key.as_str()) {
-                let [low, high] = face.width.unwrap_or([100.0; 2]);
-                requests
+            }
+            let choices: Vec<_> = if let Some(matched) = matching.get(key.as_str()) {
+                charge(
+                    &mut match_work,
+                    matched.len(),
+                    4_000_000,
+                    "EPUB font-face matching exceeds its work budget",
+                )?;
+                let mut eligible = matched
                     .iter()
-                    .copied()
-                    .filter(|[_, width]| f32::from_bits(*width).clamp(low, high) == widths[width])
-                    .map(Some)
-                    .collect()
+                    .filter_map(|(&request, &(width, rank))| {
+                        let same_style = rank.is_none_or(|rank| {
+                            request
+                                .slope
+                                .rank(face.style, face.oblique)
+                                .cmp(rank)
+                                .is_eq()
+                        });
+                        (contains_width(face, width) && same_style).then_some(Some(request))
+                    })
+                    .collect::<Vec<_>>();
+                eligible.sort_unstable();
+                eligible
             } else {
                 vec![None]
             };
             if choices.is_empty() {
                 continue;
             }
-            let style = face
-                .style
-                .ok_or_else(|| unsupported("EPUB font-face style range"))?;
             let interval = face.weight.unwrap_or([400.0; 2]);
             let data = read_face(face, book)?;
             charge(
@@ -195,12 +272,17 @@ impl Fonts {
             // an author face's range can reach the next family on the CSS list.
             let mut register = |data: Vec<u8>| {
                 let blob = Blob::new(Arc::new(data));
-                if face.weight.is_some() || face.width.is_some() || !face.axes.is_empty() {
+                if face.weight.is_some()
+                    || face.width.is_some()
+                    || face.oblique.is_some()
+                    || !face.axes.is_empty()
+                {
                     result.variations.insert(
                         blob.id(),
                         FaceVariations {
                             weight: face.weight,
                             width: face.width,
+                            oblique: face.oblique,
                             axes: face.axes.clone(),
                         },
                     );
@@ -217,9 +299,33 @@ impl Fonts {
                         families += 1;
                         format!("\0EPUB font family {families}")
                     });
-                    let [weight, width] =
-                        choice.map_or([interval[0], 100.0], |axes| axes.map(f32::from_bits));
+                    let [weight, width] = choice.map_or([interval[0], 100.0], |request| {
+                        [
+                            f32::from_bits(request.weight),
+                            f32::from_bits(request.width),
+                        ]
+                    });
                     let nominal = weight.clamp(interval[0], interval[1]);
+                    let style = if let Some(request) = choice {
+                        match face.oblique {
+                            Some(range) => {
+                                let angle = request.slope.angle(range);
+                                if angle == 0.0 && request.slope == slope::Request::Normal {
+                                    FontStyle::Normal
+                                } else {
+                                    FontStyle::Oblique(Some(angle))
+                                }
+                            }
+                            None if face.style == FontStyle::Normal
+                                && request.slope == slope::Request::Oblique(0.0f32.to_bits()) =>
+                            {
+                                request.slope.style()
+                            }
+                            None => face.style,
+                        }
+                    } else {
+                        face.style
+                    };
                     let overrides = FontInfoOverride {
                         family_name: Some(alias),
                         weight: Some(FontWeight::new(nominal)),
@@ -281,7 +387,10 @@ impl Fonts {
             return Ok(true);
         }
         Ok(StyledText::new(block)?.spans.iter().any(|(_, _, style)| {
-            if unusual_weight(run_weight(style)) || run_width(style) != 100.0 {
+            if unusual_weight(run_weight(style))
+                || run_width(style) != 100.0
+                || style.oblique.is_some()
+            {
                 true
             } else if style.families.is_empty() {
                 style
@@ -415,7 +524,7 @@ impl Fonts {
                 let style = &run.chars;
                 let weight = run_weight(run);
                 let width = run_width(run);
-                let request = [weight.to_bits(), width.to_bits()];
+                let request = FontRequest::new(weight, width, style.italic, run.oblique);
                 let mut families: Vec<_> = run
                     .families
                     .iter()
@@ -473,8 +582,11 @@ impl Fonts {
                         range.clone(),
                     );
                 }
-                if style.italic == Some(true) {
-                    builder.push(StyleProperty::FontStyle(FontStyle::Italic), range.clone());
+                if request.slope != slope::Request::Normal {
+                    builder.push(
+                        StyleProperty::FontStyle(request.slope.style()),
+                        range.clone(),
+                    );
                 }
                 if style.hidden == Some(true) {
                     builder.push(StyleProperty::Brush([0, 0, 0, 0]), range.clone());
@@ -586,6 +698,11 @@ fn run_width(run: &RunStyle) -> f32 {
     run.font_width.unwrap_or(100.0)
 }
 
+fn contains_width(face: &Face, width: f32) -> bool {
+    let [low, high] = face.width.unwrap_or([100.0; 2]);
+    (low..=high).contains(&width)
+}
+
 fn match_width(faces: &[&Face], requested: f32) -> f32 {
     let rank = |candidate: f32| {
         let preferred = if requested <= 100.0 {
@@ -620,6 +737,10 @@ fn variations(run: &RunStyle, face: Option<&FaceVariations>) -> Vec<FontVariatio
         if let Some([low, high]) = face.width {
             axes.insert(*b"wdth", run_width(run).clamp(low, high));
         }
+        if let Some(range) = face.oblique {
+            let requested = slope::Request::new(run.chars.italic, run.oblique);
+            axes.insert(*b"slnt", -requested.angle(range));
+        }
         axes.extend(face.axes.iter().copied());
     }
     if !run.optical_sizing_disabled {
@@ -638,9 +759,12 @@ fn named_family<'a>(
     request: FontRequest,
 ) -> FontFamilyName<'a> {
     let lower = name.to_ascii_lowercase();
-    let alias = packaged
-        .get(&lower)
-        .and_then(|names| names.get(&Some(request)).or_else(|| names.get(&None)));
+    let alias = packaged.get(&lower).and_then(|names| {
+        names
+            .get(&Some(request))
+            .or_else(|| names.get(&Some(request.upright())))
+            .or_else(|| names.get(&None))
+    });
     FontFamilyName::named(if let Some(alias) = alias {
         alias
     } else {

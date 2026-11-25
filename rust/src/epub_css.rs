@@ -273,7 +273,7 @@ impl Cascade {
         for statement in statements {
             match statement {
                 Statement::QualifiedRule(rule) => {
-                    let values: Arc<[_]> = declarations(&rule.block, source)?.into();
+                    let values: Arc<[_]> = declarations(&rule.block, source, false)?.into();
                     if values.is_empty() {
                         continue;
                     }
@@ -386,7 +386,7 @@ impl Cascade {
             if block.span.end != source.len() {
                 return Err(invalid("EPUB inline CSS has trailing input"));
             }
-            for (key, value, important) in declarations(&block, &source)? {
+            for (key, value, important) in declarations(&block, &source, false)? {
                 update(&mut selected, &key, &value, (important, true, [0; 3], 0));
             }
         }
@@ -485,7 +485,7 @@ fn font_face(
     source: &str,
     base: &str,
 ) -> Result<Option<super::fonts::Face>, EngineError> {
-    let values: Properties = declarations(block, source)?
+    let values: Properties = declarations(block, source, true)?
         .into_iter()
         .filter_map(|(key, value, _)| match value {
             CssValue::Text(text)
@@ -562,12 +562,10 @@ fn font_face(
             }
         }
     }
-    let style = match values.get("font-style").map(String::as_str) {
-        None | Some("normal") => Some(parley::FontStyle::Normal),
-        Some("italic") => Some(parley::FontStyle::Italic),
-        Some("oblique") => Some(parley::FontStyle::Oblique(None)),
-        _ => None,
-    };
+    let (style, oblique) = values
+        .get("font-style")
+        .and_then(|value| parse_slope(value, true))
+        .unwrap_or_default();
     Ok(Some(super::fonts::Face {
         family: family.clone(),
         base: base.into(),
@@ -579,6 +577,7 @@ fn font_face(
             .get("font-stretch")
             .and_then(|value| width_range(value)),
         style,
+        oblique,
         unicode_ranges,
         axes: match values
             .get("font-variation-settings")
@@ -588,6 +587,69 @@ fn font_face(
             _ => Arc::default(),
         },
     }))
+}
+
+/// Requested style for an XHTML element. The descriptor also permits a second angle.
+pub(super) fn font_style(value: &str) -> Option<parley::FontStyle> {
+    parse_slope(value, false).map(|(style, _)| style)
+}
+
+fn parse_slope(value: &str, descriptor: bool) -> Option<(parley::FontStyle, Option<[f32; 2]>)> {
+    let source = format!("font-style:{value}");
+    let rule = Parser::new(&source, Syntax::Css)
+        .parse::<Declaration>()
+        .ok()?;
+    if rule.span.end != source.len() || rule.important.is_some() {
+        return None;
+    }
+    slope_components(&rule.value, descriptor)
+}
+
+fn slope_components(
+    components: &[ComponentValue<'_>],
+    descriptor: bool,
+) -> Option<(parley::FontStyle, Option<[f32; 2]>)> {
+    use parley::FontStyle;
+    let [ComponentValue::InterpolableIdent(keyword), rest @ ..] = components else {
+        return None;
+    };
+    let keyword = ident(keyword)?.to_ascii_lowercase();
+    if keyword == "normal" || keyword == "italic" || descriptor && keyword == "auto" {
+        let style = if keyword == "italic" {
+            FontStyle::Italic
+        } else {
+            FontStyle::Normal
+        };
+        return rest.is_empty().then_some((style, None));
+    }
+    if keyword != "oblique" {
+        return None;
+    }
+    let angle = |value: &ComponentValue<'_>| {
+        let ComponentValue::Dimension(dimension) = value else {
+            return None;
+        };
+        let value = dimension.value.value;
+        let degrees = match dimension.unit.name.to_ascii_lowercase().as_str() {
+            "deg" => value,
+            "grad" => value * 0.9,
+            "rad" => value.to_degrees(),
+            "turn" => value * 360.0,
+            _ => return None,
+        };
+        (-90.0..=90.0)
+            .contains(&degrees)
+            .then_some(if degrees == 0.0 { 0.0 } else { degrees })
+    };
+    let range = match rest {
+        [] => [14.0; 2],
+        [first] => [angle(first)?; 2],
+        [first, last] if descriptor => [angle(first)?, angle(last)?],
+        _ => return None,
+    };
+    let [first, last] = range;
+    let sorted = [first.min(last), first.max(last)];
+    Some((FontStyle::Oblique(Some(first)), Some(sorted)))
 }
 
 pub(super) fn font_weight(value: &str) -> Option<f32> {
@@ -821,6 +883,7 @@ fn unicode_range_list(
 fn declarations(
     block: &SimpleBlock<'_>,
     source: &str,
+    font_descriptor: bool,
 ) -> Result<Vec<DeclarationValue>, EngineError> {
     let mut output = Vec::new();
     for statement in &block.statements {
@@ -856,7 +919,9 @@ fn declarations(
             }
         } else if custom {
             output.push((name, CssValue::Text(Arc::from(value)), important));
-        } else if !value.is_empty() && valid_literal(&name, value, &declaration.value) {
+        } else if !value.is_empty()
+            && valid_literal(&name, value, &declaration.value, font_descriptor)
+        {
             for (part, value) in expand(&name, value) {
                 output.push((part, CssValue::Text(Arc::from(value)), important));
             }
@@ -865,8 +930,21 @@ fn declarations(
     Ok(output)
 }
 
-fn valid_literal(name: &str, value: &str, components: &[ComponentValue<'_>]) -> bool {
+fn valid_literal(
+    name: &str,
+    value: &str,
+    components: &[ComponentValue<'_>],
+    font_descriptor: bool,
+) -> bool {
     match name {
+        "font-style" => {
+            slope_components(components, font_descriptor).is_some()
+                || !font_descriptor
+                    && matches!(
+                        value.to_ascii_lowercase().as_str(),
+                        "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+                    )
+        }
         "font-family" => font_family_value(components).is_some(),
         "font-variation-settings" => axis_value(components).is_some(),
         "font-optical-sizing" => {
@@ -890,7 +968,7 @@ fn valid_computed(name: &str, value: &str) -> bool {
         .is_ok_and(|declaration| {
             declaration.span.end == source.len()
                 && declaration.important.is_none()
-                && valid_literal(name, value, &declaration.value)
+                && valid_literal(name, value, &declaration.value, false)
         })
 }
 

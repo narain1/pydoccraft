@@ -2907,3 +2907,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 712 installed tests, including 117
 ## 2026-11-24 Searchable fixed-layout PDF
 
 The Linux x86-64 CPython 3.11.15 wheel passed 713 installed tests, including 118 EPUB tests. It measured 24,519,101 bytes with a 57,026,776-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-searchable-fixed-layout-pdf) covers native and Poppler text extraction, search geometry, fixed-layout raster equality, and local link and bookmark retention.
+
+## 2026-11-24 XHTML oblique font-face ranges
+
+The Linux x86-64 CPython 3.11.15 wheel passed 714 installed tests, including 119 EPUB tests. It measured 24,532,386 bytes with a 57,044,184-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-xhtml-oblique-font-face-ranges) covers directional matching, resolved variable slant, chapter edits, and reopened fixed-layout PDF geometry.
