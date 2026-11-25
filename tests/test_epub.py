@@ -2596,6 +2596,109 @@ class EpubTests(unittest.TestCase):
                     with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "EPUB grid.*exceeds"):
                         book.render_page(0, dpi=96)
 
+    def test_css_grid_template_shorthand_preserves_cascade_and_pdf_geometry(self) -> None:
+        source = fixed_spread_fixture([("", "white", 320, 170)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Grid template</title>
+          <meta name="viewport" content="width=320,height=170"/><style>
+          html,body,p{margin:0} #grid{position:absolute;left:12px;top:12px;display:grid;
+          width:220px;font-size:12px;gap:4px;grid-auto-rows:18px 24px}
+          #head{grid-area:head;background:#84a849}
+          #left{grid-area:left;grid-row-start:main-start !important;background:#70aaca}
+          #right{grid-area:right;background:#a7c87c}
+          #foot{grid-row:3;grid-column:1 / -1;background:#ad7e9e}
+          #note{grid-row:4;grid-column:2;background:#e7ca7b} CSS
+          </style></head><body><div id="grid"><p id="head">Header</p><p id="left">
+          <a href="https://example.org/template">Linked label</a></p><p id="right">Main</p>
+          <p id="foot">Footer</p><p id="note"><a href="#right">Jump</a></p>
+          </div></body></html>"""
+        shorthand = """
+          #grid {
+            --layout:[top] "head head" minmax(18px,22px) [head-end]
+                [main-start] "left right" calc(28px + 1em) [bottom] /
+                [edge] calc(40% + 3px) [divider] 1fr [end];
+            grid-template:var(--layout);
+            grid-template:"invalid invalid" "invalid different";
+            grid-template:"wrong wrong" / repeat(2,20px);
+            grid-template:"ignored ignored" [extra] 24px;
+          }
+        """
+        longhands = """
+          #grid {
+            grid-template-areas:"head head" "left right";
+            grid-template-rows:[top] minmax(18px,22px) [head-end main-start] 40px [bottom];
+            grid-template-columns:[edge] 91px [divider] 1fr [end];
+          }
+        """
+        results = []
+        for css in (shorthand, longhands):
+            edited = rewrite_epub(source, {"OEBPS/s0.xhtml": template.replace("CSS", css)})
+            with doc_ex.open(edited) as book:
+                image = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                exported = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(exported) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), image)
+                hits = [pdf[0].search_for(word) for word in ("Header", "Linked label", "Footer", "Jump")]
+                self.assertTrue(all(len(item) == 1 for item in hits), pdf[0].get_text())
+                self.assertEqual(sorted(hit[0][1] for hit in hits), [hit[0][1] for hit in hits])
+                external, internal = pdf[0].get_links()
+                self.assertEqual(external.uri, "https://example.org/template")
+                self.assertEqual(internal.metadata["target_page"], 0)
+                results.append((image, hits, external.bbox, internal.bbox))
+        self.assertTrue(results[0] == results[1], "grid-template and its longhands differ")
+
+    def test_css_grid_shorthand_supports_dense_flow_and_implicit_track_cycles(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Implicit grid</title>
+          <style>body,p{margin:0;font-size:10px} section{display:grid;width:210px;height:114px;
+            gap:3px;grid-template-areas:"reset";grid-auto-rows:99px;grid-auto-columns:99px;CSS}
+          #first{background:#a83045;SPAN} #second{background:#3476a6;SPAN}
+          #third{background:#358149} #fourth{background:#c78028}
+          </style></head><body><section><p id="first">First</p><p id="second">Second</p><p id="third">Third</p>
+          <p id="fourth">Fourth</p><p>Fifth</p><p>Sixth</p><p>Seventh</p>
+          </section></body></html>"""
+        cases = (
+            ("grid-column:span 2", "grid:dense auto-flow 24px 18px / repeat(3,60px)",
+             "grid-template:none / repeat(3,60px);grid-auto-rows:24px 18px;"
+             "grid-auto-columns:auto;grid-auto-flow:dense row", "grid-auto-flow:row"),
+            ("grid-row:span 2", "grid:24px 28px 32px / auto-flow dense 48px 56px",
+             "grid-template:24px 28px 32px / none;grid-auto-columns:48px 56px;"
+             "grid-auto-rows:auto;grid-auto-flow:column dense", "grid-auto-flow:column"),
+        )
+        for span, shorthand, longhands, sparse in cases:
+            with self.subTest(span=span):
+                results = []
+                for css in (shorthand, longhands, longhands + ";" + sparse):
+                    source = chapter.replace("CSS", css).replace("SPAN", span)
+                    with doc_ex.open(epub_fixture(chapter_one=source)) as doc:
+                        results.append(rgba_pixels(png_chunks(doc.render_page(0, dpi=96))))
+                self.assertTrue(results[0] == results[1], "grid shorthand and its longhands differ")
+                self.assertTrue(results[0] != results[2], "dense flow did not fill the earlier gap")
+                width, pixels = results[0]
+                rows_are_implicit = span.startswith("grid-column")
+                for color, expected in (
+                    ("358149ff", 24 if rows_are_implicit else 48),
+                    ("c78028ff", 18 if rows_are_implicit else 56),
+                ):
+                    ink = bytes.fromhex(color)
+                    offsets = [index // 4 for index in range(0, len(pixels), 4)
+                               if pixels[index:index + 4] == ink]
+                    self.assertTrue(offsets)
+                    coordinates = [offset // width if rows_are_implicit else offset % width
+                                   for offset in offsets]
+                    self.assertAlmostEqual(max(coordinates) - min(coordinates) + 1, expected, delta=1)
+
+        for test, shorthand, longhands in (
+            ("none", "grid:none", "grid-template:none;grid-auto-columns:auto;grid-auto-rows:auto"),
+            ("implicit area height", 'grid-template:"first first" / 70px 70px',
+             'grid-template-areas:"first first";grid-template-rows:auto;grid-template-columns:70px 70px'),
+        ):
+            with self.subTest(test=test):
+                images = []
+                for css in (shorthand, longhands):
+                    source = chapter.replace("CSS", css).replace("SPAN", "grid-area:first")
+                    with doc_ex.open(epub_fixture(chapter_one=source)) as doc:
+                        images.append(rgba_pixels(png_chunks(doc.render_page(0, dpi=96))))
+                self.assertTrue(images[0] == images[1], "grid reset or implicit area height differs")
+
     def test_css_grid_intrinsic_and_fit_tracks_in_reflow(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic grid</title>
           <style>body,p{margin:0;font-size:10px}

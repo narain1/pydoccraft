@@ -7,7 +7,7 @@ use raffia::{
 };
 use taffy::{
     style::{
-        GridPlacement, GridTemplateArea, GridTemplateAreas, GridTemplateComponent,
+        GridAutoFlow, GridPlacement, GridTemplateArea, GridTemplateAreas, GridTemplateComponent,
         LengthPercentage, TrackSizingFunction,
     },
     style_helpers::{auto, fit_content, fr, max_content, min_content},
@@ -23,6 +23,10 @@ const MAX_TRACKS: usize = 32;
 const MAX_LINE_NAMES: usize = 128;
 const MAX_LINE_NAME_BYTES: usize = 128;
 const MAX_PLACEMENT: i16 = 64;
+
+#[path = "epub_css_grid_template.rs"]
+mod shorthand;
+pub(super) use shorthand::{expand_template, template_parts};
 
 #[derive(Clone, Copy)]
 enum Length<'a> {
@@ -78,6 +82,64 @@ impl<T> Template<T> {
 
 pub(super) fn valid(value: &str, components: &[ComponentValue<'_>]) -> bool {
     !matches!(parse(value, components), Err(Issue::Invalid))
+}
+
+pub(super) fn valid_auto_tracks(value: &str, components: &[ComponentValue<'_>]) -> bool {
+    !components.iter().any(|item| {
+        matches!(item, ComponentValue::BracketBlock(_))
+            || function(item).is_some_and(|(name, _)| name.eq_ignore_ascii_case("repeat"))
+            || keyword(item, "subgrid")
+            || keyword(item, "masonry")
+            || keyword(item, "none")
+    }) && valid(value, components)
+}
+
+fn keyword(item: &ComponentValue<'_>, keyword: &str) -> bool {
+    matches!(item, ComponentValue::InterpolableIdent(name)
+        if ident(name).is_some_and(|name| name.eq_ignore_ascii_case(keyword)))
+}
+
+pub(super) fn flow(components: &[ComponentValue<'_>]) -> Option<GridAutoFlow> {
+    let axis = |item| {
+        if keyword(item, "row") {
+            Some(GridAutoFlow::Row)
+        } else if keyword(item, "column") {
+            Some(GridAutoFlow::Column)
+        } else {
+            None
+        }
+    };
+    let dense = |flow| match flow {
+        GridAutoFlow::Column => GridAutoFlow::ColumnDense,
+        _ => GridAutoFlow::RowDense,
+    };
+    match components {
+        [item] if keyword(item, "dense") => Some(GridAutoFlow::RowDense),
+        [item] => axis(item),
+        [first, last] if keyword(first, "dense") => axis(last).map(dense),
+        [first, last] if keyword(last, "dense") => axis(first).map(dense),
+        _ => None,
+    }
+}
+
+pub(in crate::epub) fn resolve_flow(
+    source: &str,
+    inherited: impl FnOnce() -> GridAutoFlow,
+) -> Result<GridAutoFlow, EngineError> {
+    if source.eq_ignore_ascii_case("inherit") {
+        return Ok(inherited());
+    }
+    if source.eq_ignore_ascii_case("revert-layer") {
+        return Err(unsupported("EPUB grid cascade layers"));
+    }
+    if source.is_empty() || super::css_wide(source) {
+        return Ok(GridAutoFlow::Row);
+    }
+    let declaration = format!("value:{source}");
+    let syntax = Parser::new(&declaration, Syntax::Css)
+        .parse::<Declaration>()
+        .map_err(|_| invalid("invalid EPUB grid auto flow"))?;
+    flow(&syntax.value).ok_or_else(|| invalid("invalid EPUB grid auto flow"))
 }
 
 fn parse<'a>(
@@ -595,6 +657,28 @@ pub(in crate::epub) fn resolve(
     viewport: [f32; 2],
     lengths: &mut calc::CalculationTable,
 ) -> Result<Template<GridTemplateComponent<String>>, EngineError> {
+    let Template { tracks, names } = resolve_tracks(source, font, viewport, lengths)?;
+    Ok(Template {
+        tracks: tracks.into_iter().map(Into::into).collect(),
+        names,
+    })
+}
+
+pub(in crate::epub) fn resolve_auto_tracks(
+    source: &str,
+    font: f32,
+    viewport: [f32; 2],
+    lengths: &mut calc::CalculationTable,
+) -> Result<Vec<TrackSizingFunction>, EngineError> {
+    Ok(resolve_tracks(source, font, viewport, lengths)?.tracks)
+}
+
+fn resolve_tracks(
+    source: &str,
+    font: f32,
+    viewport: [f32; 2],
+    lengths: &mut calc::CalculationTable,
+) -> Result<Template<TrackSizingFunction>, EngineError> {
     if source.is_empty()
         || ["none", "initial", "unset", "revert"]
             .iter()
@@ -652,8 +736,7 @@ pub(in crate::epub) fn resolve(
                     max: breadth(maximum)?.max,
                 },
                 Track::Fit(limit) => fit_content(length(limit)?),
-            }
-            .into())
+            })
         })
         .collect::<Result<_, _>>()?;
     Ok(Template { tracks, names })

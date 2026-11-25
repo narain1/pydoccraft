@@ -1243,6 +1243,10 @@ fn valid_literal(
             css_wide(value) || grid::valid(value, components)
         }
         "grid-template-areas" => css_wide(value) || grid::valid_areas(value, components),
+        "grid-auto-columns" | "grid-auto-rows" => {
+            css_wide(value) || grid::valid_auto_tracks(value, components)
+        }
+        "grid-auto-flow" => css_wide(value) || grid::flow(components).is_some(),
         _ if grid::is_placement(name) => css_wide(value) || grid::valid_placement(components),
         "font-family" => font_family_value(components).is_some(),
         "font-variation-settings" => axis_value(components).is_some(),
@@ -1303,7 +1307,7 @@ fn border_names(sides: &'static [&'static str]) -> impl Iterator<Item = String> 
 }
 
 fn shorthand_parts(name: &str) -> Option<Vec<String>> {
-    if let Some(parts) = grid::placement_parts(name) {
+    if let Some(parts) = grid::placement_parts(name).or_else(|| grid::template_parts(name)) {
         return Some(parts.iter().copied().map(str::to_owned).collect());
     }
     match name {
@@ -1323,6 +1327,9 @@ fn shorthand_parts(name: &str) -> Option<Vec<String>> {
 fn expand(name: &str, value: &str) -> Vec<(String, String)> {
     if let Some(parts) = grid::placement_parts(name) {
         return grid::expand_placement(name, value, parts);
+    }
+    if let Some(parts) = grid::template_parts(name) {
+        return grid::expand_template(value, parts);
     }
     if let Some(names) = logical::shorthand(name) {
         let pieces = value_components(value);

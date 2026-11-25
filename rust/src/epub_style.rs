@@ -270,6 +270,23 @@ impl ChapterStyles {
             };
             let columns = tracks("grid-template-columns", taffy::AbsoluteAxis::Horizontal)?;
             let rows = tracks("grid-template-rows", taffy::AbsoluteAxis::Vertical)?;
+            let mut implicit_tracks = |key, axis| {
+                let source = value(&values, key);
+                if source.eq_ignore_ascii_case("inherit") {
+                    return Ok(parent
+                        .map(|p| match axis {
+                            taffy::AbsoluteAxis::Horizontal => {
+                                p.box_style.grid_auto_columns.clone()
+                            }
+                            taffy::AbsoluteAxis::Vertical => p.box_style.grid_auto_rows.clone(),
+                        })
+                        .unwrap_or_default());
+                }
+                css::grid::resolve_auto_tracks(source, font, viewport, &mut styles.calculations)
+            };
+            let auto_columns =
+                implicit_tracks("grid-auto-columns", taffy::AbsoluteAxis::Horizontal)?;
+            let auto_rows = implicit_tracks("grid-auto-rows", taffy::AbsoluteAxis::Vertical)?;
             let placement = |key, edge: fn(&Style) -> &GridPlacement<String>| {
                 css::grid::resolve_placement(value(&values, key), || {
                     parent.map_or(GridPlacement::Auto, |p| edge(&p.box_style).clone())
@@ -402,11 +419,11 @@ impl ChapterStyles {
                     start: placement("grid-column-start", |style| &style.grid_column.start)?,
                     end: placement("grid-column-end", |style| &style.grid_column.end)?,
                 },
-                grid_auto_flow: if value(&values, "grid-auto-flow") == "column" {
-                    GridAutoFlow::Column
-                } else {
-                    GridAutoFlow::Row
-                },
+                grid_auto_columns: auto_columns,
+                grid_auto_rows: auto_rows,
+                grid_auto_flow: css::grid::resolve_flow(value(&values, "grid-auto-flow"), || {
+                    parent.map_or(GridAutoFlow::Row, |p| p.box_style.grid_auto_flow)
+                })?,
                 ..Default::default()
             };
             box_context.push((
