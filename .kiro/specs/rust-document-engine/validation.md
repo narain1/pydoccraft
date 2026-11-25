@@ -2975,3 +2975,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 814 installed tests, including 2
 ## 2026-11-25 EPUB mixed CSS calculations, SVG morphology, MathML overlaps and TTML region styles
 
 The Linux x86-64 CPython 3.11 host wheel passed 820 installed tests, including 225 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-containing-box-calculations-svg-morphology-mathml-overlaps-and-ttml-region-styles)
+
+## 2026-11-25 EPUB grid sizing, compound MathML alignment, SVG effects and MP4 chapters
+
+The Linux x86-64 CPython 3.11 host wheel passed 827 installed tests, including 232 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-grid-sizing-compound-mathml-alignment-svg-spatial-effects-and-mp4-chapters)
