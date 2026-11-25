@@ -55,7 +55,9 @@
 - [x] Transport fixed-layout PDF text, annotations and destinations along provable single-layer SVG offset chains using native raster transforms and clipping.
 - [x] Compose nested axis-aligned SVG offsets for one painted source and capture surviving search, links and fragments from the whole native stack.
 - [x] Render bounded native SVG blend and component transfer and retain searchable text, links and fragments through provable alpha and offset chains.
-- [ ] Extend source CSS and fixed-layout fidelity, including more SVG filter primitives, PDF attribution for multi-source, non-axis-aligned or ambiguous spatial filter results, and complex SVG text fallback including spacing across ambiguous clusters, nested length owners and glyph positioning.
+- [ ] Extend the supported EPUB CSS and fixed-layout rendering profile.
+- [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
+- [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, nested length owners and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
@@ -115,7 +117,10 @@
 - [x] Select a WebM video track explicitly while retaining clipped intervals and synchronized captions.
 - [x] Stream fixed-geometry SDR AV1 pictures from WebM with bounded keyframe seeking and synchronized audio and captions.
 - [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
-- [ ] Extend WebM to additional AV1 profiles, high dynamic range, and alpha. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling to WebVTT region styling and scrolling, TTML inline and animated regions, and additional animation profiles, and support more media fragment track combinations and ID fragments in other containers.
+- [ ] Extend WebM to additional AV1 profiles, high dynamic range and alpha.
+- [ ] Support additional Ogg soundtracks, simultaneous video tracks and more MP4 profiles.
+- [ ] Support WebVTT region styling and scrolling and extend TTML to inline, animated and mixed-region captions, region text-style inheritance, and subtitle painting.
+- [ ] Support more media fragment track combinations and ID fragments in additional containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
