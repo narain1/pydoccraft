@@ -2983,3 +2983,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 827 installed tests, including 2
 ## 2026-11-25 EPUB CSS comparisons, MathML leading offsets, SVG convolution and Nero chapters
 
 The Linux x86-64 CPython 3.11 host wheel passed 835 installed tests, including 240 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-comparisons-mathml-leading-offsets-svg-convolution-and-nero-chapters)
+
+## 2026-11-25 EPUB intrinsic sizing, MathML alignment, SVG tiling and mixed Ogg
+
+The Linux x86-64 CPython 3.11 host wheel passed 843 installed tests, including 248 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-intrinsic-sizing-mathml-alignment-svg-tiling-and-mixed-ogg)
