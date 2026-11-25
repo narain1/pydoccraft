@@ -133,6 +133,53 @@ class EpubTextRegion:
 
 
 @dataclass(frozen=True, slots=True)
+class EpubTtmlRegion:
+    """A TTML rectangle with coordinates and physical insets relative to the root container."""
+
+    id: str | None = None
+    origin_percent: tuple[float, float] = (0.0, 0.0)
+    extent_percent: tuple[float, float] = (100.0, 100.0)
+    padding_percent: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    display_align: Literal["before", "center", "after", "justify"] = "before"
+    writing_mode: Literal["lrtb", "rltb", "tbrl", "tblr"] = "lrtb"
+    overflow: Literal["hidden", "visible"] = "hidden"
+    background_color: tuple[int, int, int, int] | None = None
+    show_background: Literal["always", "whenActive"] = "always"
+    z_index: int | None = None
+
+    def viewport_bounds(
+        self, viewport_width: float, viewport_height: float
+    ) -> tuple[float, float, float, float]:
+        """Return (left, top, width, height) within the supplied TTML root viewport."""
+        if not all(isfinite(size) and size > 0 for size in (viewport_width, viewport_height)):
+            raise ValueError("TTML region bounds require finite positive viewport dimensions")
+        x, y = self.origin_percent
+        width, height = self.extent_percent
+        bounds = (
+            (x / 100) * viewport_width,
+            (y / 100) * viewport_height,
+            (width / 100) * viewport_width,
+            (height / 100) * viewport_height,
+        )
+        if not all(isfinite(value) for value in bounds):
+            raise ValueError("TTML region bounds exceed the finite coordinate range")
+        return bounds
+
+    def content_bounds(
+        self, viewport_width: float, viewport_height: float
+    ) -> tuple[float, float, float, float]:
+        """Return the region rectangle after applying the physical padding insets."""
+        x, y, width, height = self.viewport_bounds(viewport_width, viewport_height)
+        t, r, b, l = self.padding_percent
+        top, bottom = (t / 100) * viewport_height, (b / 100) * viewport_height
+        left, right = (l / 100) * viewport_width, (r / 100) * viewport_width
+        bounds = (x + left, y + top, max(0.0, width - left - right), max(0.0, height - top - bottom))
+        if not all(isfinite(value) for value in (*bounds, right, bottom)):
+            raise ValueError("TTML region bounds exceed the finite coordinate range")
+        return bounds
+
+
+@dataclass(frozen=True, slots=True)
 class EpubTextCue:
     """Plain text and an interval on the embedded media presentation timeline."""
 
@@ -146,6 +193,7 @@ class EpubTextCue:
     runs: tuple[EpubTextRun, ...] = field(default=(), compare=False, repr=False)
     background_color: tuple[int, int, int, int] | None = field(default=None, compare=False, repr=False)
     region_layout: EpubTextRegion | None = field(default=None, compare=False, repr=False)
+    ttml_region_layout: EpubTtmlRegion | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

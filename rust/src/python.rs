@@ -569,6 +569,19 @@ type TimedTextRegion = (
     Option<&'static str>,
 );
 
+type TimedTtmlRegion = (
+    Option<String>,
+    (f64, f64),
+    (f64, f64),
+    (f64, f64, f64, f64),
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<Rgba>,
+    &'static str,
+    Option<i32>,
+);
+
 type TimedTextCue = (
     u64,
     Option<u64>,
@@ -580,6 +593,7 @@ type TimedTextCue = (
     Vec<TimedTextRun>,
     Option<Rgba>,
     Option<TimedTextRegion>,
+    Option<TimedTtmlRegion>,
 );
 
 #[pyfunction]
@@ -616,6 +630,20 @@ fn _epub_text_track(
                                 region.region_anchor_percent,
                                 region.viewport_anchor_percent,
                                 region.scroll_up.then_some("up"),
+                            )
+                        }),
+                        cue.ttml_region_layout.map(|region| {
+                            (
+                                region.id.clone(),
+                                region.origin_percent,
+                                region.extent_percent,
+                                region.padding_percent,
+                                region.display_align,
+                                region.writing_mode,
+                                region.overflow,
+                                region.background_color.map(|[r, g, b, a]| (r, g, b, a)),
+                                region.show_background,
+                                region.z_index,
                             )
                         }),
                     )

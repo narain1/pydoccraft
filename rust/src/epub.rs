@@ -58,6 +58,12 @@ mod svg;
 #[cfg(feature = "python")]
 #[path = "epub_text_tracks.rs"]
 pub(crate) mod text_tracks;
+#[path = "epub_ttml_clock.rs"]
+mod ttml_clock;
+#[path = "epub_ttml_regions.rs"]
+mod ttml_regions;
+#[path = "epub_ttml_styles.rs"]
+mod ttml_styles;
 #[cfg(feature = "python")]
 #[path = "epub_video.rs"]
 pub(crate) mod video;

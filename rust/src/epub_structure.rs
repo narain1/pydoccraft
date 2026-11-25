@@ -643,7 +643,10 @@ pub(crate) fn update_structure<'a>(
                     "EPUB timed media resource exceeds its XML byte budget",
                 ));
             }
-            parse_xml(data)?;
+            let xml = parse_xml(data)?;
+            if media == "application/ttml+xml" {
+                super::ttml_regions::read(xml.root_element())?;
+            }
         }
         let existing = book.archive.index_for_name(path).is_some();
         let mut properties = Vec::new();

@@ -1,7 +1,12 @@
 //! Read bounded, standalone text tracks from local EPUB resources.
 use std::{collections::BTreeSet, sync::Arc};
 
-use super::{charge, invalid, limited, media::integer, unsupported, validate_archive_path, Book};
+use super::{
+    charge, invalid, limited,
+    media::integer,
+    ttml_clock::{MAX_TIME, MICROS},
+    unsupported, validate_archive_path, Book,
+};
 use crate::EngineError;
 
 #[path = "epub_ttml.rs"]
@@ -12,8 +17,6 @@ mod webvtt_css;
 mod webvtt_regions;
 
 const MAX_TRACK_BYTES: usize = 2 * 1024 * 1024;
-pub(super) const MICROS: u64 = 1_000_000;
-pub(super) const MAX_TIME: u64 = (1 << 53) - 1;
 const MAX_STYLE_LABEL: usize = 1024;
 const MAX_STYLE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CUE_RUNS: usize = 10_000;
@@ -135,6 +138,7 @@ pub(crate) struct Cue {
     pub runs: Vec<TextRun>,
     pub background_color: Option<[u8; 4]>,
     pub region_layout: Option<Arc<webvtt_regions::Region>>,
+    pub ttml_region_layout: Option<Arc<super::ttml_regions::Region>>,
 }
 
 #[derive(Default)]
@@ -157,6 +161,9 @@ impl Track {
             cue.region.as_deref(),
             cue.markup.as_deref(),
             cue.region_layout.as_ref().map(|region| region.id.as_str()),
+            cue.ttml_region_layout
+                .as_ref()
+                .and_then(|region| region.id.as_deref()),
         ]
         .into_iter()
         .flatten()
@@ -539,6 +546,7 @@ impl<'a> WebvttCue<'a> {
                     runs,
                     background_color,
                     region_layout: self.region_layout.clone(),
+                    ttml_region_layout: None,
                 })?;
             }
             start = end;

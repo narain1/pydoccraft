@@ -4302,6 +4302,136 @@ overlay
                 with doc_ex.open(changed) as book, self.assertRaisesRegex(error, message):
                     book.epub_embedded_text(0, 0, track_index=index)
 
+    def test_ttml_region_geometry_and_activation_reach_seeks_and_cropped_video(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        ttml = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xml:lang="en"
+          tts:extent="200px 100px" ttp:cellResolution="20 10" ttp:tickRate="1000">
+          <head><styling>
+            <initial tts:overflow="visible"/>
+            <style xml:id="base" tts:extent="80% 50%" tts:displayAlign="center" tts:origin="10px 10px"
+              tts:padding="1c 5% 2px 10px" tts:backgroundColor="#19334d80"/>
+            <style xml:id="variant" style="base" tts:extent="100px 30px" tts:writingMode="rl"/>
+          </styling><layout>
+            <region xml:id="timed" style="variant" begin="170t" end="185t" dur="50t"
+              tts:origin="10% 60%" tts:displayAlign="after" tts:showBackground="whenActive" tts:zIndex="2">
+              <style tts:extent="50% 35%" tts:origin="30% 30%"/>
+              <style tts:extent="60% 40%"/>
+            </region>
+            <region xml:id="side" tts:position="75% 50%" tts:extent="40% 20%" tts:origin="99% 99%"
+              tts:writingMode="tbrl" tts:padding="1c 2px 5% 10%" tts:overflow="hidden"/>
+          </layout></head>
+          <body><div begin="150t" timeContainer="seq">
+            <p xml:id="lead" region="timed" dur="40t">Ping<set begin="25t" dur="10t" tts:fontWeight="bold"/></p>
+            <p xml:id="tail" region="side" dur="10t">Tail</p>
+            <p xml:id="unassigned" dur="10t">Unassigned</p>
+          </div><div begin="177t" end="182t" region="side"><p xml:id="overlay">Side</p></div></body>
+        </tt>'''
+        default = (b'<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="0s" dur="1s">'
+                   b'Full viewport</p></body></tt>')
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>TTML regions</title></head>
+          <body><video src="clip.mp4#t=0.167,0.187&amp;xywh=1,1,6,4">
+          <track src="regions.ttml" kind="captions" srclang="en"/>
+          <track src="default.ttml" kind="captions" srclang="en"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("TTML regions", chapter, "OEBPS/regions.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/regions.ttml": doc_ex.EpubResource("application/ttml+xml", ttml),
+                    "OEBPS/default.ttml": doc_ex.EpubResource("application/ttml+xml", default),
+                },
+            )
+        timed = doc_ex.EpubTtmlRegion(
+            "timed", (10, 60), (60, 40), (10, 5, 2, 3), "after", "rltb", "visible",
+            (25, 51, 77, 128), "whenActive", 2,
+        )
+        side = doc_ex.EpubTtmlRegion("side", (45, 40), (40, 20), (2, 5, 2, 2), writing_mode="tbrl")
+        with doc_ex.open(data) as book:
+            lead, bold_lead, overlay, tail, unassigned = book.epub_embedded_text(0, 0)
+            self.assertEqual([(cue.id, cue.start_us, cue.end_us) for cue in (lead, bold_lead, overlay, tail, unassigned)],
+                             [("lead", 170_000, 175_000), ("lead", 175_000, 185_000),
+                              ("overlay", 177_000, 182_000), ("tail", 190_000, 200_000),
+                              ("unassigned", 200_000, 210_000)])
+            self.assertEqual(lead, doc_ex.EpubTextCue(170_000, 175_000, "Ping", "lead", region="timed"))
+            self.assertIsNone(lead.region_layout)
+            self.assertEqual(lead.ttml_region_layout, timed)
+            self.assertEqual(bold_lead.ttml_region_layout, timed)
+            self.assertFalse(lead.runs[0].style.bold)
+            self.assertTrue(bold_lead.runs[0].style.bold)
+            self.assertEqual(overlay.ttml_region_layout, side)
+            self.assertEqual(tail.ttml_region_layout, side)
+            self.assertIsNone(unassigned.ttml_region_layout)
+            self.assertEqual(timed.viewport_bounds(200, 100), (20, 60, 120, 40))
+            self.assertEqual(timed.content_bounds(200, 100), (26, 70, 104, 28))
+            self.assertEqual(side.viewport_bounds(200, 100), (90, 40, 80, 20))
+            self.assertEqual(side.content_bounds(200, 100), (94, 42, 66, 16))
+            full, = book.epub_embedded_text(0, 0, track_index=1)
+            self.assertIsNone(full.region)
+            self.assertEqual(full.ttml_region_layout, doc_ex.EpubTtmlRegion())
+            sought, = book.epub_embedded_text(0, 0, start_us=171_000, end_us=174_000)
+            self.assertEqual(sought.ttml_region_layout, timed)
+            self.assertEqual((sought.start_us, sought.end_us, sought.runs), (171_000, 174_000, lead.runs))
+
+            frames = list(book.epub_embedded_video(0, 0, start_us=166_000, end_us=188_000, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames],
+                             [(167_000, 3_000), (170_000, 5_000), (175_000, 2_000),
+                              (177_000, 5_000), (182_000, 3_000), (185_000, 2_000)])
+            self.assertTrue(all((f.width, f.height) == (6, 4) and f.rgb is frames[0].rgb for f in frames))
+            self.assertEqual([[cue.ttml_region_layout for cue in f.text_cues] for f in frames],
+                             [[], [timed], [timed], [timed, side], [timed], []])
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("TTML regions", "Regions revised")})
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened.read_epub_resource("OEBPS/regions.ttml"), ttml)
+            self.assertEqual(reopened.epub_embedded_text(0, 0)[0].ttml_region_layout, timed)
+
+    def test_ttml_region_edits_and_playback_validate_references_and_geometry(self) -> None:
+        header = b'<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">'
+        body = b'<body region="r"><div><p begin="0s" end="1s">Text</p></div></body></tt>'
+
+        def track(regions: bytes, content: bytes = body) -> bytes:
+            return header + b"<head><layout>" + regions + b"</layout></head>" + content
+
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>TTML regions</title></head>
+          <body><video><track src="regions.ttml" kind="captions" srclang="en"/></video></body></html>'''
+        with doc_ex.open(epub_fixture()) as source:
+            valid = source.edit_epub_structure(
+                [doc_ex.EpubChapterSource("TTML regions", chapter, "OEBPS/regions.xhtml")],
+                resources={
+                    "OEBPS/regions.ttml": doc_ex.EpubResource("application/ttml+xml", track(b'<region xml:id="r"/>')),
+                },
+            )
+        for raw, error, message in (
+            (track(b'<region/>'), doc_ex.MalformedDocumentError, "missing TTML region ID"),
+            (track(b'<region xml:id="r"/><region xml:id="r"/>'), doc_ex.MalformedDocumentError, "duplicate TTML region"),
+            (track(b'<region xml:id="x"/>'), doc_ex.MalformedDocumentError, "missing TTML region reference"),
+            (track(b'<region xml:id="r" style="missing"/>'), doc_ex.MalformedDocumentError, "missing TTML style"),
+            (track(b'<region xml:id="r" tts:extent="-1% 5%"/>'), doc_ex.MalformedDocumentError, "negative TTML region extent"),
+            (track(b'<region xml:id="r" tts:origin="10px 0px"/>'), doc_ex.UnsupportedFormatError, "pixel root extent"),
+            (track(b'<region xml:id="r" tts:origin="10em 0%"/>'), doc_ex.UnsupportedFormatError, "region length unit"),
+            (track(b'<region xml:id="r" condition="true"/>'), doc_ex.UnsupportedFormatError, "region condition"),
+            (track(b'<region xml:id="r" begin="tomorrow"/>'), doc_ex.MalformedDocumentError, "TTML time expression"),
+            (track(b'<region xml:id="r"><set begin="0s" tts:origin="10% 0%"/></region>'),
+             doc_ex.UnsupportedFormatError, "TTML region content|inline subtitle content target"),
+            (track(b"".join(f'<region xml:id="r{i}"/>'.encode() for i in range(257))),
+             doc_ex.UnsafeArchiveError, "256 region definitions"),
+            (track(b'<region xml:id="r">' + b'<style tts:extent="99% 50%"/>' * 33 + b'</region>'),
+             doc_ex.UnsafeArchiveError, "32 nested styles"),
+            (track(b'<region xml:id="r" tts:origin="1000001% 0%"/>'),
+             doc_ex.UnsafeArchiveError, "geometry exceeds its coordinate budget"),
+        ):
+            with self.subTest(message=message):
+                with doc_ex.open(valid) as book, self.assertRaisesRegex(error, message):
+                    book.edit_epub_structure(resources={
+                        "OEBPS/regions.ttml": doc_ex.EpubResource("application/ttml+xml", raw),
+                    })
+                damaged = rewrite_epub(valid, {"OEBPS/regions.ttml": raw})
+                with doc_ex.open(damaged) as book, self.assertRaisesRegex(error, message):
+                    book.epub_embedded_text(0, 0)
+        with doc_ex.open(valid) as book:
+            self.assertEqual(book.epub_embedded_text(0, 0)[0].text, "Text")
+
     def test_embedded_ttml_nested_timing_preserves_regions_and_clip_intervals(self) -> None:
         ttml = b"""<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
           xml:lang="en" ttp:timeBase="media" ttp:frameRate="30" ttp:frameRateMultiplier="1000 1001"

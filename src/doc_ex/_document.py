@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSpineProperties, EpubSvgChapterSource, EpubTextCue, EpubTextRegion, EpubTextRun, EpubTextStyle, EpubVideoFrame, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSpineProperties, EpubSvgChapterSource, EpubTextCue, EpubTextRegion, EpubTextRun, EpubTextStyle, EpubTtmlRegion, EpubVideoFrame, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -769,15 +769,17 @@ class Document:
             self._source, track.path, track.media_type, start, end, track.language
         ))
         cues = []
-        for *legacy_fields, native_runs, background_color, native_region in result:
+        for *legacy_fields, native_runs, background_color, native_region, native_ttml in result:
             runs = []
             for text, native_style, timestamp in native_runs:
                 *properties, classes, voice, language = native_style
                 style = EpubTextStyle(*properties, tuple(classes), voice, language)
                 runs.append(EpubTextRun(text, style, timestamp))
             region_layout = None if native_region is None else EpubTextRegion(*native_region)
+            ttml_region_layout = None if native_ttml is None else EpubTtmlRegion(*native_ttml)
             cues.append(EpubTextCue(
-                *legacy_fields, runs=tuple(runs), background_color=background_color, region_layout=region_layout
+                *legacy_fields, runs=tuple(runs), background_color=background_color,
+                region_layout=region_layout, ttml_region_layout=ttml_region_layout,
             ))
         return cues
 
