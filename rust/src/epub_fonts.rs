@@ -476,7 +476,9 @@ impl Fonts {
                 if style.italic == Some(true) {
                     builder.push(StyleProperty::FontStyle(FontStyle::Italic), range.clone());
                 }
-                if let Some(TextColor::Rgb(Rgb(r, g, b))) = style.color {
+                if style.hidden == Some(true) {
+                    builder.push(StyleProperty::Brush([0, 0, 0, 0]), range.clone());
+                } else if let Some(TextColor::Rgb(Rgb(r, g, b))) = style.color {
                     builder.push(StyleProperty::Brush([r, g, b, 255]), range.clone());
                 }
                 if let Some(spacing) = style.spacing {
@@ -549,6 +551,7 @@ impl Fonts {
             super::layout::InlineNavigation::default()
         };
         Ok(Text {
+            search_text: output.svg_text.is_some().then_some(text),
             layout: RefCell::new(layout),
             align,
             navigation,
@@ -809,6 +812,7 @@ pub(super) fn read_face(face: &Face, book: &mut Book<'_>) -> Result<Vec<u8>, Eng
 
 pub(super) struct Text {
     layout: RefCell<Layout<Brush>>,
+    search_text: Option<String>,
     align: Alignment,
     inline: Vec<(usize, Vec<Draw>)>,
     navigation: super::layout::InlineNavigation,
@@ -827,14 +831,17 @@ impl Text {
         remaining: &mut usize,
         output: &mut Vec<Draw>,
         mut capture: Option<(&mut super::rendition::Capture<'_, '_>, Rect)>,
+        images: Option<&super::rendition::text::SvgImages>,
     ) -> Result<f32, EngineError> {
         self.size(area.w);
         let mut layout = self.layout.borrow_mut();
         layout.set_alignment(self.align, AlignmentOptions::default());
         for line in layout.lines() {
-            if let Some((capture, clip)) = capture.as_mut().filter(|_| !self.navigation.is_empty())
+            if let Some((capture, clip)) = capture
+                .as_mut()
+                .filter(|_| !self.navigation.is_empty() || self.search_text.is_some())
             {
-                self.capture_line(&line, area, *clip, capture)?;
+                self.capture_line(&line, area, *clip, capture, images)?;
             }
             for item in line.items() {
                 let run = match item {
@@ -867,6 +874,9 @@ impl Text {
                 let skew = synthesis.skew().unwrap_or_default().to_radians().tan();
                 let style = run.style();
                 let [red, green, blue, alpha] = style.brush;
+                if alpha == 0 {
+                    continue;
+                }
                 let mut pen = Pen {
                     path: BezPath::new(),
                     x: 0.0,
@@ -956,6 +966,7 @@ impl Text {
         area: Rect,
         clip: Rect,
         capture: &mut super::rendition::Capture<'_, '_>,
+        images: Option<&super::rendition::text::SvgImages>,
     ) -> Result<(), EngineError> {
         let metrics = line.metrics();
         let top = area.y + metrics.content_block_min_coord;
@@ -972,7 +983,7 @@ impl Text {
                     .binary_search_by_key(&range.start, |(at, _)| *at)
                     .is_ok();
                 if advance > 0.0 && !is_object && cluster.style().brush[3] != 0 {
-                    geometry.push((range, Rect::new(area.x + left, top, advance, height)));
+                    geometry.push((range, Rect::new(area.x + left, top, advance, height), None));
                 }
                 left += advance;
             }
@@ -993,13 +1004,23 @@ impl Text {
                         placed.width,
                         placed.height,
                     ),
+                    Some(placed.id as usize),
                 ));
             }
         }
         // The shaper positions glyphs in visual order. Emit source order after placing inline
         // boxes, so a linked formula (or a bidi run) remains alongside its surrounding text.
-        geometry.sort_by_key(|(range, _)| range.start);
-        for (range, rect) in geometry {
+        geometry.sort_by_key(|(range, _, _)| range.start);
+        for (range, rect, object) in geometry {
+            if let Some(text) = capture.text.as_deref_mut() {
+                if let Some(id) = object {
+                    text.draw_text(&self.inline[id].1, [rect.x, rect.y], clip, images)?;
+                } else if let Some(value) =
+                    self.search_text.as_ref().and_then(|s| s.get(range.clone()))
+                {
+                    text.add(value, rect, clip)?;
+                }
+            }
             self.navigation.capture(range, rect, clip, capture)?;
         }
         Ok(())

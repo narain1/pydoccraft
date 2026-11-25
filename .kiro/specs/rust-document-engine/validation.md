@@ -2903,3 +2903,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 709 installed tests, including 114
 ## 2026-11-24 Fixed-layout PDF links
 
 The Linux x86-64 CPython 3.11.15 wheel passed 712 installed tests, including 117 EPUB tests. It measured 24,498,410 bytes with a 56,979,672-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-fixed-layout-pdf-links) covers XHTML and SVG annotations, local destination coordinates, chapter edits and reopened page geometry.
+
+## 2026-11-24 Searchable fixed-layout PDF
+
+The Linux x86-64 CPython 3.11.15 wheel passed 713 installed tests, including 118 EPUB tests. It measured 24,519,101 bytes with a 57,026,776-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-searchable-fixed-layout-pdf) covers native and Poppler text extraction, search geometry, fixed-layout raster equality, and local link and bookmark retention.

@@ -4,7 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 use pdfcraft_cos::{Document, ObjRef, Object, SaveOptions};
 use serde_json::Value;
 
-use super::{viewport, Anchors, Capture, LinkAreas};
+use super::{text::TextLayer, viewport, Anchors, Capture, LinkAreas};
 use crate::{
     model::{DocumentPayload, PagePayload},
     EngineError,
@@ -15,6 +15,7 @@ pub(super) struct Navigation<'a> {
     destinations: HashMap<&'a str, DestinationPage<'a>>,
     pages: Vec<(&'a str, f64)>,
     links: LinkAreas,
+    text: Option<TextLayer>,
 }
 
 struct DestinationPage<'a> {
@@ -48,6 +49,7 @@ impl<'a> Navigation<'a> {
     pub(super) fn new(
         book: &'a DocumentPayload,
         selected: &[&'a PagePayload],
+        searchable: bool,
     ) -> Result<Self, EngineError> {
         let toc = book
             .metadata
@@ -67,6 +69,7 @@ impl<'a> Navigation<'a> {
             destinations: HashMap::new(),
             pages: Vec::with_capacity(selected.len()),
             links: LinkAreas::default(),
+            text: searchable.then(TextLayer::default),
         };
         for (index, page) in selected.iter().enumerate() {
             let path = chapter_path(page)
@@ -115,9 +118,13 @@ impl<'a> Navigation<'a> {
             .and_then(|path| self.destinations.get_mut(path))
             .filter(|target| target.index == index && !target.anchors.is_empty())
             .map(|target| &mut target.anchors);
+        if let Some(text) = &mut self.text {
+            text.begin_page();
+        }
         Capture {
             anchors,
             links: &mut self.links,
+            text: self.text.as_mut(),
         }
     }
 
@@ -152,7 +159,7 @@ impl<'a> Navigation<'a> {
 
     pub(super) fn attach(&self, pdf: Vec<u8>) -> Result<Vec<u8>, EngineError> {
         let bookmarks = self.bookmarks(self.items);
-        if bookmarks.is_empty() && self.links.entries.is_empty() {
+        if bookmarks.is_empty() && self.links.entries.is_empty() && self.text.is_none() {
             return Ok(pdf);
         }
         let mut document = Document::open(Arc::new(pdf)).map_err(conversion)?;
@@ -161,6 +168,13 @@ impl<'a> Navigation<'a> {
             self.attach_bookmarks(&mut document, &pages, &bookmarks)?;
         }
         self.attach_links(&mut document, &pages)?;
+        if let Some(text) = &self.text {
+            text.attach(
+                &mut document,
+                &pages,
+                self.pages.iter().map(|(_, height)| *height),
+            )?;
+        }
         pdfcraft_cos::write_full(&document, &SaveOptions::default()).map_err(conversion)
     }
 

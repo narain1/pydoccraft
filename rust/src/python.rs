@@ -360,13 +360,14 @@ fn _render_epub_spread(
 }
 
 #[pyfunction]
-#[pyo3(signature = (data, dpi, pages=None))]
+#[pyo3(signature = (data, dpi, pages=None, searchable=false))]
 fn _export_epub_fixed_pdf(
     data: &[u8],
     dpi: f64,
     pages: Option<Vec<usize>>,
+    searchable: bool,
 ) -> Result<Vec<u8>, EngineError> {
-    crate::epub::export_fixed_pdf(data, dpi, pages.as_deref())
+    crate::epub::export_fixed_pdf(data, dpi, pages.as_deref(), searchable)
 }
 
 #[pyfunction]

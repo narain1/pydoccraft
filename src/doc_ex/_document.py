@@ -672,8 +672,10 @@ class Document:
             self._source, page, dpi, orientation == "landscape", region,
         )))
 
-    def export_epub_fixed_pdf(self, *, dpi: float = 144, pages: Iterable[int] | None = None) -> bytes:
-        """Export fixed-layout spine pages as full-page PDF images with bookmarks and links."""
+    def export_epub_fixed_pdf(
+        self, *, dpi: float = 144, pages: Iterable[int] | None = None, searchable: bool = False,
+    ) -> bytes:
+        """Export fixed-layout spine pages with bookmarks, links and optional searchable text."""
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError
@@ -681,6 +683,8 @@ class Document:
             raise UnsupportedFormatError("fixed-layout visual PDF export requires EPUB input")
         from . import _core, _native
 
+        if type(searchable) is not bool:
+            raise TypeError("searchable must be a bool")
         selected = None
         if pages is not None:
             selected = []
@@ -690,7 +694,7 @@ class Document:
                     raise UnsafeArchiveError("too many EPUB PDF export pages")
                 selected.append(self._page_index(page))
         self._ensure_open()
-        return bytes(_native(lambda: _core._export_epub_fixed_pdf(self._source, dpi, selected)))
+        return bytes(_native(lambda: _core._export_epub_fixed_pdf(self._source, dpi, selected, searchable)))
 
     def convert(self, output_format: str) -> bytes:
         self._ensure_open()

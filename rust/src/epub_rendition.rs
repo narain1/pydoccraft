@@ -7,12 +7,15 @@ use wordcraft_geom::Rect;
 #[cfg(feature = "python")]
 #[path = "epub_rendition/navigation.rs"]
 mod navigation;
+#[path = "epub_rendition/text.rs"]
+pub(super) mod text;
 
 pub(super) type Anchors<'a> = HashMap<&'a str, Option<[f32; 2]>>;
 
 pub(super) struct Capture<'a, 'key> {
     pub anchors: Option<&'a mut Anchors<'key>>,
     pub links: &'a mut LinkAreas,
+    pub text: Option<&'a mut text::TextLayer>,
 }
 
 #[derive(Default)]
@@ -355,6 +358,7 @@ pub(super) fn export_pdf(
     book: &DocumentPayload,
     dpi: f64,
     pages: Option<&[usize]>,
+    searchable: bool,
 ) -> Result<Vec<u8>, EngineError> {
     use wordcraft_doc::StoryRef;
     use wordcraft_layout::{DocLayout, Page, Placed};
@@ -383,7 +387,7 @@ pub(super) fn export_pdf(
             "visual PDF export requires fixed-layout spine entries",
         ));
     }
-    let mut navigation = navigation::Navigation::new(book, &selected)?;
+    let mut navigation = navigation::Navigation::new(book, &selected, searchable)?;
     let mut document = super::output::Output::new(data, book, false, dpi).document;
     let mut pdf_layout = DocLayout::default();
     let mut rendered_pixels = 0;

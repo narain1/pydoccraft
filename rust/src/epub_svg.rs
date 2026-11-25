@@ -158,7 +158,7 @@ pub(super) fn render(
     )?;
     let [w, h] = viewport.unwrap_or([tree.size().width() * 0.75, tree.size().height() * 0.75]);
     if let Some((capture, links)) = navigation.as_mut().zip(links.as_ref()) {
-        if capture.anchors.is_some() || !links.targets.is_empty() {
+        if capture.anchors.is_some() || capture.text.is_some() || !links.targets.is_empty() {
             let clip = wordcraft_geom::Rect::new(0.0, 0.0, w, h);
             let scale = [w / tree.size().width(), h / tree.size().height()];
             capture_svg(&tree, links, scale, clip, capture)?;
@@ -242,6 +242,56 @@ fn capture_svg(
             rect.height() * scale[1],
         )
     };
+    let mut metrics = HashMap::new();
+    visit_painted_svg(tree, scale, clip, |node, clip| {
+        if let Some(rect) = node.abs_bounding_box() {
+            super::rendition::capture_anchor(&mut capture.anchors, node.id(), geometry(rect), clip);
+        }
+        if let (Some(text), usvg::Node::Text(source)) = (capture.text.as_deref_mut(), node) {
+            capture_svg_text(tree.fontdb(), source, scale, clip, &mut metrics, text)?;
+        }
+        if let Some(href) = links.targets.get(node.id()) {
+            if let Some(rect) = node.abs_stroke_bounding_box() {
+                capture.links.add(geometry(rect), clip, (*href).into())?;
+            }
+        }
+        Ok(())
+    })
+}
+
+pub(super) fn collect_image_text(
+    tree: &usvg::Tree,
+    size: [f32; 2],
+    output: &mut super::rendition::text::TextLayer,
+) -> Result<(), EngineError> {
+    let clip = wordcraft_geom::Rect::new(0.0, 0.0, size[0], size[1]);
+    let scale = [
+        size[0] / tree.size().width(),
+        size[1] / tree.size().height(),
+    ];
+    let mut metrics = HashMap::new();
+    visit_painted_svg(tree, scale, clip, |node, clip| {
+        if let usvg::Node::Text(source) = node {
+            capture_svg_text(tree.fontdb(), source, scale, clip, &mut metrics, output)?;
+        }
+        Ok(())
+    })
+}
+
+fn visit_painted_svg(
+    tree: &usvg::Tree,
+    scale: [f32; 2],
+    clip: wordcraft_geom::Rect,
+    mut visit: impl FnMut(&usvg::Node, wordcraft_geom::Rect) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    let geometry = |rect: usvg::Rect| {
+        wordcraft_geom::Rect::new(
+            rect.x() * scale[0],
+            rect.y() * scale[1],
+            rect.width() * scale[0],
+            rect.height() * scale[1],
+        )
+    };
     let mut stack = vec![(tree.root().children().iter(), clip)];
     while let Some((children, parent_clip)) = stack.last_mut() {
         let Some(node) = children.next() else {
@@ -261,13 +311,65 @@ fn capture_svg(
             }
             stack.push((group.children().iter(), clip));
         }
-        if let Some(rect) = node.abs_bounding_box() {
-            super::rendition::capture_anchor(&mut capture.anchors, node.id(), geometry(rect), clip);
+        visit(node, clip)?;
+    }
+    Ok(())
+}
+
+type SvgGlyphMetrics = HashMap<(usvg::fontdb::ID, u32), Option<[f32; 3]>>;
+
+fn capture_svg_text(
+    fonts: &usvg::fontdb::Database,
+    node: &usvg::Text,
+    scale: [f32; 2],
+    clip: wordcraft_geom::Rect,
+    metrics: &mut SvgGlyphMetrics,
+    output: &mut super::rendition::text::TextLayer,
+) -> Result<(), EngineError> {
+    use skrifa::{
+        instance::{LocationRef, Size},
+        FontRef, GlyphId, MetadataProvider,
+    };
+    for span in node.layouted() {
+        if !span.visible || span.fill.is_none() && span.stroke.is_none() {
+            continue;
         }
-        if let Some(href) = links.targets.get(node.id()) {
-            if let Some(rect) = node.abs_stroke_bounding_box() {
-                capture.links.add(geometry(rect), clip, (*href).into())?;
+        for glyph in &span.positioned_glyphs {
+            let Some([advance, ascent, descent]) =
+                *metrics.entry((glyph.font, glyph.id.0)).or_insert_with(|| {
+                    fonts
+                        .with_face_data(glyph.font, |data, index| {
+                            let font = FontRef::from_index(data, index).ok()?;
+                            let size = Size::unscaled();
+                            let location = LocationRef::default();
+                            let metrics = font.metrics(size, location);
+                            let advance = font
+                                .glyph_metrics(size, location)
+                                .advance_width(GlyphId::new(glyph.id.0))?;
+                            Some([advance, metrics.ascent, metrics.descent])
+                        })
+                        .flatten()
+                })
+            else {
+                continue;
+            };
+            if advance <= 0.0 {
+                // Nonspacing marks share their source cluster with the base glyph.
+                continue;
             }
+            let mapping = node.abs_transform().pre_concat(glyph.outline_transform());
+            let page = kurbo::Affine::scale_non_uniform(scale[0].into(), scale[1].into())
+                * kurbo::Affine::new(
+                    [
+                        mapping.sx, mapping.ky, mapping.kx, mapping.sy, mapping.tx, mapping.ty,
+                    ]
+                    .map(f64::from),
+                );
+            let rect = super::rendition::text::transformed(
+                wordcraft_geom::Rect::new(0.0, descent, advance, ascent - descent),
+                page,
+            );
+            output.add(&glyph.text, rect, clip)?;
         }
     }
     Ok(())

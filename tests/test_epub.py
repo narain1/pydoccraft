@@ -938,6 +938,86 @@ class EpubTests(unittest.TestCase):
             self.assertRegex(editor.to_bytes(object_streams=False),
                              rb"/XYZ\s+60(?:\.0+)?\s+30(?:\.0+)?\s+null")
 
+    def test_fixed_layout_pdf_searchable_text_preserves_rendering_and_selection(self) -> None:
+        source = fixed_spread_fixture([("", "white", 320, 200)] * 3)
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            opf = archive.read("OEBPS/content.opf")
+        opf = opf.replace(b'href="s2.xhtml" media-type="application/xhtml+xml"',
+                          b'href="s2.svg" media-type="image/svg+xml"')
+
+        def xhtml(family: str, word: str) -> str:
+            return f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Text</title>
+                <meta name="viewport" content="width=320,height=200"/>
+                <style>
+                @font-face {{font-family:Book;src:url(Inter.ttf)}}
+                body {{margin:0; font-family:{family}; font-size:20px}}
+                #content {{position:absolute; top:20px; left:24px}}
+                #clip {{position:absolute; left:24px; top:80px; height:28px; overflow:hidden}}
+                #omitted {{position:absolute; top:60px}}
+                </style></head><body>
+                <div id="content"><a href="https://example.org/words">{word} café office Ω</a>
+                <span style="display:none">DISPLAYNONE</span>
+                <span style="visibility:hidden">INVISIBLE</span></div>
+                <div id="clip">Visible here<span id="omitted">OUTSIDECLIP</span></div>
+                <p style="position:absolute; left:24px; top:135px; margin:0">
+                <math xmlns="http://www.w3.org/1998/Math/MathML">
+                  <mfrac><mtext>Numerator</mtext><mtext>Denominator</mtext></mfrac>
+                </math></p>
+                <div style="position:absolute;left:174px;top:68px">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 24">
+                    <text x="1" y="18" font-family="Source Sans 3" font-size="18">Vector heading</text>
+                  </svg>
+                </div>
+                <p style="position:absolute;left:158px;top:106px;margin:0">Art
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 24">
+                    <text x="1" y="18" font-family="Source Sans 3" font-size="17">Inline vector</text>
+                  </svg></p>
+                </body></html>"""
+
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 20 320 200">
+                <style>@font-face {font-family:Book;src:url(Inter.ttf)}</style>
+                <g transform="translate(10 20)">
+                  <text x="32" y="64" font-size="24" font-family="Book">SVG résumé</text>
+                  <text x="32" y="120" font-size="24" font-family="Book" visibility="hidden">SVGHIDDEN</text>
+                </g></svg>"""
+        data = rewrite_epub(source, {
+            "OEBPS/content.opf": opf, "OEBPS/s0.xhtml": xhtml("serif", "Standard"),
+            "OEBPS/s1.xhtml": xhtml("Book", "Packaged"), "OEBPS/s2.svg": svg,
+            "OEBPS/Inter.ttf": font,
+        })
+        order = [2, 1, 0, 1]
+        with doc_ex.open(data) as book:
+            visual = book.export_epub_fixed_pdf(dpi=96, pages=order)
+            searchable = book.export_epub_fixed_pdf(dpi=96, pages=order, searchable=True)
+            with self.assertRaisesRegex(TypeError, "searchable must be a bool"):
+                book.export_epub_fixed_pdf(searchable=1)
+        with doc_ex.open(visual) as images, doc_ex.open(searchable) as pdf:
+            self.assertEqual(len(pdf), len(order))
+            for index, word in enumerate(("SVG résumé", "Packaged", "Standard", "Packaged")):
+                with self.subTest(index=index):
+                    page = pdf[index]
+                    text = page.get_text()
+                    self.assertEqual(text.count(word), 1, text)
+                    self.assertEqual(images[index].get_text().strip(), "")
+                    hit, = page.search_for(word)
+                    self.assertGreater(hit[0], 15)
+                    self.assertLess(hit[0], 29)
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(index, dpi=96))),
+                                     rgba_pixels(png_chunks(images.render_page(index, dpi=96))))
+                    if index == 0:
+                        self.assertNotIn("SVGHIDDEN", text)
+                    else:
+                        self.assertIn("café office Ω", text)
+                        self.assertIn("Visible here", text)
+                        for hidden in ("DISPLAYNONE", "INVISIBLE", "OUTSIDECLIP"):
+                            self.assertNotIn(hidden, text)
+                        self.assertIn("Numerator", text)
+                        self.assertIn("Denominator", text)
+                        self.assertIn("Vector heading", text)
+                        self.assertIn("Inline vector", text)
+                        self.assertEqual(page.get_links()[0].uri, "https://example.org/words")
+
     def test_fixed_layout_uses_viewport_and_local_stylesheet_cascade(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
         <meta name="viewport" content="width=320, height=240"/>

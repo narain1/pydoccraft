@@ -24,7 +24,8 @@
 - [x] Preserve nested EPUB navigation in fixed-layout PDF outlines, with destinations remapped to the exported page order.
 - [x] Preserve clickable links and fragment destinations on fixed-layout XHTML content and standalone SVG objects.
 - [ ] Extend fixed-layout link geometry to SVG text spans and SVG embedded in XHTML, and resolve remaining inline fragment cases.
-- [ ] Preserve searchable text in fixed-layout PDF export.
+- [x] Offer searchable fixed-layout PDF export for XHTML, native MathML, and standalone and embedded SVG.
+- [ ] Match searchable SVG text geometry to nonrectangular clipping and masks.
 - [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
 - [x] Preserve ordered XHTML font-family stacks across inherited and inline styles, including packaged and generic fallbacks.
 - [x] Shape variable-font glyphs with inherited CSS axis values and optical sizing in XHTML previews, and pass the properties to the static SVG renderer.

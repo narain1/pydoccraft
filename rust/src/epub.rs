@@ -109,8 +109,9 @@ pub(crate) fn export_fixed_pdf(
     data: &[u8],
     dpi: f64,
     pages: Option<&[usize]>,
+    searchable: bool,
 ) -> Result<Vec<u8>, EngineError> {
-    rendition::export_pdf(data, &extract(data, None)?, dpi, pages)
+    rendition::export_pdf(data, &extract(data, None)?, dpi, pages, searchable)
 }
 
 pub(crate) fn convert(

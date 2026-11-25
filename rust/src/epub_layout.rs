@@ -126,6 +126,12 @@ pub(super) fn render_with_navigation(
         equation_styles: Some((&styles, viewport)),
     };
     let mut output = Output::new(data, book, false, dpi);
+    if navigation
+        .as_ref()
+        .is_some_and(|capture| capture.text.is_some())
+    {
+        output.svg_text = Some(Default::default());
+    }
     if navigation.is_some() {
         output.navigation = Some(HashMap::new());
     }
@@ -801,6 +807,18 @@ impl<'book> Layout<'book> {
                         &page,
                         &wordcraft_layout::display::DisplayOptions::default(),
                     );
+                    if let Some(text) = positions
+                        .navigation
+                        .as_mut()
+                        .and_then(|capture| capture.text.as_deref_mut())
+                    {
+                        text.draw_text(
+                            &draws,
+                            [content_box.x, content_box.y],
+                            child_clip,
+                            self.output.svg_text.as_ref(),
+                        )?;
+                    }
                     inner.push(Draw::Turned {
                         x: content_box.x,
                         y: content_box.y,
@@ -819,13 +837,27 @@ impl<'book> Layout<'book> {
                                 .navigation
                                 .as_mut()
                                 .map(|capture| (capture, child_clip)),
+                            self.output.svg_text.as_ref(),
                         )?;
                     }
                 }
                 Some(Contents::Image(image, alt)) if content_box.w > 0.0 && content_box.h > 0.0 => {
+                    let media = image.media(&mut self.output, content_box)?;
+                    if let Some(text) = positions
+                        .navigation
+                        .as_mut()
+                        .and_then(|capture| capture.text.as_deref_mut())
+                    {
+                        text.draw_image(
+                            self.output.svg_text.as_ref(),
+                            &media,
+                            content_box,
+                            child_clip,
+                        )?;
+                    }
                     inner.push(Draw::Image {
                         rect: content_box,
-                        media: image.media(&mut self.output, content_box)?,
+                        media,
                         crop: [0.0; 4],
                         alpha: 1.0,
                         alt: alt.clone(),

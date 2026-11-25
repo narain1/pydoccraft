@@ -95,6 +95,7 @@ pub(super) struct Output<'a> {
     archive: Option<super::Book<'a>>,
     pub document: Document,
     preserve_links: bool,
+    pub svg_text: Option<super::rendition::text::SvgImages>,
     pub navigation: Option<std::collections::HashMap<u64, super::layout::InlineNavigation>>,
     pixels: u64,
     raster_dpi: f64,
@@ -147,6 +148,7 @@ impl<'a> Output<'a> {
             archive: None,
             document,
             preserve_links,
+            svg_text: None,
             navigation: None,
             pixels: 0,
             raster_dpi,
@@ -445,7 +447,7 @@ impl<'a> Output<'a> {
         if wordcraft_render::decode_pixmap(&bytes).is_none() {
             return Err(conversion("EPUB raster image failed to decode"));
         }
-        let media = self.document.add_media(bytes, ext);
+        let media = self.add_preview_media(bytes, ext);
         Ok(RasterImage {
             media,
             width: width as f32,
@@ -463,7 +465,21 @@ impl<'a> Output<'a> {
         let pixels = [width, height].map(|size| (f64::from(size) * scale).ceil().max(1.0) as u32);
         self.charge_image(pixels[0], pixels[1])?;
         let bytes = super::svg::transparent_png(tree, pixels[0], pixels[1])?;
-        Ok(self.document.add_media(bytes, "png"))
+        let media = self.add_preview_media(bytes, "png");
+        if let Some(capture) = self.svg_text.as_mut() {
+            capture.record(&media, tree, [width, height])?;
+        }
+        Ok(media)
+    }
+
+    fn add_preview_media(&mut self, bytes: Vec<u8>, ext: &str) -> String {
+        if self.svg_text.is_none() {
+            return self.document.add_media(bytes, ext);
+        }
+        // Two images can have identical pixels and different searchable text.
+        let media = format!("image{}.{ext}", self.document.media.len() + 1);
+        self.document.media.insert(media.clone(), Arc::new(bytes));
+        media
     }
 
     fn charge_image(&mut self, width: u32, height: u32) -> Result<(), EngineError> {
