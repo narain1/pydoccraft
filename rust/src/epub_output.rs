@@ -203,7 +203,7 @@ impl<'a> Output<'a> {
                         mut table, extras, ..
                     } if extras.is_empty() || self.pdf_math.is_none() => {
                         if !extras.is_empty() {
-                            table.apply_editable(&extras.editable(&self.document, &format)?)?;
+                            table.apply_editable(&extras.editable(&self.document, None)?)?;
                         }
                         let align = CssParagraph::from_block(block)?.and_then(|style| style.align);
                         return table
@@ -211,7 +211,7 @@ impl<'a> Output<'a> {
                             .map(|table| Some(Arc::new(Block::Table(table))));
                     }
                     equation if self.pdf_math.is_some() => {
-                        let object = self.equation_object(equation, &format, width)?;
+                        let object = self.equation_object(equation, &format, width, None)?;
                         return self
                             .paragraph(block, width, Some((object, format)))
                             .map(wordcraft_doc::para_block)
@@ -234,6 +234,7 @@ impl<'a> Output<'a> {
         equation: super::math::Equation,
         format: &CharProps,
         width: f32,
+        paragraph_style: Option<&str>,
     ) -> Result<InlineObject, EngineError> {
         match equation {
             super::math::Equation::Native {
@@ -250,8 +251,15 @@ impl<'a> Output<'a> {
                 display,
                 extras,
             } if self.pdf_math.is_none() => {
-                extras.editable(&self.document, format)?.apply(&mut math)?;
-                let resolved = self.document.styles.resolve_char(None, format);
+                extras
+                    .editable(&self.document, paragraph_style)?
+                    .apply(&mut math)?;
+                // DOCX stores each math run's format, but the equation itself
+                // takes its surrounding paragraph style after reopening.
+                let resolved = self
+                    .document
+                    .styles
+                    .resolve_char(paragraph_style, &CharProps::default());
                 let layout = wordcraft_layout::math::layout_equation(
                     &math,
                     "",
@@ -316,7 +324,15 @@ impl<'a> Output<'a> {
                     } else {
                         let mut style = text.style_at(start);
                         let equation = self.equation(source, css, &mut style)?;
-                        (self.equation_object(equation, &style, width)?, style)
+                        (
+                            self.equation_object(
+                                equation,
+                                &style,
+                                width,
+                                p.props.style.as_deref(),
+                            )?,
+                            style,
+                        )
                     };
                     p.insert_object(p.len(), object, &style)
                         .map_err(conversion)?;

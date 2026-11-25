@@ -12,6 +12,7 @@ use wordcraft_doc::{
     resolve::ResolvedChar,
     Document,
 };
+use wordcraft_fonts::math::{resolve_math, C};
 use wordcraft_layout::math::{layout_equation, MItem, MathLayout};
 
 use super::{css, invalid, limited, table, unsupported, zero_length, Presentation, MATHML};
@@ -36,7 +37,7 @@ pub(in crate::epub) struct Editable {
 
 struct EditableLayout<'a> {
     document: &'a Document,
-    format: &'a CharProps,
+    carrier: ResolvedChar,
     guide_ratios: OnceCell<[f32; 2]>,
 }
 
@@ -135,12 +136,14 @@ impl Extras {
     pub(in crate::epub) fn editable(
         self,
         document: &Document,
-        format: &CharProps,
+        paragraph_style: Option<&str>,
     ) -> Result<Editable, EngineError> {
         let mut editable = Editable::default();
         let layout = EditableLayout {
             document,
-            format,
+            carrier: document
+                .styles
+                .resolve_char(paragraph_style, &CharProps::default()),
             guide_ratios: OnceCell::new(),
         };
         for extra in self.nodes {
@@ -234,7 +237,14 @@ impl Extras {
 
 impl Editable {
     pub(in crate::epub) fn apply(&self, math: &mut Math) -> Result<(), EngineError> {
-        math.nodes = self.substitute(std::mem::take(&mut math.nodes))?;
+        let nodes = self.substitute(std::mem::take(&mut math.nodes))?;
+        let too_deep = Cell::new(false);
+        math.nodes = check_editable_depth(nodes, 0, &too_deep);
+        if too_deep.get() {
+            return Err(limited(
+                "editable MathML exceeds the DOCX equation depth limit",
+            ));
+        }
         Ok(())
     }
 
@@ -250,6 +260,18 @@ impl Editable {
         }
         Ok(nodes)
     }
+}
+
+fn check_editable_depth(nodes: Arg, level: usize, exceeded: &Cell<bool>) -> Arg {
+    if level >= wordcraft_doc::math::MAX_DEPTH / 2 && !nodes.is_empty() {
+        // WordCraft advances its layout depth both into a node and into its argument.
+        exceeded.set(true);
+        return nodes;
+    }
+    nodes
+        .into_iter()
+        .map(|node| map_args(node, &|arg| check_editable_depth(arg, level + 1, exceeded)))
+        .collect()
 }
 
 pub(super) fn padding(
@@ -367,15 +389,18 @@ impl Padding {
     ) -> Result<MNode, EngineError> {
         let [width, height, depth, left, shift] = self.lengths;
         let unsupported_padding = || unsupported("MathML composed geometry in DOCX export");
-        if shift.is_some_and(|length| length.value != 0.0) {
-            return Err(unsupported_padding());
-        }
         // Keep native width when adding a fixed horizontal gap. Other dimensions
         // may use any measured extent of the original operand as their basis.
         let additive_width = width.filter(|l| l.basis.is_none() && l.relative && l.value >= 0.0);
         let body = editable.substitute(self.body)?;
-        let needs_original =
-            [width, height, depth, left]
+        let need_shift = shift.is_some_and(|length| length.value != 0.0);
+        let need_overhang_width = (additive_width.is_some() || zeroed(width, 0) == Some(false))
+            && left.is_some_and(|length| {
+                length.basis.is_some() || length.value > additive_width.map_or(0.0, |l| l.value)
+            });
+        let needs_original = need_shift
+            || need_overhang_width
+            || [width, height, depth, left]
                 .into_iter()
                 .enumerate()
                 .any(|(index, length)| {
@@ -402,24 +427,31 @@ impl Padding {
         } else {
             [0.0; 3]
         };
-        let (absolute_width, advance) = match (width, additive_width) {
+        let (mut absolute_width, mut advance) = match (width, additive_width) {
             (_, Some(additive)) => (false, additive.value),
             (length, _) if zeroed(length, 0) == Some(false) => (false, 0.0),
             (Some(length), _) => (true, length.resolve(0, original).max(0.0)),
             (None, _) => (false, 0.0),
         };
         let left = left.map_or(0.0, |length| length.resolve(3, original));
-        if left < 0.0 || !absolute_width && left > advance {
+        if left < 0.0 {
             return Err(unsupported_padding());
         }
-        if ![left, advance]
+        if !absolute_width && left > advance {
+            // Reserve the original advance separately when the leading offset
+            // overhangs the width added to the operand.
+            absolute_width = true;
+            advance += original[0];
+        }
+        let shift = shift.map_or(0.0, |length| length.resolve(4, original));
+        if ![left, advance, shift.abs()]
             .into_iter()
             .all(|value| value <= MAX_GEOMETRY)
         {
             return Err(limited("MathML padding exceeds its geometry budget"));
         }
         let lengths = [height, depth];
-        let vertical = std::array::from_fn(|index| match zeroed(lengths[index], index + 1) {
+        let mut vertical = std::array::from_fn(|index| match zeroed(lengths[index], index + 1) {
             Some(false) => None,
             Some(true) => Some(0.0),
             None => lengths[index].map(|length| length.resolve(index + 1, original).max(0.0)),
@@ -433,6 +465,12 @@ impl Padding {
         if !body.is_empty() {
             contents.extend(editable_gap(leading)?);
             contents.extend(body);
+            if shift != 0.0 {
+                contents = vec![layout.shift(contents, shift)?];
+                for (extent, original) in vertical.iter_mut().zip(&original[1..]) {
+                    *extent = extent.or(Some(*original));
+                }
+            }
             if absolute_width || vertical.iter().any(Option::is_some) {
                 contents = vec![MNode::Phant {
                     show: true,
@@ -497,15 +535,56 @@ impl Padding {
 }
 
 impl EditableLayout<'_> {
+    fn shift(&self, contents: Arg, shift: f32) -> Result<MNode, EngineError> {
+        let (face, constants) = resolve_math("Cambria Math");
+        let axis_ratio = constants.as_ref().map_or(0.25, |table| {
+            table.get(C::AxisHeight) / face.upem.max(1.0) as f32
+        });
+        let axis = self.carrier.draw_size().clamp(1.0, 1638.0) * axis_ratio;
+        // A one-row equation array centers its row on the math axis. Zero the
+        // operand extents and give the row an independent ascent or descent so
+        // its baseline lands at the requested offset.
+        let correction = 2.0 * (axis - shift);
+        let mut row = vec![
+            MNode::Phant {
+                show: true,
+                zero_wid: false,
+                zero_asc: true,
+                zero_desc: true,
+                e: contents,
+            },
+            phantom(
+                guide("H", 1.0, Some(math_spacing::SHIFT_GUIDE_COLOR)),
+                false,
+                true,
+                true,
+                true,
+            ),
+        ];
+        let index = usize::from(correction < 0.0);
+        let minimum = self.ratios()[index];
+        if correction.abs() >= minimum / 2.0 {
+            // The smallest positive guide is one point. A subpoint guide
+            // rounds to the nearer of that one-point guide and no guide.
+            let mut extents = [None; 2];
+            extents[index] = Some(correction.abs().max(minimum));
+            self.add_extents(&mut row, extents)?;
+        }
+        Ok(MNode::EqArr { rows: vec![row] })
+    }
+
+    fn ratios(&self) -> [f32; 2] {
+        *self
+            .guide_ratios
+            .get_or_init(|| guide_ratios(&self.carrier))
+    }
+
     fn add_extents(&self, nodes: &mut Arg, extents: [Option<f32>; 2]) -> Result<(), EngineError> {
         for (index, extent) in extents.into_iter().enumerate() {
             let Some(extent) = extent.filter(|extent| *extent != 0.0) else {
                 continue;
             };
-            let ratios = self.guide_ratios.get_or_init(|| {
-                let resolved = self.document.styles.resolve_char(None, self.format);
-                guide_ratios(&resolved)
-            });
+            let ratios = self.ratios();
             let size = (extent / ratios[index] * 2.0).round() * 0.5;
             if !(1.0..=1638.0).contains(&size) {
                 return Err(unsupported(

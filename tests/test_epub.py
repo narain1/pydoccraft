@@ -4447,9 +4447,7 @@ first
             self.assertIn(b'm:t xml:space="preserve"> </m:t>', xml)
 
         for attributes, message in (
-            ('width="+8pt" voffset="3pt"', "composed geometry"),
             ('width="+8pt" lspace="-2pt"', "composed geometry"),
-            ('width="+8pt" lspace="9pt"', "composed geometry"),
             ('width="+0.1pt"', "spacing resolution"),
             ('width="600pt"', "exceeds the DOCX text area"),
         ):
@@ -4457,6 +4455,68 @@ first
             with self.subTest(attributes=attributes), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.convert("docx")
+
+    def test_mathml_signed_vertical_and_overhanging_horizontal_shifts_stay_editable(self) -> None:
+        red = '<m:mtext mathcolor="#cf222e">Red</m:mtext>'
+        blue = '<m:mtext mathcolor="#1644df">Blue</m:mtext>'
+        green = '<m:mtext mathcolor="#198144">Guard</m:mtext>'
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Editable content offsets</title><style>body {{ margin:0 }}</style></head>
+          <body><p><m:math mathsize="18pt">{}</m:math></p>
+          <p><m:math mathsize="18pt">{}</m:math></p></body></html>"""
+
+        def positions(doc: doc_ex.Document) -> list[tuple[int, int]]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=96)))
+            result = []
+            for color in ("cf222e", "1644df", "198144"):
+                ink = bytes.fromhex(color + "ff")
+                matches = [divmod(i // 4, width) for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                result.append((min(x for _, x in matches), min(y for y, _ in matches)))
+            return result
+
+        def sample(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]], bytes]:
+            with doc_ex.open(epub_fixture(chapter_one=template.format(body, green))) as book:
+                preview = positions(book)
+                data = book.convert("docx")
+            with doc_ex.open(data) as word:
+                reopened = positions(word)
+                text = word[0].get_text()
+                for label in ("Red", "Blue", "Guard"):
+                    self.assertEqual(text.count(label), 1, text)
+                self.assertNotIn("⟡H", text)
+                self.assertNotIn("⟡g", text)
+                self.assertNotIn("█(", text)
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                return preview, reopened, archive.read("word/document.xml")
+
+        spacer = '<m:mspace width="8pt"/>'
+        unshifted = f'<m:mpadded width="100%">{red}</m:mpadded>'
+        baseline = sample(unshifted + spacer + blue)
+        for offset in (6, -5, 3.2):
+            with self.subTest(offset=offset):
+                padded = f'<m:mpadded width="+3pt" lspace="9pt" voffset="{offset}pt">{red}</m:mpadded>'
+                raised = sample(padded + spacer + blue)
+                self.assertIn(b"<m:eqArr>", raised[2])
+                for before, after in zip(baseline[:2], raised[:2]):
+                    self.assertAlmostEqual(after[0][0] - before[0][0], 12, delta=1)
+                    self.assertAlmostEqual(after[1][0] - before[1][0], 4, delta=1)
+                    self.assertAlmostEqual(after[0][1] - before[0][1], -offset * 4 / 3, delta=1)
+                    self.assertAlmostEqual(after[1][1], before[1][1], delta=1)
+                    self.assertAlmostEqual(after[2][1], before[2][1], delta=1)
+
+        fraction = '<m:mfrac>{}<m:msqrt>{}</m:msqrt></m:mfrac>'
+        before = sample(fraction.format(unshifted, blue))
+        nested = sample(fraction.format(f'<m:mpadded voffset="-25%height">{red}</m:mpadded>', blue))
+        for original, shifted in zip(before[:2], nested[:2]):
+            self.assertGreater(shifted[0][1], original[0][1])
+            self.assertEqual(shifted[1:], original[1:])
+        self.assertIn(b"<m:f>", nested[2])
+        self.assertIn(b"<m:rad>", nested[2])
+
+        deep = '<m:mpadded voffset="3pt">' * 9 + red + '</m:mpadded>' * 9
+        with doc_ex.open(epub_fixture(chapter_one=template.format(deep, green))) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "DOCX equation depth"):
+                book.convert("docx")
 
     def test_mathml_vertical_padding_and_space_stay_editable_in_docx(self) -> None:
         red = '<m:mtext mathcolor="#cf222e">Red</m:mtext>'
