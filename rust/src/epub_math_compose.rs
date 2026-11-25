@@ -1,5 +1,8 @@
 //! Supply measured MathML boxes to the pinned equation shaper.
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+};
 
 use roxmltree::Node;
 use wordcraft_doc::{
@@ -25,6 +28,11 @@ const MAX_SAVED_DRAW_UNITS: usize = 250_000;
 pub(in crate::epub) struct Extras {
     nodes: Vec<Extra>,
     occupied_colors: HashSet<[u8; 3]>,
+}
+
+#[derive(Default)]
+pub(in crate::epub) struct Editable {
+    boxes: Vec<Cell<Option<MNode>>>,
 }
 
 pub(super) enum Extra {
@@ -108,6 +116,18 @@ impl Extras {
         })])
     }
 
+    pub(in crate::epub) fn editable(self) -> Result<Editable, EngineError> {
+        let mut editable = Editable::default();
+        for extra in self.nodes {
+            let node = match extra {
+                Extra::Padded(padding) => padding.editable(&editable)?,
+                _ => return Err(unsupported("MathML composed geometry in DOCX export")),
+            };
+            editable.boxes.push(Cell::new(Some(node)));
+        }
+        Ok(editable)
+    }
+
     pub(in crate::epub) fn measure(
         self,
         doc: &Document,
@@ -176,6 +196,26 @@ impl Extras {
         }
         measurements.draw_units = draw_units;
         Ok(measurements)
+    }
+}
+
+impl Editable {
+    pub(in crate::epub) fn apply(&self, math: &mut Math) -> Result<(), EngineError> {
+        math.nodes = self.substitute(std::mem::take(&mut math.nodes))?;
+        Ok(())
+    }
+
+    fn substitute(&self, body: Arg) -> Result<Arg, EngineError> {
+        let missing = Cell::new(false);
+        let nodes = replace_boxes(body, &|index| {
+            let node = self.boxes.get(index).and_then(Cell::take);
+            missing.set(missing.get() || node.is_none());
+            node
+        });
+        if missing.get() {
+            return Err(invalid("missing editable MathML box"));
+        }
+        Ok(nodes)
     }
 }
 
@@ -287,6 +327,65 @@ fn factor(value: &str) -> Result<f32, EngineError> {
 }
 
 impl Padding {
+    fn editable(self, editable: &Editable) -> Result<MNode, EngineError> {
+        let [width, height, depth, left, vertical] = self.lengths;
+        let unsupported_padding = || unsupported("MathML composed geometry in DOCX export");
+        if vertical.is_some_and(|length| length.value != 0.0) {
+            return Err(unsupported_padding());
+        }
+        let zero_asc = zeroed(height, 1).ok_or_else(unsupported_padding)?;
+        let zero_desc = zeroed(depth, 2).ok_or_else(unsupported_padding)?;
+        let left = match left {
+            None => 0.0,
+            Some(length) if length.value == 0.0 => 0.0,
+            Some(Length {
+                value, basis: None, ..
+            }) if value > 0.0 => value,
+            _ => return Err(unsupported_padding()),
+        };
+        let (absolute_width, advance) = match width {
+            length if zeroed(length, 0) == Some(false) => (false, 0.0),
+            length if zeroed(length, 0) == Some(true) => (true, 0.0),
+            Some(Length {
+                value,
+                basis: None,
+                relative: true,
+            }) if value > 0.0 => (false, value),
+            Some(Length {
+                value,
+                basis: None,
+                relative: false,
+            }) => (true, value.max(0.0)),
+            _ => return Err(unsupported_padding()),
+        };
+        if !absolute_width && left > advance {
+            return Err(unsupported_padding());
+        }
+        let body = editable.substitute(self.body)?;
+        if body.is_empty() {
+            // An empty visible phantom exposes WordCraft's argument placeholder.
+            return Ok(editable_gap(advance)?.unwrap_or_else(|| MNode::Run(MRun::plain(""))));
+        }
+        let mut contents = Vec::new();
+        contents.extend(editable_gap(left)?);
+        contents.extend(body);
+        if absolute_width || zero_asc || zero_desc {
+            contents = vec![MNode::Phant {
+                show: true,
+                zero_wid: absolute_width,
+                zero_asc,
+                zero_desc,
+                e: contents,
+            }];
+        }
+        contents.extend(editable_gap(if absolute_width {
+            advance
+        } else {
+            advance - left
+        })?);
+        Ok(MNode::Boxed { e: contents })
+    }
+
     fn layout(
         mut self,
         doc: &Document,
@@ -335,6 +434,54 @@ impl Padding {
         }
         Ok(layout)
     }
+}
+
+fn zeroed(length: Option<Length>, dimension: usize) -> Option<bool> {
+    match length {
+        None => Some(false),
+        Some(Length {
+            value: 0.0,
+            relative,
+            ..
+        }) => Some(!relative),
+        Some(Length {
+            value: 1.0,
+            basis: Some(basis),
+            relative: false,
+        }) if basis == dimension => Some(false),
+        _ => None,
+    }
+}
+
+fn editable_gap(width: f32) -> Result<Option<MNode>, EngineError> {
+    if width == 0.0 {
+        return Ok(None);
+    }
+    // WordCraft advances a math space by 0.4 em and writes run sizes in half-points.
+    // Use one run per distinct size so long gaps retain the same rounding precision.
+    let units = (width * 5.0).round() as usize;
+    if units < 2 {
+        return Err(unsupported(
+            "MathML padding is below the DOCX spacing resolution",
+        ));
+    }
+    let count = units.div_ceil(3276);
+    let size = (units / count) as f32 / 2.0;
+    let larger = units % count;
+    let run = |count: usize, size| {
+        MNode::Run(MRun {
+            size: Some(size),
+            ..MRun::plain(" ".repeat(count))
+        })
+    };
+    let mut nodes = vec![run(count - larger, size)];
+    if larger > 0 {
+        nodes.push(run(larger, size + 0.5));
+    }
+    if nodes.len() == 1 {
+        return Ok(nodes.pop());
+    }
+    Ok(Some(MNode::Boxed { e: nodes }))
 }
 
 pub(in crate::epub) fn position(item: &mut MItem, dx: f32, dy: f32, scale: f32) {
@@ -530,24 +677,26 @@ impl Measurements {
     }
 
     fn substitute(&self, nodes: Arg) -> Arg {
-        nodes
-            .into_iter()
-            .map(|node| match node {
-                MNode::Run(ref run) => {
-                    if let Some(index) = run
-                        .font
-                        .as_deref()
-                        .and_then(|font| font.strip_prefix(BOX_PREFIX))
-                        .and_then(|index| index.parse::<usize>().ok())
-                    {
-                        if let Some(measure) = self.boxes.get(index) {
-                            return measure.placeholder.clone();
-                        }
-                    }
-                    node
-                }
-                _ => map_args(node, &|arg| self.substitute(arg)),
-            })
-            .collect()
+        replace_boxes(nodes, &|index| {
+            self.boxes
+                .get(index)
+                .map(|measure| measure.placeholder.clone())
+        })
     }
+}
+
+fn replace_boxes(nodes: Arg, replacement: &dyn Fn(usize) -> Option<MNode>) -> Arg {
+    nodes
+        .into_iter()
+        .map(|node| match node {
+            MNode::Run(ref run) => run
+                .font
+                .as_deref()
+                .and_then(|font| font.strip_prefix(BOX_PREFIX))
+                .and_then(|index| index.parse::<usize>().ok())
+                .and_then(replacement)
+                .unwrap_or(node),
+            _ => map_args(node, &|arg| replace_boxes(arg, replacement)),
+        })
+        .collect()
 }

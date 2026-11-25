@@ -39,7 +39,8 @@
 - [x] Apply MathML padding dimensions, relative padding offsets and vertical space in chapter previews and fixed-layout PDF.
 - [x] Export composed MathML, including tables mixed with paragraph content, as searchable reflowable PDF.
 - [x] Render authored fraction rules and operand alignment in previews, searchable reflowable PDF and visual fixed-layout PDF.
-- [ ] Export composed MathML as editable DOCX and expand the remaining MathML visual properties.
+- [x] Export fixed and additive horizontal MathML padding as editable DOCX equations, including equations in native spanning tables.
+- [ ] Extend editable DOCX export to the remaining composed MathML, including vertical padding and spanning grids inside formulas. Expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.

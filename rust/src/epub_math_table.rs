@@ -308,6 +308,19 @@ impl CellDrawing {
 }
 
 impl Table {
+    pub(in crate::epub) fn apply_editable(
+        &mut self,
+        editable: &compose::Editable,
+    ) -> Result<(), EngineError> {
+        for cell in &mut self.cells {
+            match &mut cell.content {
+                CellContent::Equation(math) => editable.apply(math)?,
+                CellContent::Table(table) => table.apply_editable(editable)?,
+            }
+        }
+        Ok(())
+    }
+
     pub(in crate::epub) fn layout(
         &self,
         doc: &Document,

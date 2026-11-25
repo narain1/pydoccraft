@@ -3152,6 +3152,93 @@ first
         with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "native vertical extent"):
             preview('<m:mpadded height="5000pt">' + red + '</m:mpadded>')
 
+    def test_mathml_horizontal_padding_stays_editable_in_docx(self) -> None:
+        red = '<m:mtext mathcolor="#cf222e">Red</m:mtext>'
+        blue = '<m:mtext mathcolor="#1644df">Blue</m:mtext>'
+        green = '<m:mtext mathcolor="#198144">Green</m:mtext>'
+        words = f'<m:mpadded width="100%">{red}</m:mpadded><m:mpadded width="100%">{blue}</m:mpadded>{green}'
+        padded = (
+            f'<m:mpadded width="+8pt" lspace="2pt"><m:mpadded width="+12pt" lspace="6pt">'
+            f'{red}</m:mpadded></m:mpadded><m:mpadded width="72pt" lspace="4pt" height="100%" depth="0">'
+            f'{blue}</m:mpadded>{green}'
+        )
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"
+          xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Editable math padding</title>
+          <style>body {{margin:0}}</style></head>
+          <body><p>Before <m:math mathsize="18pt">{}</m:math> after.</p></body></html>"""
+
+        def starts(png: bytes) -> dict[str, int]:
+            width, pixels = rgba_pixels(png_chunks(png))
+            result = {}
+            for color in ("cf222e", "1644df", "198144"):
+                ink = bytes.fromhex(color + "ff")
+                result[color] = min(i // 4 % width for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink)
+            return result
+
+        with (
+            doc_ex.open(epub_fixture(chapter_one=template.format(words))) as baseline,
+            doc_ex.open(epub_fixture(chapter_one=template.format(padded))) as book,
+        ):
+            native = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(native)) as archive:
+                xml = archive.read("word/document.xml")
+            ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+            root = ET.fromstring(xml)
+            math, = root.findall(".//m:oMath", ns)
+            self.assertEqual("".join(node.text or "" for node in math.findall(".//m:t", ns)).split(), ["Red", "Blue", "Green"])
+            self.assertIsNotNone(math.find(".//m:phantPr/m:zeroWid", ns))
+            self.assertIsNotNone(math.find(".//m:phantPr/m:zeroDesc", ns))
+            self.assertNotIn(b"epub-math-box-", xml)
+            with doc_ex.open(native) as word, doc_ex.open(baseline.convert("docx")) as original_word:
+                expected = word[0].get_text()
+                for token in ("Before", "Red", "Blue", "Green", "after."):
+                    self.assertEqual(expected.count(token), 1, expected)
+                for control, changed in ((baseline, book), (original_word, word)):
+                    plain = starts(control.render_page(0, dpi=144))
+                    moved = starts(changed.render_page(0, dpi=144))
+                    self.assertAlmostEqual(moved["cf222e"] - plain["cf222e"], 16, delta=2)
+                    self.assertAlmostEqual(moved["1644df"] - plain["1644df"], 48, delta=2)
+                    self.assertAlmostEqual(moved["198144"] - moved["1644df"], 136, delta=2)
+
+        grid = f"""<m:mtable><m:mtr><m:mtd columnspan="2">
+          <m:mfrac><m:mpadded width="+12pt" lspace="6pt">{red}</m:mpadded>
+          <m:msqrt>{blue}</m:msqrt></m:mfrac></m:mtd></m:mtr>
+          <m:mtr><m:mtd>{green}</m:mtd><m:mtd><m:mn>2</m:mn></m:mtd></m:mtr></m:mtable>"""
+        chapter = template.replace("Before ", "").replace(" after.", "").format(grid)
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            data = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            xml = archive.read("word/document.xml")
+            self.assertIn(b'<w:gridSpan w:val="2"/>', xml)
+            self.assertIn(b"<m:f>", xml)
+            self.assertIn(b"<m:rad>", xml)
+        with doc_ex.open(data) as reopened:
+            for token in ("Red", "Blue", "Green"):
+                self.assertEqual(reopened[0].get_text().count(token), 1)
+            self.assertEqual(set(starts(reopened.render_page(0, dpi=144))), {"cf222e", "1644df", "198144"})
+
+        empty = template.format('<m:mpadded width="12pt"/>' + red)
+        with doc_ex.open(epub_fixture(chapter_one=empty)) as book:
+            data = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            xml = archive.read("word/document.xml")
+            self.assertNotIn(b"<m:phant", xml)
+            self.assertIn(b'm:t xml:space="preserve"> </m:t>', xml)
+
+        for attributes, message in (
+            ('width="+8pt" voffset="3pt"', "composed geometry"),
+            ('width="+8pt" height="+3pt"', "composed geometry"),
+            ('width="+8pt" lspace="-2pt"', "composed geometry"),
+            ('width="+8pt" lspace="9pt"', "composed geometry"),
+            ('width="+120%"', "composed geometry"),
+            ('width="+0.1pt"', "spacing resolution"),
+            ('width="600pt"', "exceeds the DOCX text area"),
+        ):
+            chapter = template.format(f"<m:mpadded {attributes}>{red}</m:mpadded>{blue}")
+            with self.subTest(attributes=attributes), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                    book.convert("docx")
+
     def test_invalid_media_overlay_references_and_timing_are_explicit(self) -> None:
         for options, error in (
             ({"first_target": "../one.xhtml#missing"}, doc_ex.MalformedDocumentError),

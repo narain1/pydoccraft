@@ -195,16 +195,19 @@ impl<'a> Output<'a> {
                 let mut format = text.style_at(*start);
                 let equation = self.equation(source, *css, &mut format)?;
                 match equation {
-                    super::math::Equation::SpanningTable { table, extras, .. }
-                        if extras.is_empty() =>
-                    {
+                    super::math::Equation::SpanningTable {
+                        mut table, extras, ..
+                    } if extras.is_empty() || self.pdf_math.is_none() => {
+                        if !extras.is_empty() {
+                            table.apply_editable(&extras.editable()?)?;
+                        }
                         let align = CssParagraph::from_block(block)?.and_then(|style| style.align);
                         return table
                             .export(&self.document, &format, width, align)
                             .map(|table| Some(Arc::new(Block::Table(table))));
                     }
                     equation if self.pdf_math.is_some() => {
-                        let object = self.equation_object(equation, &format)?;
+                        let object = self.equation_object(equation, &format, width)?;
                         return self
                             .paragraph(block, width, Some((object, format)))
                             .map(wordcraft_doc::para_block)
@@ -226,6 +229,7 @@ impl<'a> Output<'a> {
         &mut self,
         equation: super::math::Equation,
         format: &CharProps,
+        width: f32,
     ) -> Result<InlineObject, EngineError> {
         match equation {
             super::math::Equation::Native {
@@ -237,6 +241,33 @@ impl<'a> Output<'a> {
                 display,
                 math,
             }),
+            super::math::Equation::Composed {
+                mut math,
+                display,
+                extras,
+            } if self.pdf_math.is_none() => {
+                extras.editable()?.apply(&mut math)?;
+                let resolved = self.document.styles.resolve_char(None, format);
+                let layout = wordcraft_layout::math::layout_equation(
+                    &math,
+                    "",
+                    &resolved,
+                    display,
+                    width,
+                    &Default::default(),
+                    &mut 0,
+                );
+                let section = &self.document.last_section;
+                let height = section.page_h - section.margin_top - section.margin_bottom;
+                if layout.width > width || layout.ascent + layout.descent > height {
+                    return Err(unsupported("composed MathML exceeds the DOCX text area"));
+                }
+                Ok(InlineObject::Equation {
+                    linear: wordcraft_doc::math::to_linear(&math.nodes),
+                    display,
+                    math,
+                })
+            }
             equation => self
                 .pdf_math
                 .as_mut()
@@ -281,7 +312,7 @@ impl<'a> Output<'a> {
                     } else {
                         let mut style = text.style_at(start);
                         let equation = self.equation(source, css, &mut style)?;
-                        (self.equation_object(equation, &style)?, style)
+                        (self.equation_object(equation, &style, width)?, style)
                     };
                     p.insert_object(p.len(), object, &style)
                         .map_err(conversion)?;

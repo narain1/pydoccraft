@@ -2883,3 +2883,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 703 installed tests, including 108
 ## 2026-11-24 Embedded Ogg Theora video
 
 The Linux x86-64 CPython 3.11.15 wheel passed 704 installed tests, including 109 EPUB tests. It measured 23,917,222 bytes with a 55,584,936-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-ogg-theora-video) covers the coded picture limit, decoded colors, frame and caption intervals, synchronized Opus and the public MP4 regression.
+
+## 2026-11-24 Editable MathML horizontal padding
+
+The Linux x86-64 CPython 3.11.15 wheel passed 705 installed tests, including 110 EPUB tests. It measured 23,923,742 bytes with a 55,588,712-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-editable-mathml-horizontal-padding) covers reopened DOCX geometry, editable formulas inside a table cell, and the results of editing OMML operand text.
