@@ -97,68 +97,74 @@ struct View<'a, F> {
 const MAX_FIT_PROBES: usize = 4_096;
 
 impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> View<'_, F> {
-    fn fit_width(&mut self, id: NodeId, input: LayoutInput) -> Option<f32> {
-        let AvailableSpace::Definite(limit) = input.available_space.width else {
-            return None;
-        };
-        if input.known_dimensions.width.is_some() || input.run_mode != RunMode::ComputeSize {
+    fn preferred_width(&mut self, id: NodeId, input: LayoutInput) -> Option<f32> {
+        if input.known_dimensions.width.is_some()
+            || input.run_mode != RunMode::ComputeSize
+            || input.axis == RequestedAxis::Horizontal && !input.available_space.width.is_definite()
+        {
             return None;
         }
         let style = &self.nodes[usize::from(id)].style;
-        let limit = match style.size.width.expand() {
-            ExpandedDimension::FitContent => limit,
-            ExpandedDimension::FitContentPx(_)
-            | ExpandedDimension::FitContentPercent(_)
-            | ExpandedDimension::FitContentCalc(_) => {
-                // A functional limit uses the chosen box-sizing edge. Taffy's
-                // available space and the measured intrinsic extents are outer sizes.
-                let resolve = |length: taffy::LengthPercentage| {
-                    let basis = input.parent_size.width.unwrap_or(0.0);
-                    match length.expand() {
-                        ExpandedLengthPercentage::Length(points) => points,
-                        ExpandedLengthPercentage::Percent(ratio) => basis * ratio,
-                        ExpandedLengthPercentage::Calc(handle) => {
-                            self.calculations.at(handle, basis)
-                        }
-                    }
-                };
-                limit
-                    + if style.box_sizing == BoxSizing::ContentBox {
-                        resolve(style.padding.left)
-                            + resolve(style.padding.right)
-                            + resolve(style.border.left)
-                            + resolve(style.border.right)
-                    } else {
-                        0.0
-                    }
+        let basis = input.parent_size.width;
+        let (limit, functional) = match style.size.width.expand() {
+            ExpandedDimension::MinContent if input.axis != RequestedAxis::Horizontal => {
+                return Some(self.probe_width(id, input, AvailableSpace::MinContent));
+            }
+            ExpandedDimension::MaxContent if input.axis != RequestedAxis::Horizontal => {
+                return Some(self.probe_width(id, input, AvailableSpace::MaxContent));
+            }
+            ExpandedDimension::FitContent => (input.available_space.width.into_option()?, false),
+            ExpandedDimension::FitContentPx(points) => (points, true),
+            ExpandedDimension::FitContentPercent(ratio) => (basis? * ratio, true),
+            ExpandedDimension::FitContentCalc(handle) => {
+                (self.calculations.at(handle, basis?), true)
             }
             _ => return None,
         };
-        self.fit_probes += 1;
-        if self.fit_probes > MAX_FIT_PROBES {
-            return Some(0.0);
-        }
+        // Functional limits use the selected box-sizing edge. Both Taffy's
+        // available space and the measured intrinsic extents are outer sizes.
+        let limit = limit
+            + if functional && style.box_sizing == BoxSizing::ContentBox {
+                let resolve = |length: taffy::LengthPercentage| match length.expand() {
+                    ExpandedLengthPercentage::Length(points) => points,
+                    ExpandedLengthPercentage::Percent(ratio) => basis.unwrap_or(0.0) * ratio,
+                    ExpandedLengthPercentage::Calc(handle) => {
+                        basis.map_or(0.0, |basis| self.calculations.at(handle, basis))
+                    }
+                };
+                resolve(style.padding.left)
+                    + resolve(style.padding.right)
+                    + resolve(style.border.left)
+                    + resolve(style.border.right)
+            } else {
+                0.0
+            };
         // Wrapping at the limit alone returns the width of the widest wrapped
         // line. The box uses the limit itself when it lies between min and max.
-        let mut probe = |width| {
-            self.place_node(
-                id,
-                LayoutInput {
-                    axis: RequestedAxis::Horizontal,
-                    available_space: Size {
-                        width,
-                        ..input.available_space
-                    },
-                    ..input
-                },
-                None,
-            )
-            .size
-            .width
-        };
-        let minimum = probe(AvailableSpace::MinContent);
-        let maximum = probe(AvailableSpace::MaxContent);
+        let minimum = self.probe_width(id, input, AvailableSpace::MinContent);
+        let maximum = self.probe_width(id, input, AvailableSpace::MaxContent);
         Some(limit.min(maximum).max(minimum))
+    }
+
+    fn probe_width(&mut self, id: NodeId, input: LayoutInput, width: AvailableSpace) -> f32 {
+        self.fit_probes += 1;
+        if self.fit_probes > MAX_FIT_PROBES {
+            return 0.0;
+        }
+        self.place_node(
+            id,
+            LayoutInput {
+                axis: RequestedAxis::Horizontal,
+                available_space: Size {
+                    width,
+                    ..input.available_space
+                },
+                ..input
+            },
+            None,
+        )
+        .size
+        .width
     }
 
     fn place_node(
@@ -174,7 +180,7 @@ impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> View<'_, F> {
             return LayoutOutput::HIDDEN;
         }
         compute_cached_layout(self, id, input, |tree, id, mut input| {
-            if let Some(width) = tree.fit_width(id, input) {
+            if let Some(width) = tree.preferred_width(id, input) {
                 if input.axis == RequestedAxis::Horizontal {
                     return LayoutOutput::from_outer_size(Size { width, height: 0.0 });
                 }

@@ -875,9 +875,13 @@ impl<'book> Layout<'book> {
                             },
                         );
                     }
-                    match measure(
+                    let mut measure_content = |known_dimensions, available_space| match measure(
                         content.as_deref(),
-                        input,
+                        LayoutInput {
+                            known_dimensions,
+                            available_space,
+                            ..input
+                        },
                         &mut self.output.document,
                         &mut self.cache,
                         &mut self.measure_count,
@@ -887,7 +891,33 @@ impl<'book> Layout<'book> {
                             error = Some(err);
                             Size::ZERO
                         }
+                    };
+                    if style.size.width.is_sizing_keyword()
+                        || style.size.height.is_sizing_keyword()
+                        || style.padding != taffy::geometry::Rect::zero()
+                        || style.border != taffy::geometry::Rect::zero()
+                    {
+                        return taffy::compute_leaf_layout(
+                            input,
+                            style,
+                            |handle, basis| tree::calculated_length(calculations, handle, basis),
+                            |known, available| {
+                                // The native API keeps known dimensions in border-box
+                                // coordinates and supplies the content space separately.
+                                let content_extent = |known: Option<f32>, space: AvailableSpace| {
+                                    known.and(space.into_option()).map(|extent| extent.max(0.0))
+                                };
+                                measure_content(
+                                    Size {
+                                        width: content_extent(known.width, available.width),
+                                        height: content_extent(known.height, available.height),
+                                    },
+                                    available,
+                                )
+                            },
+                        );
                     }
+                    measure_content(input.known_dimensions, input.available_space)
                 } else {
                     Size::ZERO
                 };

@@ -2298,6 +2298,39 @@ class EpubTests(unittest.TestCase):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "CSS intrinsic box size"):
                     preview(size)
 
+    def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
+          <style>body,p{margin:0} section{width:200px;CONTAINER}
+          p{font-size:20px;background:#488a3d;overflow:hidden;BOX}
+          aside{width:100px;height:5px;background:#264985}
+          </style></head><body><section><p>WORDS</p><aside></aside></section></body></html>"""
+
+        def preview(box: str, words: str, container: str = "") -> tuple[int, bytes]:
+            source = chapter.replace("CONTAINER", container).replace("BOX", box).replace("WORDS", words)
+            with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+                return rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+
+        def right_edge(image: tuple[int, bytes]) -> int:
+            width, pixels = image
+            return max((index // 4) % width for index in range(0, len(pixels), 4)
+                       if pixels[index:index + 4] == b"\x48\x8a\x3d\xff")
+
+        word = "Unbreakable"
+        for size in ("min-content", "max-content", "fit-content", "fit-content(0px)", "fit-content(250px)"):
+            with self.subTest(size=size):
+                plain = preview(f"width:{size}", word)
+                padded = preview(f"width:{size};padding-inline:12px;border:2px solid #264985", word)
+                self.assertAlmostEqual(right_edge(padded) - right_edge(plain), 26, delta=1)
+
+        flex = "display:flex;flex-direction:column;align-items:start"
+        words = "Wine Wine Wine Wine"
+        fixed = preview("width:60px", words, flex)
+        for value in ("fit-content(60px)", "fit-content(30%)", "fit-content(calc(25% + 10px))"):
+            with self.subTest(value=value):
+                self.assertEqual(fixed, preview("width:" + value, words, flex))
+        intrinsic = preview("width:min-content", words)
+        self.assertEqual(intrinsic, preview("width:min-content", words, flex))
+
     def test_css_intrinsic_box_inherits_limits_in_searchable_fixed_pdf(self) -> None:
         source = fixed_spread_fixture([("", "white", 300, 160)])
         template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic fixed box</title>
