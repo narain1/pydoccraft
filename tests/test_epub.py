@@ -3665,6 +3665,106 @@ class EpubTests(unittest.TestCase):
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
             render(unsupported, False)
 
+    def test_epub_svg_position_lists_preserve_mixed_face_spacing_and_scaling(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+        resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
+        fixture = fixed_spread_fixture([("", "white", 324, 136)])
+        labels = ("B\u0301", "é", "B\u0301", "é")
+        colors = ((162, 32, 34), (34, 133, 48), (40, 66, 151), (137, 42, 139))
+        positions = 'dx="6, 0, 4, 6, 0, 8" dy="-4px 0 15 -9 0 11"'
+
+        def svg(length: int, *, offsets: str = positions, mode: str = "spacing", transform: str = "") -> str:
+            glyphs = "".join(
+                f'<a href="https://example.org/{index}" id="mark-{index}" fill="#{bytes(rgb).hex()}">{label}</a>'
+                for index, (rgb, label) in enumerate(zip(colors, labels))
+            )
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 324 136">
+              <style>
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+00E9;
+                             font-variation-settings:"wght" 340}}
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+0042,U+0301;
+                             font-variation-settings:"wght" 760}}
+                text {{font-family:Layout;font-size:34px;font-optical-sizing:none;text-anchor:middle}}
+              </style>
+              <a href="#mark-0"><rect x="10" y="8" width="8" height="8" fill="#287044"/></a>
+              <g transform="translate(5 8) {transform}">
+                <text x="146" y="72" textLength="{length}" lengthAdjust="{mode}" {offsets}>{glyphs}</text>
+              </g></svg>"""
+
+        def render(source: str, inline: bool) -> tuple:
+            if inline:
+                path = "OEBPS/s0.xhtml"
+                authored = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Relative positions</title>
+                    <meta name="viewport" content="width=324,height=136"/>
+                    <style>body {{margin:0}} svg {{width:324px;height:136px}}</style>
+                    </head><body>{source}</body></html>"""
+                with doc_ex.open(rewrite_epub(fixture, {path: authored})) as book:
+                    data = book.edit_epub_structure([0], resources=resources)
+            else:
+                path, authored = "OEBPS/relatives.svg", source
+                with doc_ex.open(epub_fixture()) as book:
+                    data = book.edit_epub_structure(
+                        [doc_ex.EpubSvgChapterSource("Relative positions", authored, path), 0], resources=resources,
+                    )
+            with doc_ex.open(data) as book:
+                self.assertEqual(book.read_epub_resource(path), authored.encode())
+                width, pixels = preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                output = book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+            with doc_ex.open(output) as pdf, pdf.edit() as edit:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                search = {label: sorted(pdf[0].search_for(label), key=lambda box: box[0]) for label in set(labels)}
+                self.assertEqual({label: len(boxes) for label, boxes in search.items()}, {"B\u0301": 2, "é": 2})
+                links = {int(link.uri.rsplit("/", 1)[1]): link.bbox for link in pdf[0].get_links()
+                         if link.uri and link.uri.startswith("https://example.org/")}
+                self.assertEqual(set(links), set(range(len(labels))))
+                target, = re.findall(rb"/XYZ[ ]+([1-9][0-9.]*)[ ]+([0-9.]+)[ ]+null",
+                                     edit.to_bytes(object_streams=False))
+            ink = [{(offset // 4 % width, offset // 4 // width) for offset in range(0, len(pixels), 4)
+                    if pixels[offset:offset + 4] == bytes((*rgb, 255))}
+                   for rgb in colors]
+            self.assertTrue(all(ink))
+            return preview, ink, search, links, tuple(map(float, target))
+
+        for inline in (False, True):
+            with self.subTest(inline=inline):
+                original = render(svg(128, offsets=""), inline)
+                positioned = render(svg(128), inline)
+                # The relative lists grow the unadjusted width by 18 px.
+                # The same final fitted width offsets that by 6 px per gap.
+                shifts = ((6, -4), (4, 11), (4, 2), (6, 13))
+                for index, (dx, dy) in enumerate(shifts):
+                    self.assertEqual({(x + dx, y + dy) for x, y in original[1][index]}, positioned[1][index])
+                    for coordinate, (before, after) in enumerate(zip(original[3][index], positioned[3][index])):
+                        self.assertAlmostEqual(after - before, (dy if coordinate % 2 else dx) * .75, delta=.03)
+                self.assertAlmostEqual(positioned[4][0] - original[4][0], 4.5, delta=.03)
+                self.assertAlmostEqual(positioned[4][1] - original[4][1], 3.0, delta=.03)
+                for label, indices in (("B\u0301", (0, 2)), ("é", (1, 3))):
+                    for index, before, after in zip(indices, original[2][label], positioned[2][label]):
+                        dx, dy = shifts[index]
+                        for coordinate in range(4):
+                            self.assertAlmostEqual(after[coordinate] - before[coordinate],
+                                                   (dy if coordinate % 2 else dx) * .75, delta=.03)
+
+                mode = "spacingAndGlyphs"
+                # The authored outer transform shares the effective anchor
+                # at the original x plus the first relative shift.
+                manual = render(svg(110, mode=mode, transform="translate(152 0) scale(2 1) translate(-152 0)"), inline)
+                doubly_scaled = render(svg(220, mode=mode), inline)
+                self.assertEqual(doubly_scaled, manual)
+
+        for offsets, reason in (
+            ('dx="6 3 4 6 0 8"', "inside a shaped cluster"),
+            ('dx="6 0 -120 6 0 8"', "verifiable relative glyph positioning"),
+            ('dy="1em"', "verifiable relative glyph positioning"),
+        ):
+            with self.subTest(offsets=offsets), self.assertRaisesRegex(doc_ex.UnsupportedFormatError, reason):
+                render(svg(128, offsets=offsets), False)
+
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "verifiable relative glyph positioning"):
+            render(svg(128, transform="rotate(12)"), False)
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "relative positioning exceeds"):
+            render(svg(128, offsets='dx="' + " ".join(["0"] * 4097) + '"'), False)
+
     def test_epub_svg_overlapping_spacing_preserves_a_nested_owner_and_search_geometry(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
         resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}

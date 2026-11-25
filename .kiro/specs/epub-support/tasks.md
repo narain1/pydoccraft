@@ -53,6 +53,7 @@
 - [x] Fit multiple independently positioned sibling spacing owners in one mixed-face SVG text element.
 - [x] Fit verified left-to-right multi-glyph clusters and keep their native ink in searchable SVG PDF text and links.
 - [x] Resolve one direct nested SVG spacing owner before its overlapping outer text length and verify final native glyphs.
+- [x] Preserve verified per-character relative position lists through mixed-face SVG spacing and horizontal glyph scaling.
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
 - [x] Render alpha-preserving SVG color matrices, including saturation and hue rotation, with the fixed-layout PDF text and annotations preserved.
 - [x] Render bounded SVG filter chains with prior named inputs, including alpha-changing color matrices in visual output. Reject PDF text or annotation capture when the source geometry cannot be preserved.

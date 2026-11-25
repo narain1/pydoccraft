@@ -16,6 +16,8 @@ pub(super) struct SpacingCheck {
     width: Option<f32>,
     cluster_range: Range<usize>,
     shift: Shift,
+    absolute: Option<usvg::Transform>,
+    preserve_order: bool,
 }
 
 enum Shift {
@@ -69,6 +71,8 @@ impl SpacingCheck {
             width: verify_full_width.then_some(target),
             cluster_range: offset..offset + count,
             shift: Shift::Even { gap, anchor },
+            absolute: None,
+            preserve_order: false,
         })
     }
 
@@ -78,7 +82,32 @@ impl SpacingCheck {
             width: Some(target),
             cluster_range: 0..offsets.len(),
             shift: Shift::Explicit(offsets),
+            absolute: None,
+            preserve_order: false,
         }
+    }
+
+    pub(super) fn scaled(index: usize, text: &usvg::Text, absolute: usvg::Transform) -> Self {
+        let count = text
+            .layouted()
+            .iter()
+            .flat_map(|span| svg::glyph_clusters(span, true))
+            .count();
+        Self {
+            index,
+            width: Some(text.bounding_box().width()),
+            cluster_range: 0..count,
+            shift: Shift::Even {
+                gap: 0.0,
+                anchor: 0.0,
+            },
+            absolute: Some(absolute),
+            preserve_order: true,
+        }
+    }
+
+    pub(super) fn require_order(&mut self) {
+        self.preserve_order = true;
     }
 
     fn offset(&self, cluster: usize) -> f32 {
@@ -181,11 +210,23 @@ pub(super) fn verify_probe(
     start.ok_or_else(spacing_error)
 }
 
-fn same_chunk(before: &usvg::TextChunk, after: &usvg::TextChunk) -> bool {
+pub(super) fn same_chunk(before: &usvg::TextChunk, after: &usvg::TextChunk) -> bool {
     before.x() == after.x()
         && before.y() == after.y()
         && before.anchor() == after.anchor()
         && before.text() == after.text()
+}
+
+pub(super) fn same_spans(before: &usvg::Text, after: &usvg::Text) -> bool {
+    let before = before.layouted();
+    let after = after.layouted();
+    before.len() == after.len()
+        && before.iter().zip(after).all(|(old, new)| {
+            old.variations == new.variations
+                && old.font_optical_sizing == new.font_optical_sizing
+                && old.visible == new.visible
+                && old.positioned_glyphs.len() == new.positioned_glyphs.len()
+        })
 }
 
 pub(super) fn verify(
@@ -213,7 +254,7 @@ pub(super) fn verify(
                 .iter()
                 .zip(after.chunks())
                 .any(|(old, new)| !same_chunk(old, new))
-            || before.abs_transform() != after.abs_transform()
+            || checks[0].absolute.unwrap_or_else(|| before.abs_transform()) != after.abs_transform()
             || checks.iter().any(|check| {
                 check
                     .width
@@ -225,16 +266,7 @@ pub(super) fn verify(
         {
             return Err(spacing_error());
         }
-        let before_spans = before.layouted();
-        let after_spans = after.layouted();
-        if before_spans.len() != after_spans.len()
-            || before_spans.iter().zip(after_spans).any(|(old, new)| {
-                old.variations != new.variations
-                    || old.font_optical_sizing != new.font_optical_sizing
-                    || old.visible != new.visible
-                    || old.positioned_glyphs.len() != new.positioned_glyphs.len()
-            })
-        {
+        if !same_spans(before, after) {
             return Err(spacing_error());
         }
         let mut revised = after
@@ -245,9 +277,17 @@ pub(super) fn verify(
             .layouted()
             .iter()
             .flat_map(|span| svg::glyph_clusters(span, true));
+        let preserve_order = checks.iter().any(|check| check.preserve_order);
+        let mut previous_x = f32::NEG_INFINITY;
         let mut checks = checks.iter().peekable();
         for (index, cluster) in originals.enumerate() {
             let adjusted = revised.next().ok_or_else(spacing_error)?;
+            let x = adjusted.first().ok_or_else(spacing_error)?.transform().tx;
+            if preserve_order && x <= previous_x {
+                return Err(spacing_error());
+            }
+            previous_x = x;
+
             while checks
                 .peek()
                 .is_some_and(|check| check.cluster_range.end <= index)
@@ -281,7 +321,7 @@ pub(super) fn verify(
     Ok(())
 }
 
-fn close(actual: f32, expected: f32) -> bool {
+pub(super) fn close(actual: f32, expected: f32) -> bool {
     (actual - expected).abs() <= 0.02
 }
 

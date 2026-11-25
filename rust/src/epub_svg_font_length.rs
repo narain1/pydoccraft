@@ -20,6 +20,9 @@ use crate::{
 #[path = "epub_svg_nested_length.rs"]
 mod nested;
 
+#[path = "epub_svg_relative_length.rs"]
+mod relative;
+
 #[path = "epub_svg_font_spacing.rs"]
 mod spacing;
 use spacing::SpacingCheck;
@@ -33,6 +36,7 @@ pub(in crate::epub::svg) struct TextLength {
     temporary_id: bool,
     owners: Vec<LengthOwner>,
     nested: Option<nested::NestedLength>,
+    relative: Option<relative::RelativePositions>,
 }
 
 struct LengthOwner {
@@ -66,14 +70,15 @@ pub(super) fn prepare_lengths(
         ));
     }
     if root.descendants().filter(Node::is_element).any(|node| {
-        ["dx", "dy", "rotate"]
-            .iter()
-            .any(|attribute| node.has_attribute(*attribute))
-            || node != root && node.has_tag_name((NS, "text"))
+        node.has_attribute("rotate")
+            || node != root
+                && (node.has_attribute("dx")
+                    || node.has_attribute("dy")
+                    || node.has_tag_name((NS, "text")))
             || node.has_tag_name((NS, "textPath"))
     }) {
         return Err(unsupported(
-            "EPUB SVG mixed-font textLength requires linear chunks without per-glyph positioning",
+            "EPUB SVG mixed-font textLength requires linear chunks without rotation or descendant per-glyph positioning",
         ));
     }
     for effect in ["filter", "clip-path", "mask"] {
@@ -106,11 +111,18 @@ pub(super) fn prepare_lengths(
             .map(|owner| prepare_owner(root, owner, edits))
             .collect::<Result<_, _>>()?
     };
+    let relative = relative::RelativePositions::read(root)?;
+    if relative.is_some()
+        && (nested.is_some() || !matches!(owners.as_slice(), [owner] if owner.chunk.is_none()))
+    {
+        return Err(relative::error());
+    }
     Ok(TextLength {
         id,
         temporary_id,
         owners,
         nested,
+        relative,
     })
 }
 
@@ -350,6 +362,17 @@ pub(in crate::epub::svg) fn fit_lengths(
             }
             spacing.push(check);
         }
+        let leading_dx = length
+            .relative
+            .as_ref()
+            .map(|positions| {
+                let reference = probe_ids
+                    .get(&(id, 0))
+                    .and_then(|id| probes.get(id.as_str()).copied())
+                    .ok_or_else(relative::error)?;
+                positions.verify(node, text, reference)
+            })
+            .transpose()?;
         for adjustment in &length.owners {
             let (chunk, start, owner) = if let Some(origin) = adjustment.chunk {
                 if text.chunks().len() != origin.count {
@@ -397,7 +420,7 @@ pub(in crate::epub::svg) fn fit_lengths(
             match adjustment.adjust {
                 usvg::LengthAdjust::Spacing => {
                     let (offset, measured) = start.unwrap_or((0, text));
-                    let check = SpacingCheck::new(
+                    let mut check = SpacingCheck::new(
                         index,
                         adjustment.target,
                         measured,
@@ -405,11 +428,19 @@ pub(in crate::epub::svg) fn fit_lengths(
                         offset,
                         start.is_none(),
                     )?;
+                    if leading_dx.is_some() {
+                        check.require_order();
+                    }
                     check.apply(source, owner, &mut edits, &mut bytes)?;
                     spacing.push(check);
                 }
                 usvg::LengthAdjust::SpacingAndGlyphs => {
-                    let edit = scale_glyphs(source, node, text, chunk, adjustment.target)?;
+                    let anchor = chunk.x().unwrap_or(0.0) + leading_dx.unwrap_or(0.0);
+                    let (edit, absolute) =
+                        scale_glyphs(source, node, text, anchor, adjustment.target)?;
+                    if leading_dx.is_some() {
+                        spacing.push(SpacingCheck::scaled(index, text, absolute));
+                    }
                     charge(
                         &mut bytes,
                         edit.1.len(),
@@ -459,7 +490,9 @@ fn probe_chunks<'a>(
     measure: impl FnOnce(&[u8]) -> Result<usvg::Tree, EngineError>,
 ) -> Result<(Option<usvg::Tree>, ProbeIds<'a>), EngineError> {
     if !lengths.values().any(|length| {
-        length.nested.is_some() || length.owners.iter().any(|owner| owner.chunk.is_some())
+        length.nested.is_some()
+            || length.relative.is_some()
+            || length.owners.iter().any(|owner| owner.chunk.is_some())
     }) {
         return Ok((None, HashMap::new()));
     }
@@ -489,6 +522,8 @@ fn probe_chunks<'a>(
         let mut selected = Vec::new();
         if let Some(nested) = &length.nested {
             selected.push((0, nested.owner(text)?));
+        } else if length.relative.is_some() {
+            selected.push((0, text));
         } else {
             for origin in length.owners.iter().filter_map(|owner| owner.chunk) {
                 selected.push((origin.index, positioned_owner(text, origin)?));
@@ -502,11 +537,18 @@ fn probe_chunks<'a>(
                     break id;
                 }
             };
-            let mut copy_edits: Vec<Edit> = text
-                .children()
-                .filter(|child| *child != owner)
-                .map(|child| (local(child.range()), String::new()))
-                .collect();
+            let mut copy_edits: Vec<Edit> = if owner == text {
+                ["dx", "dy"]
+                    .into_iter()
+                    .filter_map(|name| text.attribute_node(name))
+                    .map(|attr| (local(attr.range()), String::new()))
+                    .collect()
+            } else {
+                text.children()
+                    .filter(|child| *child != owner)
+                    .map(|child| (local(child.range()), String::new()))
+                    .collect()
+            };
             copy_edits.push((local(attr.range_value()), probe_id.clone()));
             let copy = apply_edits(&source[range.clone()], copy_edits, XML_BYTES)?;
             charge(
@@ -546,14 +588,13 @@ fn scale_glyphs(
     source: &str,
     node: Node<'_, '_>,
     text: &usvg::Text,
-    chunk: &usvg::TextChunk,
+    x: f32,
     target: f32,
-) -> Result<Edit, EngineError> {
+) -> Result<(Edit, usvg::Transform), EngineError> {
     // The native text box uses glyph advances rather than ink bounds.
     // Scale the inline positions and outlines around the author's anchor.
     let width = text.bounding_box().width();
     let scale = target / width;
-    let x = chunk.x().unwrap_or(0.0);
     if !scale.is_finite()
         || !(0.001..=1000.0).contains(&scale)
         || !x.is_finite()
@@ -607,7 +648,10 @@ fn scale_glyphs(
             format!(" transform=\"{adjustment}\""),
         )
     };
-    Ok(edit)
+    let absolute = text
+        .abs_transform()
+        .pre_concat(usvg::Transform::from_row(scale, 0.0, 0.0, 1.0, dx, 0.0));
+    Ok((edit, absolute))
 }
 
 impl FittedLengths {
