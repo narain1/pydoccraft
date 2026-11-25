@@ -3558,6 +3558,37 @@ first
             self.assertEqual(struct.unpack_from(">II", tail[b"IHDR"]), (16, 20))
             self.assertEqual(rgba_pixels(tail)[1], bytes((169, 51, 114, 255)) * 320)
 
+    def test_clipped_packaged_font_preview_uses_only_visible_outlines(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+        sentence = "Amber blue green: crooked letters cross the clip. "
+
+        def chapter(repetitions: int) -> bytes:
+            html = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title><style>
+              @font-face {{ font-family: Reader; src: url(inter.ttf); font-weight: 100 900 }}
+              body, p {{ margin:0 }} p {{ font-family:Reader; font-size:12pt; font-weight:641.25;
+              font-style:oblique -23.5deg; text-decoration:underline; color:#15324e }}
+              </style></head><body><p>{sentence * repetitions}</p></body></html>"""
+            source = epub_fixture(chapter_one=html)
+            with doc_ex.open(source) as book:
+                return book.edit_epub_structure(resources={
+                    "OEBPS/inter.ttf": doc_ex.EpubResource("font/ttf", font),
+                })
+
+        with (doc_ex.open(chapter(10)) as compact, doc_ex.open(chapter(1_800)) as long):
+            width, reference = rgba_pixels(png_chunks(compact.render_page(0, dpi=96)))
+            clip = (12, 3, 72, 18)
+            cropped = png_chunks(long.render_page(0, dpi=96, clip=clip))
+            self.assertEqual(struct.unpack_from(">II", cropped[b"IHDR"]), (96, 24))
+            _, pixels = rgba_pixels(cropped)
+            expected = bytearray()
+            for row in range(4, 28):
+                start = (row * width + 16) * 4
+                expected.extend(reference[start:start + 96 * 4])
+            self.assertEqual(pixels, expected)
+            self.assertIn(bytes((21, 50, 78, 255)), pixels)
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "outline budget"):
+                long.render_page(0, dpi=24)
+
     def test_mathml_applies_chapter_css_in_preview_and_native_exports(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Math styles</title><link rel="stylesheet" href="math.css"/>

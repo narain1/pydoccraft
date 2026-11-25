@@ -1,4 +1,8 @@
 //! Shape EPUB text with scoped archive fonts and bundled fallback faces.
+#[path = "epub_fonts/bounds.rs"]
+mod bounds;
+pub(super) use bounds::GlyphPaths;
+
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -988,7 +992,7 @@ impl Text {
     pub(super) fn draw(
         &self,
         area: Rect,
-        remaining: &mut usize,
+        glyph_paths: &mut GlyphPaths,
         output: &mut Vec<Draw>,
         mut capture: Option<(&mut super::rendition::Capture<'_, '_>, Rect)>,
         images: Option<&super::rendition::text::SvgImages>,
@@ -1036,12 +1040,22 @@ impl Text {
                 }
                 let synthesis = run.run().synthesis();
                 let skew = self.synthetic_skew(&run, &font)?;
+                let mut clip = glyph_paths.clip.as_mut().and_then(|clip| {
+                    clip.font(
+                        data.data.id(),
+                        data.index,
+                        size,
+                        &coordinates,
+                        skew,
+                        synthesis.embolden(),
+                    )
+                });
                 let mut pen = Pen {
                     path: BezPath::new(),
                     x: 0.0,
                     y: 0.0,
                     skew,
-                    remaining,
+                    remaining: &mut glyph_paths.remaining,
                     truncated: false,
                 };
                 for glyph in run.positioned_glyphs() {
@@ -1051,8 +1065,13 @@ impl Text {
                     pen.x = area.x + glyph.x;
                     pen.y = area.y + glyph.y;
                     let settings =
-                        DrawSettings::unhinted(Size::new(size), LocationRef::new(&coordinates));
-                    outline.draw(settings, &mut pen).map_err(invalid)?;
+                        || DrawSettings::unhinted(Size::new(size), LocationRef::new(&coordinates));
+                    if let Some(clip) = clip.as_mut() {
+                        if !clip.visible(glyph.id, &outline, settings(), [pen.x, pen.y])? {
+                            continue;
+                        }
+                    }
+                    outline.draw(settings(), &mut pen).map_err(invalid)?;
                     if pen.truncated {
                         return Err(limited("EPUB packaged-font outline budget exceeded"));
                     }

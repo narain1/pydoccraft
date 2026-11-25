@@ -9,7 +9,7 @@
 - [x] Update locked dependencies, license inventories, and format and authoring documentation.
 - [x] Accept inert XHTML and selected legacy doctypes. Reopen and edit the original W3C Accessible EPUB 3 sample.
 - [ ] Expand the public EPUB conformance corpus.
-- [ ] Render clipped regions of long chapters with packaged fonts within the outline budget. Reproduce with the public Children’s Literature EPUB.
+- [x] Limit packaged-font outline emission to glyphs that can paint the requested EPUB preview region. Verify clipped regions of the public Children’s Literature EPUB.
 - [x] Open the unmodified math-heavy *Linear Algebra* sample within the semantic output budget and exercise its spine previews.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
 - [x] Replace existing XHTML and SVG chapters transactionally and preserve targeted navigation and overlay anchors.

@@ -143,7 +143,11 @@ pub(super) fn render_with_navigation(
     root_style.box_sizing = taffy::style::BoxSizing::BorderBox;
     layout.tree.set_style(id, root_style).map_err(failure)?;
     let dimension = layout.place(root_id, fixed)?;
+    let cropped = !matches!(region, Region::Viewport(None));
     let region = region.for_page(dimension.map(f64::from), dpi, fixed)?;
+    if cropped {
+        layout.glyph_paths.set_clip(region, dpi / 72.0);
+    }
     let html_color = styles.boxes[&root.id()]
         .background
         .filter(|(_, alpha)| *alpha > 0.0);
@@ -283,7 +287,7 @@ struct Layout<'book> {
     cache: LayoutCache,
     viewport: [f32; 2],
     measure_count: usize,
-    glyph_paths_remaining: usize,
+    glyph_paths: super::fonts::GlyphPaths,
     fonts: Option<Fonts>,
 }
 
@@ -353,7 +357,7 @@ impl<'book> Layout<'book> {
             cache: LayoutCache::new(),
             viewport,
             measure_count: 0,
-            glyph_paths_remaining: 1_000_000,
+            glyph_paths: super::fonts::GlyphPaths::default(),
             fonts,
         }
     }
@@ -837,7 +841,7 @@ impl<'book> Layout<'book> {
                     for block in blocks {
                         area.y += block.draw(
                             area,
-                            &mut self.glyph_paths_remaining,
+                            &mut self.glyph_paths,
                             &mut inner,
                             positions
                                 .navigation
