@@ -53,33 +53,45 @@ type Serial = [u8; 4];
 
 #[derive(Default)]
 pub(super) struct NamedTracks {
-    audio: Vec<Serial>,
+    audio: Vec<(Serial, Codec)>,
     video: Vec<Serial>,
-    audio_codec: Option<Codec>,
 }
 
 impl NamedTracks {
     pub(super) fn audio_codec(&self) -> Option<Codec> {
-        self.audio_codec
+        let &(_, codec) = self.audio.first()?;
+        self.audio
+            .iter()
+            .all(|&(_, value)| value == codec)
+            .then_some(codec)
+    }
+
+    pub(super) fn mixed_audio(&self) -> bool {
+        !self.audio.is_empty() && self.audio_codec().is_none()
     }
 
     pub(super) fn has_video(&self) -> bool {
         !self.video.is_empty()
     }
 
-    fn serials(&self, codec: Codec) -> Result<&[Serial], EngineError> {
-        match codec {
-            Codec::Theora if self.has_video() => Ok(&self.video),
-            codec if self.audio_codec == Some(codec) => Ok(&self.audio),
-            _ => Err(unsupported(
-                "named Ogg fragment does not select the requested media type",
-            )),
-        }
+    fn track(&self, index: usize, codec: Codec) -> Result<Serial, EngineError> {
+        let serial = match codec {
+            Codec::Theora => self.video.get(index).copied(),
+            codec => self
+                .audio
+                .get(index)
+                .filter(|&&(_, selected)| selected == codec)
+                .map(|&(serial, _)| serial),
+        };
+        serial.ok_or_else(|| {
+            unsupported("named Ogg fragment does not select the requested media type")
+        })
     }
 }
 
 pub(super) struct Segment<'a> {
     pub pages: Vec<Page<'a>>,
+    pub codec: Codec,
     pub opus_tracks: usize,
     pub vorbis_tracks: usize,
     pub has_other_audio: bool,
@@ -205,12 +217,35 @@ impl Stream {
 /// Each segment starts with adjacent BOS pages and ends after every stream's EOS.
 /// Retain the selected track's page slices. Check the other pages without assembling packets.
 pub(super) fn groups<'a>(
-    mut bytes: &'a [u8],
+    bytes: &'a [u8],
     codec: Codec,
     track: Option<usize>,
     named: Option<&NamedTracks>,
 ) -> Result<Vec<Segment<'a>>, EngineError> {
-    let named = named.map(|tracks| tracks.serials(codec)).transpose()?;
+    scan_groups(bytes, track, |index| {
+        let serial = named.map(|tracks| tracks.track(index, codec)).transpose()?;
+        Ok((codec, serial))
+    })
+}
+
+pub(super) fn named_audio_groups<'a>(
+    bytes: &'a [u8],
+    named: &NamedTracks,
+) -> Result<Vec<Segment<'a>>, EngineError> {
+    scan_groups(bytes, None, |index| {
+        let &(serial, codec) = named
+            .audio
+            .get(index)
+            .ok_or_else(|| unsupported("named Ogg fragment does not select an audio track"))?;
+        Ok((codec, Some(serial)))
+    })
+}
+
+fn scan_groups<'a>(
+    mut bytes: &'a [u8],
+    track: Option<usize>,
+    pick: impl Fn(usize) -> Result<(Codec, Option<Serial>), EngineError>,
+) -> Result<Vec<Segment<'a>>, EngineError> {
     if bytes.is_empty() {
         return Err(invalid("truncated Ogg header"));
     }
@@ -224,6 +259,7 @@ pub(super) fn groups<'a>(
     let mut vorbis_tracks = 0;
     let mut has_other_audio = false;
     let mut packets_left = MAX_PACKETS;
+    let (mut codec, mut named) = pick(0)?;
     for _ in 0..MAX_PAGES {
         let (page, rest) = Page::read(bytes)?;
         bytes = rest;
@@ -238,10 +274,7 @@ pub(super) fn groups<'a>(
             let identified = Codec::from_identification(page.body);
             let matches = identified == Some(codec);
             let selected_track = matches
-                && named.map_or_else(
-                    || track.unwrap_or(0) == tracks,
-                    |serials| serials.get(groups.len()) == Some(&serial),
-                );
+                && named.map_or_else(|| track.unwrap_or(0) == tracks, |target| serial == target);
             tracks += usize::from(matches);
             opus_tracks += usize::from(identified == Some(Codec::Opus));
             vorbis_tracks += usize::from(identified == Some(Codec::Vorbis));
@@ -305,6 +338,7 @@ pub(super) fn groups<'a>(
             }
             groups.push(Segment {
                 pages: std::mem::take(&mut selected),
+                codec,
                 opus_tracks,
                 vorbis_tracks,
                 has_other_audio,
@@ -314,6 +348,9 @@ pub(super) fn groups<'a>(
             opus_tracks = 0;
             vorbis_tracks = 0;
             has_other_audio = false;
+            if !bytes.is_empty() {
+                (codec, named) = pick(groups.len())?;
+            }
         }
         if bytes.is_empty() {
             if !active.is_empty() {
@@ -384,20 +421,14 @@ pub(super) fn named_tracks(mut bytes: &[u8], names: &[String]) -> Result<NamedTr
             }
             let NamedSegment { audio, video } =
                 resolve_names(std::mem::take(&mut metadata), &codecs, names)?;
-            let audio_codec = audio.map(|track| track.codec);
             let name = audio.map(|track| track.name);
-            if link > 0
-                && (selection.audio_codec != audio_codec
-                    || audio_name != name
-                    || selection.has_video() != video.is_some())
-            {
+            if link > 0 && (audio_name != name || selection.has_video() != video.is_some()) {
                 return Err(unsupported(
-                    "named Ogg tracks change media type or codec across segments",
+                    "named Ogg tracks change media type across segments",
                 ));
             }
             if let Some(track) = audio {
-                selection.audio.push(track.serial);
-                selection.audio_codec = Some(track.codec);
+                selection.audio.push((track.serial, track.codec));
                 audio_name = name;
             }
             if let Some(serial) = video {

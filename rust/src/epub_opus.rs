@@ -64,6 +64,19 @@ impl Track {
         Ok(Self::from_links(links, frames))
     }
 
+    pub(super) fn open_ogg_link(
+        pages: Vec<ogg_pages::Page<'_>>,
+        packets_left: &mut usize,
+    ) -> Result<Self, EngineError> {
+        let link = Link::index(pages, 0, packets_left)?;
+        let frames = link.playable;
+        Ok(Self::from_links(vec![link], frames))
+    }
+
+    pub(super) fn release_playback(&mut self) {
+        self.playback = None;
+    }
+
     pub(super) fn open_webm(mut reader: webm::Reader, index: u32) -> Result<Self, EngineError> {
         let stream = &reader.demux.streams()[index as usize];
         if stream.params.extradata.len() > 1024 {
@@ -241,6 +254,15 @@ impl Track {
     }
 
     pub(super) fn samples(&mut self, start: usize, stop: usize) -> Result<Vec<i16>, EngineError> {
+        self.samples_with_work(start, stop, &mut 0)
+    }
+
+    pub(super) fn samples_with_work(
+        &mut self,
+        start: usize,
+        stop: usize,
+        work: &mut usize,
+    ) -> Result<Vec<i16>, EngineError> {
         if start >= stop || stop > self.frames {
             return Err(invalid("Opus clip lies outside its presentation"));
         }
@@ -258,7 +280,6 @@ impl Track {
         let mut samples = Vec::with_capacity((stop - start) * channels);
         let leading = self.links[0].timeline.start.min(stop).saturating_sub(start);
         samples.resize(leading * channels, 0);
-        let mut work = MAX_FRAMES_PER_CLIP;
         for index in first..last {
             let link = &self.links[index];
             let begin = start.max(link.timeline.start) - link.timeline.start;
@@ -274,7 +295,7 @@ impl Track {
                         next_packet: 0,
                         pcm: Vec::new(),
                     });
-                state.append(link, begin..audible, &mut work, &mut samples)?;
+                state.append(link, begin..audible, work, &mut samples)?;
                 playback = Some(state);
             }
             samples.resize(samples.len() + (end - audible.max(begin)) * channels, 0);
@@ -433,11 +454,13 @@ impl Playback {
             self.decoder.reset();
             self.next_packet = 0;
         }
-        *work = work
-            .checked_sub(
-                last.saturating_sub(self.next_packet) * usize::from(link.head.mapping.stream_count),
-            )
-            .ok_or_else(|| limited("Ogg Opus clip exceeds its packet decoding budget"))?;
+        // Scale the Opus budget to the work units shared with Vorbis.
+        super::super::charge(
+            work,
+            last.saturating_sub(self.next_packet) * usize::from(link.head.mapping.stream_count) * 2,
+            MAX_FRAMES_PER_CLIP * 2,
+            "Ogg Opus clip exceeds its packet decoding budget",
+        )?;
         for index in first..last {
             while self.next_packet <= index {
                 let packet = &link.packets[self.next_packet];

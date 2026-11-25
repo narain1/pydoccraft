@@ -72,6 +72,35 @@ def rewrite_epub(data: bytes, updates: dict[str, bytes | str]) -> bytes:
     return output.getvalue()
 
 
+def ogg_page_body(page: bytes) -> bytes:
+    return page[27 + page[26]:]
+
+
+def ogg_pages(data: bytes) -> list[bytes]:
+    pages = []
+    offset = 0
+    while offset < len(data):
+        assert data[offset:offset + 4] == b"OggS"
+        body = offset + 27 + data[offset + 26]
+        stop = body + sum(data[offset + 27:body])
+        assert stop <= len(data)
+        pages.append(data[offset:stop])
+        offset = stop
+    return pages
+
+
+def checked_ogg_page(page: bytes | bytearray) -> bytes:
+    page = bytearray(page)
+    page[22:26] = bytes(4)
+    checksum = 0
+    for octet in page:
+        checksum ^= octet << 24
+        for _ in range(8):
+            checksum = ((checksum << 1) ^ (0x04C11DB7 if checksum & 0x80000000 else 0)) & 0xFFFFFFFF
+    struct.pack_into("<I", page, 22, checksum)
+    return bytes(page)
+
+
 def mp4_box(tag: bytes, payload: bytes) -> bytes:
     return struct.pack(">I4s", len(payload) + 8, tag) + payload
 
@@ -4150,6 +4179,111 @@ first
             with self.assertRaisesRegex(ValueError, "audio track ordinal"):
                 next(book.epub_embedded_audio(0, 0, opus_track=0))
 
+    def test_named_ogg_changes_soundtrack_codec_on_the_selected_picture_clock(self) -> None:
+        source = (Path(__file__).parent / "fixtures/epub-video-named-tracks.ogv").read_bytes()
+        pages = ogg_pages(source)
+        starts = [i for i, page in enumerate(pages) if page[5] & 2 and ogg_page_body(page).startswith(b"fishead")]
+        self.assertEqual(len(starts), 2)
+        split = starts[1]
+        first = b"".join(pages[:split])
+        swap = {
+            b"Name: Cloche\r\n": b"Name: Spoken\r\n",
+            b"Name: Spoken\r\n": b"Name: Cloche\r\n",
+        }
+        second = b"".join(
+            next((checked_ogg_page(page.replace(old, new)) for old, new in swap.items() if old in page), page)
+            for page in pages[split:]
+        )
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Mixed soundtrack</title></head>
+          <body><video src="mixed.ogv#track=Cloche&amp;track=Azur&amp;xywh=percent:25,25,50,50">
+          <track src="words.vtt" kind="captions" srclang="en"/></video>
+          <video src="mixed.ogv#track=Spoken&amp;track=Azur"/>
+          <audio src="mixed.ogv#track=Cloche"/>
+          <audio src="first.ogv#track=Cloche"/><audio src="second.ogv#track=Cloche"/>
+          <audio src="first.ogv#track=Spoken"/><audio src="second.ogv#track=Spoken"/>
+          </body></html>'''
+        path = "OEBPS/mixed.ogv"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Mixed soundtrack", chapter, "OEBPS/video.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("video/ogg", first + second),
+                    "OEBPS/first.ogv": doc_ex.EpubResource("video/ogg", first),
+                    "OEBPS/second.ogv": doc_ex.EpubResource("video/ogg", second),
+                    "OEBPS/words.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00.470 --> 00:00.520\nAcross codecs\n",
+                    ),
+                },
+            )
+
+        def pcm(book: doc_ex.Document, index: int, **bounds: int) -> bytes:
+            samples = bytearray()
+            for clip in book.epub_embedded_audio(0, index, chunk_frames=991, **bounds):
+                self.assertEqual((clip.channels, clip.sample_rate), (1, 48_000))
+                with wave.open(io.BytesIO(clip.wave), "rb") as stream:
+                    samples.extend(stream.readframes(clip.frame_count))
+            return bytes(samples)
+
+        with doc_ex.open(data) as book:
+            self.assertEqual(book.epub_embedded_media(0)[0].sources[0].fragment_tracks, ("Cloche", "Azur"))
+            early_vorbis, later_opus, early_opus, later_vorbis = [pcm(book, index) for index in (3, 4, 5, 6)]
+            self.assertEqual([len(part) // 2 for part in (early_vorbis, later_opus, early_opus, later_vorbis)],
+                             [14_400, 43_200, 43_200, 21_600])
+            expected = early_vorbis + bytes(9_600 * 2) + later_opus
+            self.assertEqual(pcm(book, 0), expected)
+            self.assertEqual(pcm(book, 0, start_us=290_001, end_us=520_001), expected[13_921 * 2:24_961 * 2])
+            self.assertEqual(pcm(book, 1), early_opus + later_vorbis)
+            self.assertEqual(pcm(book, 2), early_vorbis + later_opus)
+            frames = list(book.epub_embedded_video(0, 0, start_us=450_000, end_us=620_000, text_track=0))
+            self.assertEqual([(frame.start_us, frame.duration_us, tuple(cue.text for cue in frame.text_cues))
+                              for frame in frames],
+                             [(450_000, 20_000, ()), (470_000, 30_000, ("Across codecs",)),
+                              (500_000, 20_000, ("Across codecs",)), (520_000, 100_000, ())])
+            self.assertEqual([(frame.width, frame.height) for frame in frames], [(32, 20)] * 2 + [(28, 18)] * 2)
+            self.assertGreater(frames[0].rgb[2], 245)
+            self.assertGreater(frames[-1].rgb[1], 245)
+            self.assertIs(frames[0].rgb, frames[1].rgb)
+            self.assertIs(frames[2].rgb, frames[3].rgb)
+            reverse = list(book.epub_embedded_video(0, 1, start_us=450_000, end_us=925_000))
+            self.assertEqual([(frame.start_us, frame.duration_us) for frame in reverse],
+                             [(450_000, 50_000), (900_000, 25_000)])
+            edited = book.edit_epub_structure(replacements={0: chapter.replace("Mixed soundtrack", "Revised")})
+        with doc_ex.open(edited) as reopened:
+            self.assertEqual(reopened.read_epub_resource(path), first + second)
+            self.assertEqual(pcm(reopened, 0), expected)
+
+        unusual_rate = b"".join(self._ogg_vorbis_group_at_rate(page, 44_100) for page in pages[:split])
+        bad_transport = pages[split-1]
+        damaged_auxiliary = b"".join(pages[:split-1]) + bad_transport[:-1] + bytes([bad_transport[-1] ^ 1])
+        missing_name = b"".join(
+            checked_ogg_page(page.replace(b"Name: Cloche\r\n", b"Name: Absent\r\n"))
+            if b"audio/opus\r\nName: Cloche\r\n" in page else page
+            for page in ogg_pages(second)
+        )
+        for encoded, error, message in (
+            (unusual_rate + second, doc_ex.UnsupportedFormatError, "requires one 48 kHz channel layout"),
+            (damaged_auxiliary + second, doc_ex.MalformedDocumentError, "CRC32 hash mismatch"),
+            (first + missing_name, doc_ex.MalformedDocumentError, "track name .* absent"),
+        ):
+            with self.subTest(message=message), doc_ex.open(rewrite_epub(data, {path: encoded})) as book:
+                for playback in (book.epub_embedded_audio, book.epub_embedded_video):
+                    with self.assertRaisesRegex(error, message):
+                        next(playback(0, 0, source_index=0))
+
+    @staticmethod
+    def _ogg_vorbis_group_at_rate(page: bytes, rate: int) -> bytes:
+        body = ogg_page_body(page)
+        start = len(page) - len(body)
+        if body.startswith(b"\x01vorbis"):
+            offset = start + 12
+        elif body.startswith(b"fisbone\x00") and b"Content-Type: audio/vorbis\r\n" in body:
+            offset = start + 20
+        else:
+            return page
+        patched = bytearray(page)
+        struct.pack_into("<I", patched, offset, rate)
+        return checked_ogg_page(patched)
+
     def test_spatial_video_fragments_crop_picture_pixels_without_changing_the_clock(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Crops</title></head>
@@ -6660,21 +6794,10 @@ Trailing
                 with self.assertRaises(doc_ex.MalformedDocumentError):
                     next(book.epub_narration(0))
 
-        def checked_page(page: bytes | bytearray) -> bytes:
-            page = bytearray(page)
-            page[22:26] = bytes(4)
-            checksum = 0
-            for octet in page:
-                checksum ^= octet << 24
-                for _ in range(8):
-                    checksum = ((checksum << 1) ^ (0x04C11DB7 if checksum & 0x80000000 else 0)) & 0xFFFFFFFF
-            struct.pack_into("<I", page, 22, checksum)
-            return bytes(page)
-
         # Ogg permits an auxiliary EOS page containing no packets.
         nil_eos = bytearray(pages[-1][:27])
         nil_eos[26] = 0
-        with doc_ex.open(fixture(missing_eos + checked_page(nil_eos))) as book:
+        with doc_ex.open(fixture(missing_eos + checked_ogg_page(nil_eos))) as book:
             self.assertEqual(pcm(next(book.epub_narration(0)).audio), expected)
         with doc_ex.open(fixture(missing_eos + nil_eos)) as book:
             with self.assertRaises(doc_ex.MalformedDocumentError):
@@ -6683,7 +6806,7 @@ Trailing
         # A complete auxiliary stream may occupy a single leading BOS page.
         single = bytearray(pages[0])
         single[5] |= 4
-        with doc_ex.open(fixture(checked_page(single) + stereo)) as book:
+        with doc_ex.open(fixture(checked_ogg_page(single) + stereo)) as book:
             self.assertEqual(pcm(next(book.epub_narration(0)).audio), expected)
 
         path = "OEBPS/Media/grouped.ogg"

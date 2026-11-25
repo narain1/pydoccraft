@@ -13,6 +13,8 @@ use crate::EngineError;
 
 #[path = "epub_aac.rs"]
 mod aac;
+#[path = "epub_ogg_mixed.rs"]
+pub(in crate::epub) mod ogg_mixed;
 #[path = "epub_opus.rs"]
 pub(super) mod opus;
 #[path = "epub_vorbis.rs"]
@@ -90,6 +92,7 @@ enum Decoder {
     Aac(Box<aac::Track>),
     Opus(Box<opus::Track>),
     Vorbis(Box<vorbis::Track>),
+    MixedOgg(Box<ogg_mixed::Track>),
 }
 
 pub(crate) struct AudioClip {
@@ -165,6 +168,13 @@ impl AudioSource {
                     let named = (!names.is_empty())
                         .then(|| ogg::named_tracks(&bytes, names))
                         .transpose()?;
+                    if let Some(tracks) = named.as_ref().filter(|tracks| tracks.mixed_audio()) {
+                        let mut audio = ogg_mixed::Track::open(&bytes, tracks)?;
+                        if synchronize_video {
+                            super::video::align_mixed_audio(&bytes, &mut audio, tracks)?;
+                        }
+                        return Ok(Decoder::MixedOgg(Box::new(audio)));
+                    }
                     let codec = match (named.as_ref(), codec) {
                         (Some(tracks), _) => tracks.audio_codec().ok_or_else(|| {
                             unsupported("named Ogg fragment does not select an audio track")
@@ -327,6 +337,7 @@ impl AudioSource {
         let speaker_mask = match &self.decoder {
             Decoder::Opus(track) => track.speaker_mask(),
             Decoder::Vorbis(track) => track.speaker_mask(),
+            Decoder::MixedOgg(track) => track.speaker_mask(),
             _ => None,
         };
         Ok(AudioWindow {
@@ -345,6 +356,7 @@ impl AudioSource {
             Decoder::Aac(track) => (track.spec(), Some(track.frames())),
             Decoder::Opus(track) => (track.spec(), Some(track.frames())),
             Decoder::Vorbis(track) => (track.spec(), Some(track.frames())),
+            Decoder::MixedOgg(track) => (track.spec(), Some(track.frames())),
             Decoder::Mp3(reader) => {
                 std::panic::catch_unwind(AssertUnwindSafe(|| reader.geometry()))
                     .map_err(|_| invalid("malformed MPEG Layer III audio"))??
@@ -375,6 +387,11 @@ impl AudioSource {
                 let end = known_end()?;
                 std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(start, end)))
                     .map_err(|_| invalid("malformed Vorbis audio"))?
+            }
+            Decoder::MixedOgg(track) => {
+                let end = known_end()?;
+                std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(start, end)))
+                    .map_err(|_| invalid("malformed mixed Ogg audio"))?
             }
             Decoder::Mp3(reader) => {
                 std::panic::catch_unwind(AssertUnwindSafe(|| reader.samples(start, end, allow_eof)))

@@ -161,6 +161,17 @@ impl Track {
         Self::new(links)
     }
 
+    pub(super) fn open_ogg_link(
+        pages: Vec<Page<'_>>,
+        work: &mut usize,
+    ) -> Result<Self, EngineError> {
+        Self::new(vec![Link::ogg(pages, work)?])
+    }
+
+    pub(super) fn release_playback(&mut self) {
+        self.playback = None;
+    }
+
     fn new(links: Vec<Link>) -> Result<Self, EngineError> {
         let spec = links
             .first()
@@ -238,6 +249,15 @@ impl Track {
     }
 
     pub(super) fn samples(&mut self, start: usize, stop: usize) -> Result<Vec<i16>, EngineError> {
+        self.samples_with_work(start, stop, &mut 0)
+    }
+
+    pub(super) fn samples_with_work(
+        &mut self,
+        start: usize,
+        stop: usize,
+        work: &mut usize,
+    ) -> Result<Vec<i16>, EngineError> {
         if start >= stop || stop > self.frames {
             return Err(invalid("Vorbis clip lies outside its presentation"));
         }
@@ -250,7 +270,6 @@ impl Track {
         let first = self
             .links
             .partition_point(|link| link.offset + link.length() <= start);
-        let mut work = 0;
         for (index, link) in self.links.iter().enumerate().skip(first) {
             if link.offset >= stop {
                 break;
@@ -277,7 +296,7 @@ impl Track {
                 let raw = raw_start..raw_start + count;
                 let offset = (link.offset + from - start) * channels;
                 let output = &mut samples[offset..offset + count * channels];
-                state.read(&link.index, raw, &self.wave_order, &mut work, output)?;
+                state.read(&link.index, raw, &self.wave_order, work, output)?;
             }
         }
         Ok(samples)
