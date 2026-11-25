@@ -369,11 +369,15 @@ struct WidthScope {
 }
 
 fn shares_line_width(node: Node<'_, '_>) -> bool {
-    node.tag_name().namespace() == Some(MATHML)
-        && matches!(
-            node.tag_name().name(),
-            "math" | "mrow" | "mstyle" | "merror" | "semantics"
-        )
+    if node.tag_name().namespace() != Some(MATHML) {
+        return false;
+    }
+    match node.tag_name().name() {
+        "math" | "mrow" | "mstyle" | "merror" | "semantics" => true,
+        // Vertical padding keeps the horizontal advance and origin of its row.
+        "mpadded" => node.attribute("width").is_none() && node.attribute("lspace").is_none(),
+        _ => false,
+    }
 }
 
 // WordCraft addresses a run by characters and each compound node as one unit.

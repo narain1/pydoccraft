@@ -9957,6 +9957,72 @@ Trailing
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                         operation()
 
+    def test_mathml_relative_width_passes_through_vertical_padding_in_a_fixed_operand_cell(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML padded operand width</title>
+            <meta name="viewport" content="width=500,height=380"/><style>body {margin:0}</style>
+          </head><body><p><m:math mathsize="12pt"><m:mfrac><m:mrow>
+            <m:mtable width="230pt" columnwidth="150pt 64pt" columnspacing="16pt" columnalign="left">
+              <m:mtr><m:mtd><m:mpadded voffset="-3pt" height="+4pt"><m:mrow>
+                <m:mtable width="INNER" columnwidth="50% fit" columnspacing="4pt" columnalign="left">
+                  <m:mtr><m:mtd><m:mtext>Near</m:mtext></m:mtd><m:mtd><m:mtext>Far</m:mtext></m:mtd></m:mtr>
+                </m:mtable><m:mtext>Tail</m:mtext>
+              </m:mrow></m:mpadded></m:mtd><m:mtd><m:mtext>Aside</m:mtext></m:mtd></m:mtr>
+            </m:mtable></m:mrow><m:mtext>Denominator</m:mtext>
+          </m:mfrac></m:math></p></body></html>"""
+        terms = ("Near", "Far", "Tail", "Aside", "Denominator")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 380)])
+
+        def boxes(doc: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            matches = {}
+            for term in terms:
+                matches[term], = doc[0].search_for(term)
+            return matches
+
+        samples = []
+        # The advance and positioning of the vertical wrapper do not change
+        # the 150pt containing track. Its inner table uses exactly half.
+        for width in ("75pt", "50%"):
+            chapter = source.replace("INNER", width)
+            with self.subTest(width=width), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                preview = book.render_page(0, dpi=96)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    vector = boxes(pdf)
+                    self.assertFalse(pdf[0].get_images())
+                    self.assertGreater(vector["Far"][0] - vector["Near"][0], 30)
+                    self.assertGreater(vector["Near"][1] - vector["Aside"][1], 2)
+                editable = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                fraction = xml.find(".//m:oMath//m:f/m:num", ns)
+                self.assertIsNotNone(fraction)
+                self.assertGreaterEqual(len(fraction.findall(".//m:m", ns)), 2)
+                with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                    native = boxes(pdf)
+                    for term in terms:
+                        self.assertEqual(word[0].get_text().count(term), 1)
+                        for expected, actual in zip(vector[term], native[term]):
+                            self.assertAlmostEqual(expected, actual, delta=0.35)
+            with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter})) as book:
+                fixed = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), fixed)
+                    fixed_vector = boxes(pdf)
+            samples.append((preview, vector, native, fixed, fixed_vector))
+        self.assertEqual(samples[0], samples[1])
+
+        relative = source.replace("INNER", "50%")
+        for chapter in (
+            relative.replace('width="230pt" columnwidth="150pt 64pt"', 'columnwidth="auto 64pt"'),
+            relative.replace('<m:mpadded voffset=', '<m:mpadded width="150pt" voffset='),
+            relative.replace('<m:mpadded voffset=', '<m:mpadded lspace="2pt" voffset='),
+        ):
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing line width"):
+                        operation()
+
     def test_mathml_table_aligns_editable_numbers_at_decimal_points(self) -> None:
         source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Aligned MathML decimals</title><meta name="viewport" content="width=440,height=340"/>
