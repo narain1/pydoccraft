@@ -85,6 +85,7 @@
 - [x] Apply fixed fit-content() limits to horizontal minimum and maximum widths using the measured native content bounds.
 - [x] Evaluate bounded ratios of linear lengths and percentages on the native containing axis.
 - [x] Measure intrinsic block-axis minima and maxima at independently definite inline widths.
+- [x] Measure block-axis constraints for relative and in-flow automatic widths at a proven containing inline size.
 - [x] Resolve percentage fit-content() inline limits and relative border-box edges at independently definite containing blocks.
 - [ ] Extend the EPUB CSS profile with block bounds at dependent inline widths, functional block bounds, relative inline bounds and edges in dependent containing blocks, contain-fit sizing, nonlinear percentage ratios and other typed math, and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.

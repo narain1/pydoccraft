@@ -2781,10 +2781,27 @@ class EpubTests(unittest.TestCase):
             with self.subTest(sizing=sizing):
                 self.assertTrue(views[0] == views[1] == views[2], "intrinsic block size changed geometry")
 
+        for declaration, control in (
+            ("width:60%;padding-top:10%;height:8px;min-height:min-content",
+             "width:120px;padding-top:20px;height:auto"),
+            ("width:calc(50% + 20px);height:120px;max-block-size:max-content",
+             "width:120px;height:auto"),
+            ("width:auto;margin-inline:10px 20px;height:120px;max-height:min-content",
+             "width:158px;margin-inline:10px 20px;height:auto"),
+            ("width:auto;box-sizing:border-box;margin-inline:10px 20px;height:5px;min-height:max-content",
+             "width:170px;box-sizing:border-box;margin-inline:10px 20px;height:auto"),
+        ):
+            rendered = []
+            for style in (declaration, control):
+                with doc_ex.open(publication(f"#panel{{{style}}}#plate{{height:36px}}")) as book:
+                    rendered.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+            with self.subTest(declaration=declaration):
+                self.assertTrue(rendered[0] == rendered[1], "relative inline width changed block bounds")
+
         for rules, message in (
-            ("#panel{width:60%;min-height:min-content}", "definite inline size"),
+            ("#holder{width:auto}#panel{width:60%;min-height:min-content}", "definite inline size"),
             ("#holder{display:flex}#panel{min-height:min-content}", "definite inline size"),
-            ("#panel{padding-top:10%;min-height:min-content}", "fixed padding and borders"),
+            ("#holder{width:auto}#panel{padding-top:10%;min-height:min-content}", "fixed padding and borders"),
         ):
             with self.subTest(rules=rules), doc_ex.open(publication(rules)) as book:
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):

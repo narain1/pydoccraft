@@ -5,10 +5,9 @@ use taffy::{
     geometry::Size,
     style::{
         AvailableSpace, BoxSizing, CalcHandle, Dimension, Display, ExpandedDimension,
-        ExpandedLengthPercentage, ExpandedLengthPercentageAuto, FlexDirection,
-        LengthPercentageAuto, Position, Style,
+        ExpandedLengthPercentage, FlexDirection, LengthPercentageAuto, Position, Style,
     },
-    util::ResolveOrZero,
+    util::{MaybeResolve, ResolveOrZero},
     BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Layout,
     LayoutBlockContainer, LayoutContainingBlock, LayoutFlexboxContainer, LayoutGridContainer,
     LayoutInput, LayoutOutput, LayoutPartialTree, NodeId, RequestedAxis, RunMode, SizingMode,
@@ -133,23 +132,38 @@ struct View<'a, F> {
 
 const MAX_FIT_PROBES: usize = 4_096;
 
-fn fixed_outer_width(style: &Style, inline_edges: f32) -> Option<f32> {
-    let ExpandedDimension::Length(width) = style.size.width.expand() else {
-        return None;
+fn outer_width(
+    style: &Style,
+    inline_edges: f32,
+    basis: Option<f32>,
+    auto_width: Option<f32>,
+    calculate: impl Fn(CalcHandle, f32) -> f32,
+) -> Option<f32> {
+    let to_outer = |width| {
+        if style.box_sizing == BoxSizing::ContentBox {
+            width + inline_edges
+        } else {
+            width
+        }
     };
-    let limit = |length: LengthPercentageAuto, initial| match length.expand() {
-        ExpandedLengthPercentageAuto::Length(width) => Some(width),
-        ExpandedLengthPercentageAuto::Auto => Some(initial),
-        _ => None,
-    };
-    let width = width
-        .min(limit(style.max_size.width, f32::INFINITY)?)
-        .max(limit(style.min_size.width, 0.0)?);
-    Some(if style.box_sizing == BoxSizing::ContentBox {
-        width + inline_edges
+    let preferred = if style.size.width.is_auto() {
+        auto_width?
     } else {
-        width.max(inline_edges)
-    })
+        to_outer(style.size.width.maybe_resolve(basis, &calculate)?)
+    };
+    let limit = |length: LengthPercentageAuto, initial| {
+        if length.is_auto() {
+            Some(initial)
+        } else {
+            length.maybe_resolve(basis, &calculate).map(to_outer)
+        }
+    };
+    Some(
+        preferred
+            .min(limit(style.max_size.width, f32::INFINITY)?)
+            .max(limit(style.min_size.width, 0.0)?)
+            .max(inline_edges),
+    )
 }
 
 impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
@@ -301,7 +315,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         };
         let padding = fixed_edge(style.padding.left)? + fixed_edge(style.padding.right)?;
         let border = fixed_edge(style.border.left)? + fixed_edge(style.border.right)?;
-        let outer = fixed_outer_width(style, padding + border)?;
+        let outer = outer_width(style, padding + border, None, None, |_, _| 0.0)?;
         match node.style.position {
             Position::Fixed => None,
             Position::Absolute if style.position == Position::Static => None,
@@ -339,11 +353,15 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 "EPUB CSS intrinsic block bounds on non-replaced aspect ratios",
             ));
         }
-        let edge = |length: taffy::LengthPercentage| match length.expand() {
-            ExpandedLengthPercentage::Length(points) => Ok(points),
-            _ => Err(unsupported(
-                "EPUB CSS intrinsic block bounds require fixed padding and borders",
-            )),
+        let basis = self.definite_containing_width(index);
+        let calculate = |handle, basis| self.calculations.at(handle, basis);
+        let edge = |length: taffy::LengthPercentage| {
+            if basis.is_none() && !matches!(length.expand(), ExpandedLengthPercentage::Length(_)) {
+                return Err(unsupported(
+                    "EPUB CSS intrinsic block bounds require fixed padding and borders or a definite containing width",
+                ));
+            }
+            Ok(length.resolve_or_zero(basis, calculate))
         };
         let inline_edges = edge(style.padding.left)?
             + edge(style.padding.right)?
@@ -353,7 +371,17 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             + edge(style.padding.bottom)?
             + edge(style.border.top)?
             + edge(style.border.bottom)?;
-        let width = fixed_outer_width(style, inline_edges).ok_or_else(unresolved)?;
+        let auto_width = if style.position.is_out_of_flow() || style.item_is_replaced {
+            None
+        } else {
+            basis.map(|width| {
+                width
+                    - style.margin.left.resolve_or_zero(basis, calculate)
+                    - style.margin.right.resolve_or_zero(basis, calculate)
+            })
+        };
+        let width = outer_width(style, inline_edges, basis, auto_width, calculate)
+            .ok_or_else(unresolved)?;
         let height_adjust = if style.box_sizing == BoxSizing::ContentBox {
             block_edges
         } else {
@@ -374,6 +402,10 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                     axis: RequestedAxis::Vertical,
                     known_dimensions: Size {
                         width: Some(width),
+                        height: None,
+                    },
+                    parent_size: Size {
+                        width: basis,
                         height: None,
                     },
                     available_space: Size {
