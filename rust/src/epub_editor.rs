@@ -460,20 +460,29 @@ pub(super) fn collect_removed_anchors<'a>(
     if original == replacement {
         return Ok(());
     }
-    let ids = anchors(xml);
     let source = parse_xml(&original)?;
-    let mut removed = HashSet::new();
-    for id in anchors(&source).difference(&ids) {
-        charge(
-            anchor_bytes,
-            id.len() + 48,
-            XML_BYTES,
-            "removed EPUB anchors exceed their byte budget",
-        )?;
-        removed.insert((*id).to_owned());
-    }
-    if !removed.is_empty() {
-        removed_anchors.insert(path, removed);
+    collect_removed_xml_anchors(path, &source, xml, removed_anchors, anchor_bytes)
+}
+
+pub(super) fn collect_removed_xml_anchors<'a>(
+    path: &'a str,
+    original: &Document<'_>,
+    replacement: &Document<'_>,
+    removed_anchors: &mut RemovedAnchors<'a>,
+    anchor_bytes: &mut usize,
+) -> Result<(), EngineError> {
+    let retained = anchors(replacement);
+    for &id in anchors(original).difference(&retained) {
+        let removed = removed_anchors.entry(path).or_default();
+        if !removed.contains(id) {
+            charge(
+                anchor_bytes,
+                id.len() + 48,
+                XML_BYTES,
+                "removed EPUB anchors exceed their byte budget",
+            )?;
+            removed.insert(id.to_owned());
+        }
     }
     Ok(())
 }

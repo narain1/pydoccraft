@@ -978,6 +978,8 @@ For an existing book, `document.edit_epub_metadata(title="New title", descriptio
 
 Use `document.edit_epub_structure(order, resources=...)` to set the reading order. Pass `replacements={index: markup}` to change existing XHTML or SVG chapters in the same transaction. Replacement indexes refer to the original spine, including negative indexes. Combine replacements with `overlays` to retarget narration when changing chapter IDs. If an obsolete SMIL resource remains in the archive, include its path in `remove_resources` when the replacement would remove its target. An integer selects an existing spine entry by index, including negative indexes. Use an `EpubChapterSource` to insert a new XHTML chapter. Replacing a packaged SVG preserves any existing fragment ID referenced by a retained or newly inserted chapter.
 
+For a packaged EPUB 3 navigation document outside the spine, pass its decoded archive path in `resources` with an `EpubResource("application/xhtml+xml", navigation_bytes)`. Supply complete UTF-8 XHTML with a table of contents. Local destinations and their element IDs must resolve in the finished package. Keep any navigation IDs still targeted by retained links. When the same edit changes the spine, the editor updates the authored navigation and reorders any compatibility NCX from its own hierarchy. If the spine order stays the same, the editor keeps the supplied navigation XHTML bytes. Use `replacements` for navigation that belongs to the spine. Explicit NCX replacement is unsupported. [EPUB 3.3 navigation documents](https://www.w3.org/TR/epub-33/#sec-nav)
+
 ```python
 added = doc_ex.EpubChapterSource(
     "Appendix",

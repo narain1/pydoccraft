@@ -1108,7 +1108,11 @@ class Document:
         remove_resources: Iterable[str] = (),
         overlays: Mapping[str, Iterable[EpubOverlayCue | EpubOverlaySequence] | None] | None = None,
     ) -> bytes:
-        """Stage chapter replacements by original index alongside spine, resource and narration edits."""
+        """Stage chapter replacements by original index alongside spine, resource and narration edits.
+
+        To replace a packaged EPUB 3 navigation document outside the spine, pass
+        its archive path and an XHTML resource in `resources`.
+        """
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError

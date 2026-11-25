@@ -86,7 +86,7 @@
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Protect referenced fragment IDs across packaged SVG resource replacements and staged chapter insertions.
 - [x] Combine existing chapter replacements with spine, resource and narration edits in one validated transaction.
-- [ ] Support explicit replacement of navigation markup outside the spine within the same chapter edit.
+- [x] Replace packaged EPUB 3 navigation XHTML outside the spine through the resource map in the same chapter edit.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
 - [x] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata.
 - [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.

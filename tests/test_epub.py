@@ -5007,6 +5007,147 @@ first
             self.assertEqual(nav[0]["fragment"], "new")
             self.assertEqual(book[0].get_text(), "A chapter")
 
+    def test_structure_replaces_and_reorders_nonspine_navigation(self) -> None:
+        source, nav_path, nav, html = self.nonspine_navigation_fixture()
+        revised_nav = nav.replace("Old introduction", "New introduction").replace(
+            "one.xhtml#old", "one.xhtml#fresh-%C3%A9",
+        ).replace('id="old-nav"', 'id="new-nav"').replace(
+            '<svg xmlns="http://www.w3.org/2000/svg"/>',
+            '<math xmlns="http://www.w3.org/1998/Math/MathML"><mn>2</mn></math>',
+        )
+        with doc_ex.open(source) as book:
+            revised = book.edit_epub_structure(
+                [1, doc_ex.EpubChapterSource(
+                    "Inserted", html.format('<p id="extra">A new chapter</p>'), path="OEBPS/extra.xhtml",
+                ), 0],
+                replacements={
+                    0: html.format('<h1 id="fresh-é">New chapter text</h1>'),
+                    1: html.format('<h1 id="other">Second text</h1><a href="Nav/contents.xhtml#new-nav">Contents</a>'),
+                },
+                resources={nav_path: doc_ex.EpubResource("application/xhtml+xml", revised_nav.encode())},
+            )
+            self.assertEqual(book.read_epub_resource(nav_path), nav.encode())
+            self.assertEqual(len(book), 2)
+
+        with doc_ex.open(revised) as book:
+            self.assertEqual(len(book), 3)
+            self.assertIn("New chapter text", book[2].get_text())
+            groups = {group["kind"]: group["items"] for group in book.metadata["navigation"]}
+            self.assertEqual([item["label"] for item in groups["toc"]], ["Second", "Inserted", "Part A"])
+            self.assertEqual(groups["toc"][-1]["children"][0]["label"], "New introduction")
+            self.assertEqual(groups["toc"][-1]["children"][0]["fragment"], "fresh-é")
+            self.assertEqual(groups["page-list"][0]["fragment"], "other")
+            self.assertEqual(groups["related"][0]["href"], "https://example.org/")
+            manifest = {item["path"]: item for item in book.metadata["manifest"]}
+            self.assertEqual(manifest[nav_path]["properties"], "nav mathml")
+            self.assertIn(b'<nav id="new-nav"', book.read_epub_resource(nav_path))
+            self.assertIn(b'<aside', book.read_epub_resource(nav_path))
+            ncx = ET.fromstring(book.read_epub_resource("OEBPS/toc.ncx"))
+            points = ncx.findall(".//{*}navPoint")
+            self.assertEqual([point.attrib["playOrder"] for point in points], ["1", "2", "3"])
+            self.assertEqual(
+                [point.findtext("{*}navLabel/{*}text") for point in points],
+                ["NCX two", "Inserted", "NCX one"],
+            )
+
+    def test_structure_replaces_nonspine_navigation_verbatim_without_reorder(self) -> None:
+        source, nav_path, nav, _ = self.nonspine_navigation_fixture()
+        revised_nav = nav.replace("Old introduction", "Edited label").encode()
+        with doc_ex.open(source) as book:
+            updated = book.edit_epub_structure(
+                resources={nav_path: doc_ex.EpubResource("application/xhtml+xml", revised_nav)},
+            )
+            ncx = book.read_epub_resource("OEBPS/toc.ncx")
+        with doc_ex.open(updated) as book:
+            self.assertEqual(book.read_epub_resource(nav_path), revised_nav)
+            self.assertEqual(book.read_epub_resource("OEBPS/toc.ncx"), ncx)
+            self.assertEqual(book.metadata["navigation"][0]["items"][0]["children"][0]["label"], "Edited label")
+
+    def test_structure_rejects_invalid_nonspine_navigation_edits(self) -> None:
+        source, nav_path, nav, _ = self.nonspine_navigation_fixture()
+        with doc_ex.open(source) as book:
+            for changed, message in (
+                (nav.replace("#old", "#missing", 1), "missing fragment"),
+                (nav.replace("one.xhtml#old", "absent.xhtml"), "not a packaged resource"),
+                (nav.replace("../one.xhtml#old", "https://example.org/"), "local content documents"),
+                (nav.replace("../one.xhtml#old", "../image.png"), "local content documents"),
+                (nav.replace('epub:type="toc"', 'epub:type="other"'), "one nonempty table of contents"),
+                (nav.replace('epub:type="page-list"', 'epub:type="toc"'), "one nonempty table of contents"),
+            ):
+                with self.subTest(message=message), self.assertRaisesRegex(doc_ex.MalformedDocumentError, message):
+                    book.edit_epub_structure(
+                        resources={nav_path: doc_ex.EpubResource("application/xhtml+xml", changed.encode())},
+                    )
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                changed = nav.replace('id="old-nav"', 'id="removed"')
+                book.edit_epub_structure(
+                    resources={nav_path: doc_ex.EpubResource("application/xhtml+xml", changed.encode())},
+                )
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "explicit EPUB NCX replacement"):
+                book.edit_epub_structure(resources={
+                    "OEBPS/toc.ncx": doc_ex.EpubResource(
+                        "application/x-dtbncx+xml", book.read_epub_resource("OEBPS/toc.ncx"),
+                    ),
+                })
+            with self.assertRaisesRegex(ValueError, "packaged XHTML manifest entry"):
+                book.edit_epub_structure(resources={nav_path: doc_ex.EpubResource("text/html", nav.encode())})
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_structure(
+                    [1], resources={nav_path: doc_ex.EpubResource("application/xhtml+xml", nav.encode())},
+                )
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                authored = nav.replace('id="part-a"', 'id="new-part"')
+                chapter = '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="other">Second text</h1><a href="Nav/contents.xhtml#new-part">Part</a></body></html>'
+                book.edit_epub_structure(
+                    [1], replacements={1: chapter},
+                    resources={nav_path: doc_ex.EpubResource("application/xhtml+xml", authored.encode())},
+                )
+            self.assertEqual(book.read_epub_resource(nav_path), nav.encode())
+
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            spine_nav = archive.read("OEBPS/content.opf").replace(
+                b'<itemref idref="one"/>', b'<itemref idref="one"/><itemref idref="edit-nav"/>',
+            )
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/content.opf": spine_nav})) as book:
+            with self.assertRaisesRegex(ValueError, "spine navigation chapter through replacements"):
+                book.edit_epub_structure(
+                    resources={nav_path: doc_ex.EpubResource("application/xhtml+xml", nav.encode())},
+                )
+
+    @staticmethod
+    def nonspine_navigation_fixture() -> tuple[bytes, str, str, str]:
+        html = '<html xmlns="http://www.w3.org/1999/xhtml"><body>{}</body></html>'
+        source = epub_fixture(chapter_one=html.format('<h1 id="old">Original chapter text</h1>'))
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            opf = archive.read("OEBPS/content.opf")
+        opf = opf.replace(b"</manifest><spine>", b"""
+            <item id="edit-nav" href="Nav/contents.xhtml" media-type="application/xhtml+xml" properties="nav svg"/>
+            <item id="compat" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+            </manifest><spine toc="compat">""")
+        nav_path = "OEBPS/Nav/contents.xhtml"
+        nav = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+          <head><title>Contents</title></head><body><nav id="old-nav" epub:type="toc"><ol>
+            <li id="part-a"><span>Part A</span><ol><li><a href="../one.xhtml#old">Old introduction</a></li></ol></li>
+            <li><a href="../two.xhtml#other">Second</a></li>
+          </ol></nav>
+          <nav epub:type="page-list"><ol><li><a href="../two.xhtml#other">Page 2</a></li></ol></nav>
+          <nav epub:type="related"><ol><li><a href="https://example.org/">More</a></li></ol></nav>
+          <aside><svg xmlns="http://www.w3.org/2000/svg"/></aside></body></html>"""
+        ncx = """<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>
+          <navPoint id="ncx-1" playOrder="1"><navLabel><text>NCX one</text></navLabel><content src="one.xhtml"/></navPoint>
+          <navPoint id="ncx-2" playOrder="2"><navLabel><text>NCX two</text></navLabel><content src="two.xhtml"/></navPoint>
+          </navMap></ncx>"""
+        revised = rewrite_epub(source, {
+            "OEBPS/content.opf": opf,
+            nav_path: nav,
+            "OEBPS/toc.ncx": ncx,
+            "OEBPS/two.xhtml": html.format(
+                '<h1 id="other">Second text</h1><a href="Nav/contents.xhtml#old-nav">Contents</a>'
+                '<a href="Nav/contents.xhtml#part-a">First part</a>',
+            ),
+        })
+        return revised, nav_path, nav, html
+
     def test_batch_chapter_anchor_validation_covers_non_spine_references(self) -> None:
         html = '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>{}</body></html>'
         chapter = html.format('<p id="spare">Spare destination</p>')

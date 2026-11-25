@@ -1,11 +1,12 @@
 //! Update existing EPUB 3 and EPUB 2 navigation hierarchies after a spine edit.
 use std::collections::{HashMap, HashSet};
 
-use roxmltree::Node;
+use roxmltree::{Document, Node};
+use serde_json::{Map, Value};
 
 use super::{
     append, apply_edits, child, escape_text, external, inner_range, invalid, name, opening_end,
-    parse_xml, relative_url, resolve, EPUB, NCX, XHTML, XML_BYTES,
+    parse_xml, relative_url, resolve, Book, EPUB, NCX, XHTML, XML_BYTES,
 };
 use crate::EngineError;
 
@@ -14,6 +15,104 @@ pub(super) struct Chapter {
     pub href: String,
     pub label: String,
     pub inserted: bool,
+}
+
+pub(super) fn replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {
+    let xml = parse_xml(data)?;
+    let root = xml.root_element();
+    if !name(root, XHTML, "html") || child(root, XHTML, "body").is_none() {
+        return Err(invalid(
+            "replacement EPUB navigation requires an XHTML document body",
+        ));
+    }
+    Ok(xml)
+}
+
+pub(super) fn validate_replacement(
+    data: &[u8],
+    metadata: &Map<String, Value>,
+) -> Result<(), EngineError> {
+    let groups = metadata["navigation"]
+        .as_array()
+        .ok_or_else(|| invalid("missing replacement EPUB navigation"))?;
+    let manifest: HashMap<_, _> = metadata["manifest"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| Some((item["path"].as_str()?, item["media_type"].as_str()?)))
+        .collect();
+    let mut has_toc = false;
+    let mut book = Book::open(data)?;
+    let mut fragments = HashMap::<&str, HashSet<&str>>::new();
+    for group in groups {
+        let kinds = group["kind"].as_str().unwrap_or_default();
+        let kind = |name| kinds.split_ascii_whitespace().any(|kind| kind == name);
+        let local_content = kind("toc") || kind("landmarks") || kind("page-list");
+        let mut items = group["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if kind("toc") && (std::mem::replace(&mut has_toc, true) || items.is_empty()) {
+            return Err(invalid(
+                "replacement EPUB navigation requires one nonempty table of contents",
+            ));
+        }
+        while let Some(item) = items.pop() {
+            items.extend(item["children"].as_array().into_iter().flatten());
+            let Some(path) = item["path"].as_str() else {
+                if local_content && item["href"].is_string() {
+                    return Err(invalid(
+                        "replacement EPUB navigation targets must be local content documents",
+                    ));
+                }
+                continue;
+            };
+            let media = manifest
+                .get(path)
+                .filter(|_| book.archive.index_for_name(path).is_some())
+                .ok_or_else(|| {
+                    invalid("replacement EPUB navigation target is not a packaged resource")
+                })?;
+            let content = matches!(
+                *media,
+                "application/xhtml+xml" | "text/html" | "image/svg+xml"
+            );
+            if local_content && !content {
+                return Err(invalid(
+                    "replacement EPUB navigation targets must be local content documents",
+                ));
+            }
+            if let Some(fragment) = item["fragment"]
+                .as_str()
+                .filter(|id| content && !id.is_empty())
+            {
+                fragments.entry(path).or_default().insert(fragment);
+            }
+        }
+    }
+    if !has_toc {
+        return Err(invalid(
+            "replacement EPUB navigation requires one nonempty table of contents",
+        ));
+    }
+    for (path, mut missing) in fragments {
+        let source = book.read(path, XML_BYTES)?;
+        let xml = parse_xml(&source)?;
+        for id in xml
+            .descendants()
+            .filter(Node::is_element)
+            .flat_map(super::super::element_ids)
+        {
+            missing.remove(id);
+        }
+        if !missing.is_empty() {
+            return Err(invalid(
+                "replacement EPUB navigation targets a missing fragment",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn edit(

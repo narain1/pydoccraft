@@ -153,6 +153,26 @@ pub(crate) fn update_structure<'a>(
             return Err(invalid("multiple EPUB tables of contents"));
         }
     }
+    let spine_paths: HashSet<_> = spine
+        .children()
+        .filter(|node| name(*node, OPF, "itemref"))
+        .filter_map(|node| node.attribute("idref"))
+        .filter_map(|id| manifest.get(id))
+        .collect();
+    let mut nav_edits = resources
+        .iter()
+        .filter(|(path, _, _)| existing_toc.as_ref() == Some(path));
+    let authored_nav = nav_edits.next();
+    if nav_edits.next().is_some() {
+        return Err(argument("duplicate EPUB navigation replacement"));
+    }
+    if (!epub3 && authored_nav.is_some())
+        || resources
+            .iter()
+            .any(|(path, _, _)| compatibility_ncx.as_ref() == Some(path))
+    {
+        return Err(unsupported("explicit EPUB NCX replacement"));
+    }
     let mut plan = Plan {
         occupied,
         ids: xml
@@ -166,7 +186,7 @@ pub(crate) fn update_structure<'a>(
         manifest_additions: String::new(),
         files: Files::new(),
     };
-    let original = if order.is_some() || !chapters.is_empty() {
+    let original = if order.is_some() || !chapters.is_empty() || authored_nav.is_some() {
         Some(extract(data, None)?)
     } else {
         None
@@ -196,6 +216,33 @@ pub(crate) fn update_structure<'a>(
                 .map(|(path, data)| (path.to_owned(), Cow::Borrowed(data))),
         );
         svg_chapters.extend(replacement.svg_paths.into_iter().map(str::to_owned));
+    }
+    if let Some(((path, media, data), original)) = authored_nav.zip(original.as_ref()) {
+        check_path(path)?;
+        if spine_paths.contains(path)
+            || original
+                .pages
+                .iter()
+                .any(|page| page.metadata["chapter_path"].as_str() == Some(path))
+        {
+            return Err(argument(
+                "replace a spine navigation chapter through replacements",
+            ));
+        }
+        if media != "application/xhtml+xml"
+            || paths.get(path) != Some(&media.as_str())
+            || book.archive.index_for_name(path).is_none()
+        {
+            return Err(argument(
+                "EPUB navigation replacement requires its packaged XHTML manifest entry",
+            ));
+        }
+        if data.len() > XML_BYTES {
+            return Err(limited(
+                "EPUB navigation replacement exceeds its XML byte budget",
+            ));
+        }
+        plan.files.insert(path.clone(), Cow::Borrowed(data));
     }
     if let Some((order, original)) = order.zip(original.as_ref()) {
         let references: Vec<_> = spine
@@ -430,13 +477,43 @@ pub(crate) fn update_structure<'a>(
             }
         }
     }
-    let spine_paths: HashSet<_> = spine
-        .children()
-        .filter(|node| name(*node, OPF, "itemref"))
-        .filter_map(|node| node.attribute("idref"))
-        .filter_map(|id| manifest.get(id))
-        .collect();
+    if let Some((path, _, authored)) = authored_nav {
+        let data = plan
+            .files
+            .get(path)
+            .ok_or_else(|| invalid("missing staged EPUB navigation"))?;
+        let xml = toc::replacement_xml(data)?;
+        let properties = editor::xhtml_properties(xml.root_element());
+        editor::chapter_property_edits(
+            package_source,
+            &package_path,
+            manifest_node,
+            &HashMap::from([(path.as_str(), properties)]),
+            &mut edits,
+        )?;
+        editor::collect_removed_anchors(
+            &mut book,
+            path,
+            data,
+            &xml,
+            &mut removed_anchors,
+            &mut anchor_bytes,
+        )?;
+        if authored.as_slice() != data.as_ref() {
+            let authored = toc::replacement_xml(authored)?;
+            editor::collect_removed_xml_anchors(
+                path,
+                &authored,
+                &xml,
+                &mut removed_anchors,
+                &mut anchor_bytes,
+            )?;
+        }
+    }
     for (path, media, data) in resources {
+        if authored_nav.is_some_and(|(nav_path, _, _)| nav_path == path) {
+            continue;
+        }
         check_path(path)?;
         if plan.files.contains_key(path)
             || existing_toc.as_ref() == Some(path)
@@ -610,7 +687,10 @@ pub(crate) fn update_structure<'a>(
             .collect(),
         &removals,
     )?;
-    extract(&updated, None)?;
+    let extracted = extract(&updated, None)?;
+    if authored_nav.is_some() {
+        toc::validate_replacement(&updated, &extracted.metadata)?;
+    }
     editor::validate_svg_chapters(&updated, svg_chapters.iter().map(String::as_str))?;
     Ok(updated)
 }
